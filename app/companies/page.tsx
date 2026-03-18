@@ -58,7 +58,7 @@ async function getCompanies(): Promise<CompanyRow[]> {
       "削除タグ" AS delete_tag,
       "削除フラグ" AS delete_flag,
       "強制フラグ" AS force_flag
-    FROM public.master-data
+    FROM public."master_data"
     ORDER BY "企業名" ASC, "住所" ASC
     LIMIT 200
   `)
@@ -69,7 +69,7 @@ async function getCompanies(): Promise<CompanyRow[]> {
 async function getTotalCount(): Promise<number> {
   const result = await pool.query<{ count: string }>(`
     SELECT COUNT(*)::text AS count
-    FROM public.master-data
+    FROM public."master_data"
   `)
 
   return Number(result.rows[0]?.count ?? 0)
