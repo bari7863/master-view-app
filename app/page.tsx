@@ -56,6 +56,70 @@ type ColumnFilterState = {
   valueSearch: string;
 };
 
+type AdvancedFilterModalKey =
+  | "prefecture"
+  | "industry"
+  | "established"
+  | "capital"
+  | "employeeCount"
+  | "tag";
+
+type PrefectureValueItem = {
+  region: string;
+  prefecture: string;
+  cities: string[];
+};
+
+type IndustryValueItem = {
+  industryParent: string;
+  bigIndustry: string;
+  smallIndustries: string[];
+};
+
+type TagValueItem = {
+  parent: string;
+  tags: string[];
+};
+
+type AdvancedFiltersState = {
+  prefectures: {
+    regions: string[];
+    prefectures: string[];
+    cities: string[];
+  };
+  industries: {
+    bigIndustries: string[];
+    smallIndustries: string[];
+  };
+  established: {
+    years: string[];
+    yearMonths: string[];
+    from: string;
+    to: string;
+  };
+  capital: {
+    min: string;
+    max: string;
+  };
+  employeeCount: {
+    min: string;
+    max: string;
+  };
+  tags: {
+    parents: string[];
+    tags: string[];
+  };
+};
+
+type AdvancedValueOptions = {
+  regions: string[];
+  prefectureItems: PrefectureValueItem[];
+  industryItems: IndustryValueItem[];
+  establishedYears: string[];
+  establishedMonthsByYear: Record<string, string[]>;
+  tagItems: TagValueItem[];
+};
+
 type ApiResponse = {
   ok: boolean;
   total?: number;
@@ -64,6 +128,16 @@ type ApiResponse = {
   totalPages?: number;
   rows?: Row[];
   values?: string[];
+  regions?: string[];
+  prefectures?: string[];
+  bigIndustries?: string[];
+  smallIndustries?: string[];
+  years?: string[];
+  monthsByYear?: Record<string, string[]>;
+  yearMonths?: string[];
+  parents?: string[];
+  tags?: string[];
+  items?: unknown[];
   error?: string;
   inserted?: number;
   message?: string;
@@ -236,6 +310,257 @@ function hasActiveFilter(state: ColumnFilterState) {
     state.conditionType !== "" ||
     state.valueFilterEnabled
   );
+}
+
+const ADVANCED_FILTER_BUTTONS: {
+  key: AdvancedFilterModalKey;
+  label: string;
+}[] = [
+  { key: "prefecture", label: "都道府県" },
+  { key: "industry", label: "業種" },
+  { key: "established", label: "設立" },
+  { key: "capital", label: "資本金" },
+  { key: "employeeCount", label: "従業員数" },
+  { key: "tag", label: "タグ" },
+];
+
+const ADVANCED_FILTER_TITLES: Record<AdvancedFilterModalKey, string> = {
+  prefecture: "都道府県",
+  industry: "業種",
+  established: "設立",
+  capital: "資本金",
+  employeeCount: "従業員数",
+  tag: "タグ",
+};
+
+function createInitialAdvancedFiltersState(): AdvancedFiltersState {
+  return {
+    prefectures: {
+      regions: [],
+      prefectures: [],
+      cities: [],
+    },
+    industries: {
+      bigIndustries: [],
+      smallIndustries: [],
+    },
+    established: {
+      years: [],
+      yearMonths: [],
+      from: "",
+      to: "",
+    },
+    capital: {
+      min: "",
+      max: "",
+    },
+    employeeCount: {
+      min: "",
+      max: "",
+    },
+    tags: {
+      parents: [],
+      tags: [],
+    },
+  };
+}
+
+function cloneAdvancedFiltersState(
+  state: AdvancedFiltersState
+): AdvancedFiltersState {
+  return {
+    prefectures: {
+      regions: [...state.prefectures.regions],
+      prefectures: [...state.prefectures.prefectures],
+      cities: [...state.prefectures.cities],
+    },
+    industries: {
+      bigIndustries: [...state.industries.bigIndustries],
+      smallIndustries: [...state.industries.smallIndustries],
+    },
+    established: {
+      years: [...state.established.years],
+      yearMonths: [...state.established.yearMonths],
+      from: state.established.from,
+      to: state.established.to,
+    },
+    capital: {
+      min: state.capital.min,
+      max: state.capital.max,
+    },
+    employeeCount: {
+      min: state.employeeCount.min,
+      max: state.employeeCount.max,
+    },
+    tags: {
+      parents: [...state.tags.parents],
+      tags: [...state.tags.tags],
+    },
+  };
+}
+
+function createInitialAdvancedValueOptions(): AdvancedValueOptions {
+  return {
+    regions: [],
+    prefectureItems: [],
+    industryItems: [],
+    establishedYears: [],
+    establishedMonthsByYear: {},
+    tagItems: [],
+  };
+}
+
+function toggleArrayValue(values: string[], value: string) {
+  return values.includes(value)
+    ? values.filter((item) => item !== value)
+    : [...values, value];
+}
+
+function addArrayValues(base: string[], values: string[]) {
+  return Array.from(new Set([...base, ...values]));
+}
+
+function removeArrayValues(base: string[], values: string[]) {
+  const removeSet = new Set(values);
+  return base.filter((value) => !removeSet.has(value));
+}
+
+function includesAllValues(base: string[], values: string[]) {
+  if (values.length === 0) return false;
+  return values.every((value) => base.includes(value));
+}
+
+function formatYearMonthInputValue(value: string) {
+  if (!value || value.length !== 6) return "";
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}`;
+}
+
+function parseYearMonthInputValue(value: string) {
+  return value ? value.replace("-", "") : "";
+}
+
+const ESTABLISHED_MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => {
+  const value = String(i + 1).padStart(2, "0");
+  return {
+    value,
+    label: `${i + 1}月`,
+  };
+});
+
+function getYearPart(value: string) {
+  return value && value.length >= 4 ? value.slice(0, 4) : "";
+}
+
+function getMonthPart(value: string) {
+  if (!value) return "";
+  if (value.length === 6) return value.slice(4, 6);
+  if (value.length === 2) return value;
+  return "";
+}
+
+function buildYearMonthValue(year: string, month: string) {
+  if (year && month) return `${year}${month}`;
+  if (year) return year;
+  if (month) return month;
+  return "";
+}
+
+function buildRequestAdvancedFilters(state: AdvancedFiltersState) {
+  const result: Record<string, unknown> = {};
+
+  if (
+    state.prefectures.prefectures.length > 0 ||
+    state.prefectures.cities.length > 0
+  ) {
+    result.prefectures = {
+      regions: [],
+      prefectures: state.prefectures.prefectures,
+      cities: state.prefectures.cities,
+    };
+  }
+
+  if (
+    state.industries.bigIndustries.length > 0 ||
+    state.industries.smallIndustries.length > 0
+  ) {
+    result.industries = {
+      bigIndustries: state.industries.bigIndustries,
+      smallIndustries: state.industries.smallIndustries,
+    };
+  }
+
+  const normalizedEstablishedFrom =
+    state.established.from.length === 6 ? state.established.from : "";
+  const normalizedEstablishedTo =
+    state.established.to.length === 6 ? state.established.to : "";
+
+  if (normalizedEstablishedFrom !== "" || normalizedEstablishedTo !== "") {
+    result.established = {
+      years: [],
+      yearMonths: [],
+      from: normalizedEstablishedFrom,
+      to: normalizedEstablishedTo,
+    };
+  }
+
+  if (state.capital.min !== "" || state.capital.max !== "") {
+    result.capital = {
+      min: state.capital.min,
+      max: state.capital.max,
+    };
+  }
+
+  if (state.employeeCount.min !== "" || state.employeeCount.max !== "") {
+    result.employeeCount = {
+      min: state.employeeCount.min,
+      max: state.employeeCount.max,
+    };
+  }
+
+  if (state.tags.tags.length > 0) {
+    result.tags = {
+      parents: [],
+      tags: state.tags.tags,
+    };
+  }
+
+  return result;
+}
+
+function hasActiveAdvancedFilter(
+  key: AdvancedFilterModalKey,
+  state: AdvancedFiltersState
+) {
+  switch (key) {
+    case "prefecture":
+      return (
+        state.prefectures.regions.length > 0 ||
+        state.prefectures.prefectures.length > 0 ||
+        state.prefectures.cities.length > 0
+      );
+    case "industry":
+      return (
+        state.industries.bigIndustries.length > 0 ||
+        state.industries.smallIndustries.length > 0
+      );
+    case "established":
+      return (
+        state.established.years.length > 0 ||
+        state.established.yearMonths.length > 0 ||
+        state.established.from !== "" ||
+        state.established.to !== ""
+      );
+    case "capital":
+      return state.capital.min !== "" || state.capital.max !== "";
+    case "employeeCount":
+      return (
+        state.employeeCount.min !== "" || state.employeeCount.max !== ""
+      );
+    case "tag":
+      return state.tags.parents.length > 0 || state.tags.tags.length > 0;
+    default:
+      return false;
+  }
 }
 
 function Cell({
@@ -603,6 +928,33 @@ export default function Home() {
   const [error, setError] = useState("");
   const [openFilterKey, setOpenFilterKey] = useState<FilterKey | null>(null);
 
+  const [draftAdvancedFilters, setDraftAdvancedFilters] =
+    useState<AdvancedFiltersState>(() => createInitialAdvancedFiltersState());
+  const [appliedAdvancedFilters, setAppliedAdvancedFilters] =
+    useState<AdvancedFiltersState>(() => createInitialAdvancedFiltersState());
+  const [advancedValueOptions, setAdvancedValueOptions] =
+    useState<AdvancedValueOptions>(() => createInitialAdvancedValueOptions());
+  const [openAdvancedFilterKey, setOpenAdvancedFilterKey] =
+    useState<AdvancedFilterModalKey | null>(null);
+  const [advancedLoading, setAdvancedLoading] = useState(false);
+
+  const [expandedPrefectures, setExpandedPrefectures] = useState<
+    Record<string, boolean>
+  >({});
+  const [expandedPrefectureRegions, setExpandedPrefectureRegions] = useState<
+    Record<string, boolean>
+  >({});
+  const [expandedIndustries, setExpandedIndustries] = useState<
+    Record<string, boolean>
+  >({});
+  const [expandedIndustryParents, setExpandedIndustryParents] = useState<
+    Record<string, boolean>
+  >({});
+  const [expandedYears, setExpandedYears] = useState<Record<string, boolean>>({});
+  const [expandedTagParents, setExpandedTagParents] = useState<
+    Record<string, boolean>
+  >({});
+
   const topPanelRef = useRef<HTMLDivElement | null>(null);
   const [headerStickyTop, setHeaderStickyTop] = useState(0);
 
@@ -611,119 +963,193 @@ export default function Home() {
   const [importMessage, setImportMessage] = useState("");
   const [importError, setImportError] = useState("");
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError("");
+    const fetchData = async () => {
+      setLoading(true);
+      setError("");
 
-    try {
-      const params = new URLSearchParams();
-      params.set("page", String(page));
-      params.set("limit", limit);
-      params.set(
-        "filterModels",
-        JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-      );
-
-      const sortColumn = COLUMN_DEFS.find(
-        (column) => appliedColumnStates[column.key].sortDirection !== ""
-      );
-
-      if (sortColumn) {
-        params.set("sortKey", sortColumn.key);
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(page));
+        params.set("limit", limit);
         params.set(
-          "sortDirection",
-          appliedColumnStates[sortColumn.key].sortDirection
+          "filterModels",
+          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
         );
-      }
+        params.set(
+          "advancedFilters",
+          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+        );
 
-      const res = await fetch(`/api/master_data?${params.toString()}`, {
-        cache: "no-store",
-      });
+        const sortColumn = COLUMN_DEFS.find(
+          (column) => appliedColumnStates[column.key].sortDirection !== ""
+        );
 
-      const data = await readApiResponse(res);
-
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "データ取得に失敗しました");
-      }
-
-      setRows(data.rows || []);
-      setTotal(data.total || 0);
-      setTotalPages(data.totalPages || 1);
-    } catch (e) {
-      setRows([]);
-      setTotal(0);
-      setTotalPages(1);
-      setError(e instanceof Error ? e.message : "不明なエラー");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchFilterValues = async (key: FilterKey) => {
-    try {
-      const params = new URLSearchParams();
-      params.set("valuesFor", key);
-      params.set(
-        "filterModels",
-        JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-      );
-
-      const res = await fetch(`/api/master_data?${params.toString()}`, {
-        cache: "no-store",
-      });
-
-      const data = await readApiResponse(res);
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "値一覧の取得に失敗しました");
-      }
-
-      setDraftColumnStates((prev) => {
-        const next = cloneColumnStates(prev);
-        next[key].availableValues = data.values || [];
-        if (!next[key].valueFilterEnabled) {
-          next[key].selectedValues = [];
-        } else {
-          next[key].selectedValues = next[key].selectedValues.filter((value) =>
-            (data.values || []).includes(value)
+        if (sortColumn) {
+          params.set("sortKey", sortColumn.key);
+          params.set(
+            "sortDirection",
+            appliedColumnStates[sortColumn.key].sortDirection
           );
         }
+
+        const res = await fetch(`/api/master_data?${params.toString()}`, {
+          cache: "no-store",
+        });
+
+        const data = await readApiResponse(res);
+
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "データ取得に失敗しました");
+        }
+
+        setRows(data.rows || []);
+        setTotal(data.total || 0);
+        setTotalPages(data.totalPages || 1);
+      } catch (e) {
+        setRows([]);
+        setTotal(0);
+        setTotalPages(1);
+        setError(e instanceof Error ? e.message : "不明なエラー");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const fetchFilterValues = async (key: FilterKey) => {
+      try {
+        const params = new URLSearchParams();
+        params.set("valuesFor", key);
+        params.set(
+          "filterModels",
+          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
+        );
+        params.set(
+          "advancedFilters",
+          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+        );
+
+        const res = await fetch(`/api/master_data?${params.toString()}`, {
+          cache: "no-store",
+        });
+
+        const data = await readApiResponse(res);
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "値一覧の取得に失敗しました");
+        }
+
+        setDraftColumnStates((prev) => {
+          const next = cloneColumnStates(prev);
+          next[key].availableValues = data.values || [];
+          if (!next[key].valueFilterEnabled) {
+            next[key].selectedValues = [];
+          } else {
+            next[key].selectedValues = next[key].selectedValues.filter((value) =>
+              (data.values || []).includes(value)
+            );
+          }
+          return next;
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+  const fetchAdvancedFilterValues = async (key: AdvancedFilterModalKey) => {
+    if (key === "capital" || key === "employeeCount") {
+      return;
+    }
+
+    setAdvancedLoading(true);
+
+    try {
+      const params = new URLSearchParams();
+      params.set("advancedValuesFor", key);
+      params.set(
+        "filterModels",
+        JSON.stringify(buildRequestFilterModels(appliedColumnStates))
+      );
+      params.set(
+        "advancedFilters",
+        JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+      );
+
+      const res = await fetch(`/api/master_data?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "候補の取得に失敗しました");
+      }
+
+      setAdvancedValueOptions((prev) => {
+        const next = { ...prev };
+
+        if (key === "prefecture") {
+          next.regions = data.regions || [];
+          next.prefectureItems = Array.isArray(data.items)
+            ? (data.items as PrefectureValueItem[])
+            : [];
+        }
+
+        if (key === "industry") {
+          next.industryItems = Array.isArray(data.items)
+            ? (data.items as IndustryValueItem[])
+            : [];
+        }
+
+        if (key === "established") {
+          next.establishedYears = data.years || [];
+          next.establishedMonthsByYear = data.monthsByYear || {};
+        }
+
+        if (key === "tag") {
+          next.tagItems = Array.isArray(data.items)
+            ? (data.items as TagValueItem[])
+            : [];
+        }
+
         return next;
       });
     } catch (e) {
       console.error(e);
+    } finally {
+      setAdvancedLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
-  }, [page, limit, appliedColumnStates]);
+  }, [page, limit, appliedColumnStates, appliedAdvancedFilters]);
 
   useEffect(() => {
     setHeaderStickyTop(0);
   }, []);
 
-  const handleOpenFilter = async (key: FilterKey) => {
-    if (openFilterKey === key) {
-      setOpenFilterKey(null);
-      return;
-    }
+    const handleOpenFilter = async (key: FilterKey) => {
+      if (openFilterKey === key) {
+        setOpenFilterKey(null);
+        return;
+      }
 
-    setDraftColumnStates((prev) => {
-      const next = cloneColumnStates(prev);
-      next[key] = {
-        ...appliedColumnStates[key],
-        availableValues:
-          prev[key].availableValues.length > 0
-            ? [...prev[key].availableValues]
-            : [...appliedColumnStates[key].availableValues],
-        valueSearch: "",
-      };
-      return next;
-    });
+      setOpenAdvancedFilterKey(null);
 
-    setOpenFilterKey(key);
-    await fetchFilterValues(key);
-  };
+      setDraftColumnStates((prev) => {
+        const next = cloneColumnStates(prev);
+        next[key] = {
+          ...appliedColumnStates[key],
+          availableValues:
+            prev[key].availableValues.length > 0
+              ? [...prev[key].availableValues]
+              : [...appliedColumnStates[key].availableValues],
+          valueSearch: "",
+        };
+        return next;
+      });
+
+      setOpenFilterKey(key);
+      await fetchFilterValues(key);
+    };
 
   const updateSort = (key: FilterKey, direction: SortDirection) => {
     setDraftColumnStates((prev) => {
@@ -862,6 +1288,793 @@ export default function Home() {
     setOpenFilterKey(null);
   };
 
+    const handleOpenAdvancedFilter = async (key: AdvancedFilterModalKey) => {
+      if (openAdvancedFilterKey === key) {
+        setOpenAdvancedFilterKey(null);
+        return;
+      }
+
+      setOpenFilterKey(null);
+      setDraftAdvancedFilters(cloneAdvancedFiltersState(appliedAdvancedFilters));
+      setOpenAdvancedFilterKey(key);
+
+      if (key === "prefecture") {
+        setExpandedPrefectureRegions({});
+        setExpandedPrefectures({});
+      }
+      if (key === "industry") {
+        setExpandedIndustryParents({});
+        setExpandedIndustries({});
+      }
+      if (key === "established") {
+        setExpandedYears({});
+      }
+      if (key === "tag") {
+        setExpandedTagParents({});
+      }
+
+      await fetchAdvancedFilterValues(key);
+    };
+
+    const clearAdvancedFilter = (key: AdvancedFilterModalKey) => {
+      const empty = createInitialAdvancedFiltersState();
+
+      setDraftAdvancedFilters((prev) => {
+        const next = cloneAdvancedFiltersState(prev);
+
+        if (key === "prefecture") next.prefectures = empty.prefectures;
+        if (key === "industry") next.industries = empty.industries;
+        if (key === "established") next.established = empty.established;
+        if (key === "capital") next.capital = empty.capital;
+        if (key === "employeeCount") next.employeeCount = empty.employeeCount;
+        if (key === "tag") next.tags = empty.tags;
+
+        return next;
+      });
+
+      setAppliedAdvancedFilters((prev) => {
+        const next = cloneAdvancedFiltersState(prev);
+
+        if (key === "prefecture") next.prefectures = empty.prefectures;
+        if (key === "industry") next.industries = empty.industries;
+        if (key === "established") next.established = empty.established;
+        if (key === "capital") next.capital = empty.capital;
+        if (key === "employeeCount") next.employeeCount = empty.employeeCount;
+        if (key === "tag") next.tags = empty.tags;
+
+        return next;
+      });
+
+      setPage(1);
+      setOpenAdvancedFilterKey(null);
+    };
+
+    const applyAdvancedFilter = () => {
+      setAppliedAdvancedFilters(cloneAdvancedFiltersState(draftAdvancedFilters));
+      setPage(1);
+      setOpenAdvancedFilterKey(null);
+    };
+
+  const renderAdvancedFilterContent = () => {
+    if (openAdvancedFilterKey === "prefecture") {
+      const items = advancedValueOptions.prefectureItems;
+      const regions =
+        advancedValueOptions.regions.length > 0
+          ? advancedValueOptions.regions
+          : Array.from(new Set(items.map((item) => item.region)));
+
+      return (
+        <div className="space-y-4">
+          {regions.map((region) => {
+            const regionItems = items.filter((item) => item.region === region);
+            const isRegionOpen = !!expandedPrefectureRegions[region];
+            const regionPrefectures = regionItems.map((item) => item.prefecture);
+            const regionCities = regionItems.flatMap((item) => item.cities);
+            const isRegionChecked =
+              includesAllValues(
+                draftAdvancedFilters.prefectures.prefectures,
+                regionPrefectures
+              ) &&
+              includesAllValues(
+                draftAdvancedFilters.prefectures.cities,
+                regionCities
+              );
+
+            return (
+              <div
+                key={region}
+                className="rounded-xl border border-white/10 bg-[#0f172a] p-4"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={isRegionChecked}
+                    onChange={() =>
+                      setDraftAdvancedFilters((prev) => {
+                        const next = cloneAdvancedFiltersState(prev);
+                        next.prefectures.regions = [];
+
+                        if (isRegionChecked) {
+                          next.prefectures.prefectures = removeArrayValues(
+                            next.prefectures.prefectures,
+                            regionPrefectures
+                          );
+                          next.prefectures.cities = removeArrayValues(
+                            next.prefectures.cities,
+                            regionCities
+                          );
+                        } else {
+                          next.prefectures.prefectures = addArrayValues(
+                            next.prefectures.prefectures,
+                            regionPrefectures
+                          );
+                          next.prefectures.cities = addArrayValues(
+                            next.prefectures.cities,
+                            regionCities
+                          );
+                        }
+
+                        return next;
+                      })
+                    }
+                    className="h-4 w-4 accent-sky-500"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedPrefectureRegions((prev) => ({
+                        ...prev,
+                        [region]: !prev[region],
+                      }))
+                    }
+                    className="flex-1 text-left text-sm font-semibold text-slate-100"
+                  >
+                    {isRegionOpen ? "▼" : "▶"} {region}
+                  </button>
+                </div>
+
+                {isRegionOpen && (
+                  <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    {regionItems.map((item) => {
+                      const isPrefectureOpen =
+                        !!expandedPrefectures[item.prefecture];
+                      const isPrefectureChecked =
+                        draftAdvancedFilters.prefectures.prefectures.includes(
+                          item.prefecture
+                        ) &&
+                        includesAllValues(
+                          draftAdvancedFilters.prefectures.cities,
+                          item.cities
+                        );
+
+                      return (
+                        <div
+                          key={item.prefecture}
+                          className="rounded-xl border border-white/10 bg-white/5 p-3"
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isPrefectureChecked}
+                              onChange={() =>
+                                setDraftAdvancedFilters((prev) => {
+                                  const next = cloneAdvancedFiltersState(prev);
+                                  next.prefectures.regions = [];
+
+                                  if (isPrefectureChecked) {
+                                    next.prefectures.prefectures =
+                                      removeArrayValues(
+                                        next.prefectures.prefectures,
+                                        [item.prefecture]
+                                      );
+                                    next.prefectures.cities = removeArrayValues(
+                                      next.prefectures.cities,
+                                      item.cities
+                                    );
+                                  } else {
+                                    next.prefectures.prefectures =
+                                      addArrayValues(
+                                        next.prefectures.prefectures,
+                                        [item.prefecture]
+                                      );
+                                    next.prefectures.cities = addArrayValues(
+                                      next.prefectures.cities,
+                                      item.cities
+                                    );
+                                  }
+
+                                  return next;
+                                })
+                              }
+                              className="h-4 w-4 accent-sky-500"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedPrefectures((prev) => ({
+                                  ...prev,
+                                  [item.prefecture]: !prev[item.prefecture],
+                                }))
+                              }
+                              className="flex-1 text-left text-sm font-medium text-slate-100"
+                            >
+                              {isPrefectureOpen ? "▼" : "▶"} {item.prefecture}
+                            </button>
+                          </div>
+
+                          {isPrefectureOpen && item.cities.length > 0 && (
+                            <div className="mt-3 ml-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                              {item.cities.map((city) => (
+                                <label
+                                  key={`${item.prefecture}-${city}`}
+                                  className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-200 hover:bg-white/5"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={draftAdvancedFilters.prefectures.cities.includes(
+                                      city
+                                    )}
+                                    onChange={() =>
+                                      setDraftAdvancedFilters((prev) => {
+                                        const next = cloneAdvancedFiltersState(
+                                          prev
+                                        );
+                                        next.prefectures.regions = [];
+                                        next.prefectures.prefectures =
+                                          removeArrayValues(
+                                            next.prefectures.prefectures,
+                                            [item.prefecture]
+                                          );
+                                        next.prefectures.cities =
+                                          toggleArrayValue(
+                                            next.prefectures.cities,
+                                            city
+                                          );
+                                        return next;
+                                      })
+                                    }
+                                    className="h-4 w-4 accent-sky-500"
+                                  />
+                                  <span>{city}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (openAdvancedFilterKey === "industry") {
+      const industryParents = Array.from(
+        new Set(
+          advancedValueOptions.industryItems.map((item) => item.industryParent)
+        )
+      );
+
+      return (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {industryParents.map((industryParent) => {
+            const parentItems = advancedValueOptions.industryItems.filter(
+              (item) => item.industryParent === industryParent
+            );
+            const isParentOpen = !!expandedIndustryParents[industryParent];
+            const parentBigIndustries = parentItems.map(
+              (item) => item.bigIndustry
+            );
+            const parentSmallIndustries = parentItems.flatMap(
+              (item) => item.smallIndustries
+            );
+            const isParentChecked =
+              includesAllValues(
+                draftAdvancedFilters.industries.bigIndustries,
+                parentBigIndustries
+              ) &&
+              includesAllValues(
+                draftAdvancedFilters.industries.smallIndustries,
+                parentSmallIndustries
+              );
+
+            return (
+              <div
+                key={industryParent}
+                className="rounded-xl border border-white/10 bg-[#0f172a] p-4"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={isParentChecked}
+                    onChange={() =>
+                      setDraftAdvancedFilters((prev) => {
+                        const next = cloneAdvancedFiltersState(prev);
+
+                        if (isParentChecked) {
+                          next.industries.bigIndustries = removeArrayValues(
+                            next.industries.bigIndustries,
+                            parentBigIndustries
+                          );
+                          next.industries.smallIndustries = removeArrayValues(
+                            next.industries.smallIndustries,
+                            parentSmallIndustries
+                          );
+                        } else {
+                          next.industries.bigIndustries = addArrayValues(
+                            next.industries.bigIndustries,
+                            parentBigIndustries
+                          );
+                          next.industries.smallIndustries = addArrayValues(
+                            next.industries.smallIndustries,
+                            parentSmallIndustries
+                          );
+                        }
+
+                        return next;
+                      })
+                    }
+                    className="h-4 w-4 accent-sky-500"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedIndustryParents((prev) => ({
+                        ...prev,
+                        [industryParent]: !prev[industryParent],
+                      }))
+                    }
+                    className="flex-1 text-left text-sm font-semibold text-slate-100"
+                  >
+                    {isParentOpen ? "▼" : "▶"} {industryParent}
+                  </button>
+                </div>
+
+                {isParentOpen && (
+                  <div className="mt-4 space-y-3">
+                    {parentItems.map((item) => {
+                      const isOpen = !!expandedIndustries[item.bigIndustry];
+                      const isBigIndustryChecked =
+                        draftAdvancedFilters.industries.bigIndustries.includes(
+                          item.bigIndustry
+                        ) &&
+                        includesAllValues(
+                          draftAdvancedFilters.industries.smallIndustries,
+                          item.smallIndustries
+                        );
+
+                      return (
+                        <div
+                          key={item.bigIndustry}
+                          className="rounded-xl border border-white/10 bg-white/5 p-3"
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isBigIndustryChecked}
+                              onChange={() =>
+                                setDraftAdvancedFilters((prev) => {
+                                  const next = cloneAdvancedFiltersState(prev);
+
+                                  if (isBigIndustryChecked) {
+                                    next.industries.bigIndustries =
+                                      removeArrayValues(
+                                        next.industries.bigIndustries,
+                                        [item.bigIndustry]
+                                      );
+                                    next.industries.smallIndustries =
+                                      removeArrayValues(
+                                        next.industries.smallIndustries,
+                                        item.smallIndustries
+                                      );
+                                  } else {
+                                    next.industries.bigIndustries =
+                                      addArrayValues(
+                                        next.industries.bigIndustries,
+                                        [item.bigIndustry]
+                                      );
+                                    next.industries.smallIndustries =
+                                      addArrayValues(
+                                        next.industries.smallIndustries,
+                                        item.smallIndustries
+                                      );
+                                  }
+
+                                  return next;
+                                })
+                              }
+                              className="h-4 w-4 accent-sky-500"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedIndustries((prev) => ({
+                                  ...prev,
+                                  [item.bigIndustry]: !prev[item.bigIndustry],
+                                }))
+                              }
+                              className="flex-1 text-left text-sm font-medium text-slate-100"
+                            >
+                              {isOpen ? "▼" : "▶"} {item.bigIndustry}
+                            </button>
+                          </div>
+
+                          {isOpen && (
+                            <div className="mt-3 ml-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                              {item.smallIndustries.map((smallIndustry) => (
+                                <label
+                                  key={`${item.bigIndustry}-${smallIndustry}`}
+                                  className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-200 hover:bg-white/5"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={draftAdvancedFilters.industries.smallIndustries.includes(
+                                      smallIndustry
+                                    )}
+                                    onChange={() =>
+                                      setDraftAdvancedFilters((prev) => {
+                                        const next = cloneAdvancedFiltersState(
+                                          prev
+                                        );
+                                        next.industries.bigIndustries =
+                                          removeArrayValues(
+                                            next.industries.bigIndustries,
+                                            [item.bigIndustry]
+                                          );
+                                        next.industries.smallIndustries =
+                                          toggleArrayValue(
+                                            next.industries.smallIndustries,
+                                            smallIndustry
+                                          );
+                                        return next;
+                                      })
+                                    }
+                                    className="h-4 w-4 accent-sky-500"
+                                  />
+                                  <span>{smallIndustry}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (openAdvancedFilterKey === "established") {
+      const years = advancedValueOptions.establishedYears;
+      const fromYear = getYearPart(draftAdvancedFilters.established.from);
+      const fromMonth = getMonthPart(draftAdvancedFilters.established.from);
+      const toYear = getYearPart(draftAdvancedFilters.established.to);
+      const toMonth = getMonthPart(draftAdvancedFilters.established.to);
+
+      return (
+        <div className="mx-auto w-full max-w-[1100px] rounded-xl border border-white/10 bg-[#0f172a] p-5">
+          <div className="mb-4 text-sm font-semibold text-slate-100">
+            期間指定
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="rounded-xl border border-white/10 bg-[#111827] p-5">
+              <div className="mb-3 text-sm font-medium text-slate-100">
+                開始
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="min-w-0">
+                  <div className="mb-2 text-xs text-slate-400">年</div>
+                  <select
+                    value={fromYear}
+                    onChange={(e) =>
+                      setDraftAdvancedFilters((prev) => {
+                        const next = cloneAdvancedFiltersState(prev);
+                        next.established.from = buildYearMonthValue(
+                          e.target.value,
+                          getMonthPart(next.established.from)
+                        );
+                        return next;
+                      })
+                    }
+                    className="h-11 w-full min-w-0 rounded-xl border border-white/10 bg-[#0b1220] px-3 text-sm text-slate-100 outline-none focus:border-sky-500"
+                  >
+                    <option value="">選択</option>
+                    {years.map((year) => (
+                      <option key={`from-year-${year}`} value={year}>
+                        {year}年
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="min-w-0">
+                  <div className="mb-2 text-xs text-slate-400">月</div>
+                  <select
+                    value={fromMonth}
+                    onChange={(e) =>
+                      setDraftAdvancedFilters((prev) => {
+                        const next = cloneAdvancedFiltersState(prev);
+                        next.established.from = buildYearMonthValue(
+                          getYearPart(next.established.from),
+                          e.target.value
+                        );
+                        return next;
+                      })
+                    }
+                    className="h-11 w-full min-w-0 rounded-xl border border-white/10 bg-[#0b1220] px-3 text-sm text-slate-100 outline-none focus:border-sky-500"
+                  >
+                    <option value="">選択</option>
+                    {ESTABLISHED_MONTH_OPTIONS.map((month) => (
+                      <option
+                        key={`from-month-${month.value}`}
+                        value={month.value}
+                      >
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-[#111827] p-5">
+              <div className="mb-3 text-sm font-medium text-slate-100">
+                終了
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="min-w-0">
+                  <div className="mb-2 text-xs text-slate-400">年</div>
+                  <select
+                    value={toYear}
+                    onChange={(e) =>
+                      setDraftAdvancedFilters((prev) => {
+                        const next = cloneAdvancedFiltersState(prev);
+                        next.established.to = buildYearMonthValue(
+                          e.target.value,
+                          getMonthPart(next.established.to)
+                        );
+                        return next;
+                      })
+                    }
+                    className="h-11 w-full min-w-0 rounded-xl border border-white/10 bg-[#0b1220] px-3 text-sm text-slate-100 outline-none focus:border-sky-500"
+                  >
+                    <option value="">選択</option>
+                    {years.map((year) => (
+                      <option key={`to-year-${year}`} value={year}>
+                        {year}年
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="min-w-0">
+                  <div className="mb-2 text-xs text-slate-400">月</div>
+                  <select
+                    value={toMonth}
+                    onChange={(e) =>
+                      setDraftAdvancedFilters((prev) => {
+                        const next = cloneAdvancedFiltersState(prev);
+                        next.established.to = buildYearMonthValue(
+                          getYearPart(next.established.to),
+                          e.target.value
+                        );
+                        return next;
+                      })
+                    }
+                    className="h-11 w-full min-w-0 rounded-xl border border-white/10 bg-[#0b1220] px-3 text-sm text-slate-100 outline-none focus:border-sky-500"
+                  >
+                    <option value="">選択</option>
+                    {ESTABLISHED_MONTH_OPTIONS.map((month) => (
+                      <option key={`to-month-${month.value}`} value={month.value}>
+                        {month.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (openAdvancedFilterKey === "capital") {
+      return (
+        <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+          <div className="mb-3 text-sm font-semibold text-slate-100">
+            資本金の範囲指定
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-2 text-xs text-slate-400">最小値</div>
+              <input
+                value={draftAdvancedFilters.capital.min}
+                onChange={(e) =>
+                  setDraftAdvancedFilters((prev) => {
+                    const next = cloneAdvancedFiltersState(prev);
+                    next.capital.min = e.target.value;
+                    return next;
+                  })
+                }
+                placeholder="100"
+                className="h-10 w-full rounded-xl border border-white/10 bg-[#111827] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500"
+              />
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs text-slate-400">最大値</div>
+              <input
+                value={draftAdvancedFilters.capital.max}
+                onChange={(e) =>
+                  setDraftAdvancedFilters((prev) => {
+                    const next = cloneAdvancedFiltersState(prev);
+                    next.capital.max = e.target.value;
+                    return next;
+                  })
+                }
+                placeholder="100000"
+                className="h-10 w-full rounded-xl border border-white/10 bg-[#111827] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500"
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (openAdvancedFilterKey === "employeeCount") {
+      return (
+        <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+          <div className="mb-3 text-sm font-semibold text-slate-100">
+            従業員数の範囲指定
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-2 text-xs text-slate-400">最小値</div>
+              <input
+                value={draftAdvancedFilters.employeeCount.min}
+                onChange={(e) =>
+                  setDraftAdvancedFilters((prev) => {
+                    const next = cloneAdvancedFiltersState(prev);
+                    next.employeeCount.min = e.target.value;
+                    return next;
+                  })
+                }
+                placeholder="100"
+                className="h-10 w-full rounded-xl border border-white/10 bg-[#111827] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500"
+              />
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs text-slate-400">最大値</div>
+              <input
+                value={draftAdvancedFilters.employeeCount.max}
+                onChange={(e) =>
+                  setDraftAdvancedFilters((prev) => {
+                    const next = cloneAdvancedFiltersState(prev);
+                    next.employeeCount.max = e.target.value;
+                    return next;
+                  })
+                }
+                placeholder="100000"
+                className="h-10 w-full rounded-xl border border-white/10 bg-[#111827] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500"
+              />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (openAdvancedFilterKey === "tag") {
+      return (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {advancedValueOptions.tagItems.map((item) => {
+            const isOpen = !!expandedTagParents[item.parent];
+            const isParentChecked = includesAllValues(
+              draftAdvancedFilters.tags.tags,
+              item.tags
+            );
+
+            return (
+              <div
+                key={item.parent}
+                className="rounded-xl border border-white/10 bg-[#0f172a] p-4"
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={isParentChecked}
+                    onChange={() =>
+                      setDraftAdvancedFilters((prev) => {
+                        const next = cloneAdvancedFiltersState(prev);
+                        next.tags.parents = [];
+
+                        if (isParentChecked) {
+                          next.tags.tags = removeArrayValues(
+                            next.tags.tags,
+                            item.tags
+                          );
+                        } else {
+                          next.tags.tags = addArrayValues(
+                            next.tags.tags,
+                            item.tags
+                          );
+                        }
+
+                        return next;
+                      })
+                    }
+                    className="h-4 w-4 accent-sky-500"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedTagParents((prev) => ({
+                        ...prev,
+                        [item.parent]: !prev[item.parent],
+                      }))
+                    }
+                    className="flex-1 text-left text-sm font-semibold text-slate-100"
+                  >
+                    {isOpen ? "▼" : "▶"} {item.parent}
+                  </button>
+                </div>
+
+                {isOpen && (
+                  <div className="mt-3 ml-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {item.tags.map((tag) => (
+                      <label
+                        key={`${item.parent}-${tag}`}
+                        className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-200 hover:bg-white/5"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={draftAdvancedFilters.tags.tags.includes(tag)}
+                          onChange={() =>
+                            setDraftAdvancedFilters((prev) => {
+                              const next = cloneAdvancedFiltersState(prev);
+                              next.tags.parents = [];
+                              next.tags.tags = toggleArrayValue(
+                                next.tags.tags,
+                                tag
+                              );
+                              return next;
+                            })
+                          }
+                          className="h-4 w-4 accent-sky-500"
+                        />
+                        <span>{tag}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   const handleImport = async () => {
     if (!selectedFile) {
       setImportError("CSVファイルを選択してください");
@@ -901,63 +2114,67 @@ export default function Home() {
     }
   };
 
-  const handleExport = async () => {
-  setImportError("");
-  setImportMessage("");
+    const handleExport = async () => {
+      setImportError("");
+      setImportMessage("");
 
-  try {
-    const params = new URLSearchParams();
-    params.set(
-      "filterModels",
-      JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-    );
+      try {
+        const params = new URLSearchParams();
+        params.set(
+          "filterModels",
+          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
+        );
+        params.set(
+          "advancedFilters",
+          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+        );
 
-    const sortColumn = COLUMN_DEFS.find(
-      (column) => appliedColumnStates[column.key].sortDirection !== ""
-    );
+        const sortColumn = COLUMN_DEFS.find(
+          (column) => appliedColumnStates[column.key].sortDirection !== ""
+        );
 
-    if (sortColumn) {
-      params.set("sortKey", sortColumn.key);
-      params.set(
-        "sortDirection",
-        appliedColumnStates[sortColumn.key].sortDirection
-      );
-    }
+        if (sortColumn) {
+          params.set("sortKey", sortColumn.key);
+          params.set(
+            "sortDirection",
+            appliedColumnStates[sortColumn.key].sortDirection
+          );
+        }
 
-    const res = await fetch(`/api/master_data/export?${params.toString()}`, {
-      cache: "no-store",
-    });
+        const res = await fetch(`/api/master_data/export?${params.toString()}`, {
+          cache: "no-store",
+        });
 
-    if (!res.ok) {
-      const data = await readApiResponse(res);
-      throw new Error(data.error || "CSVエクスポートに失敗しました");
-    }
+        if (!res.ok) {
+          const data = await readApiResponse(res);
+          throw new Error(data.error || "CSVエクスポートに失敗しました");
+        }
 
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
-    a.href = url;
+        const a = document.createElement("a");
+        a.href = url;
 
-    const disposition = res.headers.get("content-disposition") || "";
-    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/);
-    const normalMatch = disposition.match(/filename="([^"]+)"/);
+        const disposition = res.headers.get("content-disposition") || "";
+        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+        const normalMatch = disposition.match(/filename="([^"]+)"/);
 
-    const filename = decodeURIComponent(
-      utf8Match?.[1] || normalMatch?.[1] || "master_data.csv"
-    );
+        const filename = decodeURIComponent(
+          utf8Match?.[1] || normalMatch?.[1] || "master_data.csv"
+        );
 
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
-  } catch (e) {
-    setImportError(
-      e instanceof Error ? e.message : "CSVエクスポートに失敗しました"
-    );
-  }
-};
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      } catch (e) {
+        setImportError(
+          e instanceof Error ? e.message : "CSVエクスポートに失敗しました"
+        );
+      }
+    };
 
   const pageNumbers = useMemo(() => {
     if (limit === "all") return [1];
@@ -974,6 +2191,17 @@ export default function Home() {
   }, [page, totalPages, limit]);
 
   const usingVirtual = false;
+
+  const activeAdvancedFilterTitle = openAdvancedFilterKey
+    ? ADVANCED_FILTER_TITLES[openAdvancedFilterKey]
+    : "";
+
+  const activeAdvancedFilterKey = openAdvancedFilterKey;
+
+  const isWideAdvancedFilterModal =
+    activeAdvancedFilterKey === "prefecture" ||
+    activeAdvancedFilterKey === "industry" ||
+    activeAdvancedFilterKey === "tag";
 
   return (
     <main className="min-h-screen bg-transparent text-slate-100">
@@ -1034,6 +2262,36 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mb-3 text-sm font-semibold text-slate-200">
+                絞り込み
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+                {ADVANCED_FILTER_BUTTONS.map((button) => {
+                  const active = hasActiveAdvancedFilter(
+                    button.key,
+                    appliedAdvancedFilters
+                  );
+
+                  return (
+                    <button
+                      key={button.key}
+                      type="button"
+                      onClick={() => handleOpenAdvancedFilter(button.key)}
+                      className={`h-12 rounded-xl border px-4 text-sm font-medium transition ${
+                        active
+                          ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
+                          : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
+                      }`}
+                    >
+                      {button.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="mb-3 text-sm font-semibold text-slate-200">
                 CSV取込
@@ -1079,6 +2337,88 @@ export default function Home() {
             </div>
           </div>
         </div>
+
+        {activeAdvancedFilterKey &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => setOpenAdvancedFilterKey(null)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className={`flex w-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl ${
+                    isWideAdvancedFilterModal
+                      ? "max-w-[calc(100vw-32px)] h-[calc(100dvh-32px)]"
+                      : "max-w-[720px] max-h-[calc(100dvh-32px)]"
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      {activeAdvancedFilterTitle} のフィルタ
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setOpenAdvancedFilterKey(null)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto px-4 py-4">
+                    {advancedLoading &&
+                    activeAdvancedFilterKey !== "capital" &&
+                    activeAdvancedFilterKey !== "employeeCount" ? (
+                      <div className="rounded-xl border border-white/10 bg-[#0f172a] px-4 py-10 text-center text-sm text-slate-400">
+                        読み込み中です...
+                      </div>
+                    ) : (
+                      renderAdvancedFilterContent()
+                    )}
+                  </div>
+
+                  <div
+                    className={`border-t border-white/10 px-4 py-4 ${
+                      isWideAdvancedFilterModal
+                        ? "flex justify-center gap-3"
+                        : "flex gap-2"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={applyAdvancedFilter}
+                      className={`h-10 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 ${
+                        isWideAdvancedFilterModal
+                          ? "w-[160px] flex-none"
+                          : "flex-1"
+                      }`}
+                    >
+                      適用
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        activeAdvancedFilterKey &&
+                        clearAdvancedFilter(activeAdvancedFilterKey)
+                      }
+                      className={`h-10 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 ${
+                        isWideAdvancedFilterModal
+                          ? "w-[160px] flex-none"
+                          : "flex-1"
+                      }`}
+                    >
+                      クリア
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
         {loading && (
           <div className="mb-4 rounded-2xl border border-white/10 bg-[#0b1326]/90 px-4 py-3 text-sm text-slate-400">
