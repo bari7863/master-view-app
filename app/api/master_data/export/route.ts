@@ -79,7 +79,12 @@ type AdvancedTagFilters = {
   tags?: string[];
 };
 
+type AdvancedCompanyNameFilter = {
+  keyword?: string;
+}
+
 type AdvancedFilters = {
+  companyName?: AdvancedCompanyNameFilter;
   prefectures?: AdvancedPrefectureFilters;
   industries?: AdvancedIndustryFilters;
   established?: AdvancedEstablishedFilters;
@@ -354,6 +359,12 @@ function addAdvancedFilterClauses(
   params: (string | number)[],
   filters: AdvancedFilters
 ) {
+  const companyKeyword = String(filters.companyName?.keyword ?? "").trim();
+  if(companyKeyword !== "") {
+    params.push(`%${companyKeyword}%`);
+    where.push(`COALESCE("企業名"::text, '') ILIKE $${params.length}`);
+  }
+  
   const locationPieces = [
     buildInClause(
       params,

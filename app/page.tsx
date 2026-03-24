@@ -57,6 +57,7 @@ type ColumnFilterState = {
 };
 
 type AdvancedFilterModalKey =
+  | "companyName"
   | "prefecture"
   | "industry"
   | "established"
@@ -82,6 +83,9 @@ type TagValueItem = {
 };
 
 type AdvancedFiltersState = {
+  companyName: {
+    keyword: string;
+  };
   prefectures: {
     regions: string[];
     prefectures: string[];
@@ -316,6 +320,7 @@ const ADVANCED_FILTER_BUTTONS: {
   key: AdvancedFilterModalKey;
   label: string;
 }[] = [
+  { key: "companyName", label: "企業名" },
   { key: "prefecture", label: "都道府県" },
   { key: "industry", label: "業種" },
   { key: "established", label: "設立" },
@@ -325,6 +330,7 @@ const ADVANCED_FILTER_BUTTONS: {
 ];
 
 const ADVANCED_FILTER_TITLES: Record<AdvancedFilterModalKey, string> = {
+  companyName: "企業名",
   prefecture: "都道府県",
   industry: "業種",
   established: "設立",
@@ -335,6 +341,9 @@ const ADVANCED_FILTER_TITLES: Record<AdvancedFilterModalKey, string> = {
 
 function createInitialAdvancedFiltersState(): AdvancedFiltersState {
   return {
+    companyName: {
+      keyword: "",
+    },
     prefectures: {
       regions: [],
       prefectures: [],
@@ -369,6 +378,9 @@ function cloneAdvancedFiltersState(
   state: AdvancedFiltersState
 ): AdvancedFiltersState {
   return {
+    companyName: {
+      keyword: state.companyName.keyword,
+    },
     prefectures: {
       regions: [...state.prefectures.regions],
       prefectures: [...state.prefectures.prefectures],
@@ -468,6 +480,13 @@ function buildYearMonthValue(year: string, month: string) {
 function buildRequestAdvancedFilters(state: AdvancedFiltersState) {
   const result: Record<string, unknown> = {};
 
+  const companyKeyword = state.companyName.keyword.trim();
+  if (companyKeyword !== "") {
+    result.companyName = {
+      keyword: companyKeyword,
+    };
+  }
+
   if (
     state.prefectures.prefectures.length > 0 ||
     state.prefectures.cities.length > 0
@@ -532,6 +551,8 @@ function hasActiveAdvancedFilter(
   state: AdvancedFiltersState
 ) {
   switch (key) {
+    case "companyName":
+      return state.companyName.keyword.trim() !== "";
     case "prefecture":
       return (
         state.prefectures.regions.length > 0 ||
@@ -1055,7 +1076,11 @@ export default function Home() {
     };
 
   const fetchAdvancedFilterValues = async (key: AdvancedFilterModalKey) => {
-    if (key === "capital" || key === "employeeCount") {
+    if (
+      key === "companyName" ||
+      key === "capital" ||
+      key === "employeeCount"
+    ) {
       return;
     }
 
@@ -1322,6 +1347,7 @@ export default function Home() {
       setDraftAdvancedFilters((prev) => {
         const next = cloneAdvancedFiltersState(prev);
 
+        if (key === "companyName") next.companyName = empty.companyName;
         if (key === "prefecture") next.prefectures = empty.prefectures;
         if (key === "industry") next.industries = empty.industries;
         if (key === "established") next.established = empty.established;
@@ -1335,6 +1361,7 @@ export default function Home() {
       setAppliedAdvancedFilters((prev) => {
         const next = cloneAdvancedFiltersState(prev);
 
+        if (key === "companyName") next.companyName = empty.companyName;
         if (key === "prefecture") next.prefectures = empty.prefectures;
         if (key === "industry") next.industries = empty.industries;
         if (key === "established") next.established = empty.established;
@@ -1356,6 +1383,34 @@ export default function Home() {
     };
 
   const renderAdvancedFilterContent = () => {
+    if (openAdvancedFilterKey === "companyName") {
+      return (
+        <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+          <div className="mb-3 text-sm font-semibold text-slate-100">
+            企業名の部分一致検索
+          </div>
+
+          <input
+          value={draftAdvancedFilters.companyName.keyword}
+          onChange={(e) =>
+            setDraftAdvancedFilters((prev) => {
+              const next = cloneAdvancedFiltersState(prev);
+              next.companyName.keyword =e.target.value;
+              return next;
+            })
+          }
+          placeholder="例：株式会社"
+          className="h-11 w-full rounded-xl border border-white/1- bg-[#111827] px-3 text-sm text-slate-100 outline-none placeholder:text-slete-500 focus:border-sky-500" 
+          />
+
+          <div className="mt-3 text-xs text-slate-400">
+            入力した文字を含む企業名のみ表示します
+          </div>
+        </div>
+      );
+    }
+
+
     if (openAdvancedFilterKey === "prefecture") {
       const items = advancedValueOptions.prefectureItems;
       const regions =
@@ -2075,6 +2130,8 @@ export default function Home() {
     return null;
   };
 
+
+
   const handleImport = async () => {
     if (!selectedFile) {
       setImportError("CSVファイルを選択してください");
@@ -2218,7 +2275,7 @@ export default function Home() {
                 </h1>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="grid grid-cols-4 gap-3">
                 <div className="flex min-h-[96px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-center">
                   <div className="text-xs text-slate-400">総件数</div>
                   <div className="mt-2 text-xl font-semibold text-white">
@@ -2267,8 +2324,8 @@ export default function Home() {
                 絞り込み
               </div>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-                {ADVANCED_FILTER_BUTTONS.map((button) => {
+              <div className="grid grid-cols-8 gap-3">
+                {ADVANCED_FILTER_BUTTONS.map((button, index) => {
                   const active = hasActiveAdvancedFilter(
                     button.key,
                     appliedAdvancedFilters
@@ -2279,7 +2336,15 @@ export default function Home() {
                       key={button.key}
                       type="button"
                       onClick={() => handleOpenAdvancedFilter(button.key)}
-                      className={`h-12 rounded-xl border px-4 text-sm font-medium transition ${
+                      className={`col-span-2 h-11 w-full whitespace-nowrap rounded-xl border px-3 text-sm font-medium transition ${
+                        index === 4
+                          ? "col-start-2 "
+                          : index === 5
+                          ? "col-start-4 "
+                          : index === 6
+                          ? "col-start-6 "
+                          : ""
+                      }${
                         active
                           ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
                           : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
