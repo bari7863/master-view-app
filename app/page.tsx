@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { List, type RowComponentProps } from "react-window";
 import { createPortal } from "react-dom";
 
@@ -12,6 +12,7 @@ type Row = {
   small_industry: string | null;
   company_kana: string | null;
   summary: string | null;
+  business_content: string | null;
   website_url: string | null;
   form_url: string | null;
   phone: string | null;
@@ -53,6 +54,7 @@ type ColumnFilterState = {
   valueFilterEnabled: boolean;
   selectedValues: string[];
   availableValues: string[];
+  valueCounts: Record<string, number>;
   valueSearch: string;
 };
 
@@ -69,17 +71,23 @@ type PrefectureValueItem = {
   region: string;
   prefecture: string;
   cities: string[];
+  prefectureCount: number;
+  cityCounts: Record<string, number>;
 };
 
 type IndustryValueItem = {
   industryParent: string;
   bigIndustry: string;
   smallIndustries: string[];
+  bigIndustryCount: number;
+  smallIndustryCounts: Record<string, number>;
 };
 
 type TagValueItem = {
   parent: string;
   tags: string[];
+  parentCount: number;
+  tagCounts: Record<string, number>;
 };
 
 type AdvancedFiltersState = {
@@ -124,6 +132,22 @@ type AdvancedValueOptions = {
   tagItems: TagValueItem[];
 };
 
+type CrawlPreviewChange = {
+  key: string;
+  label: string;
+  before: string | null;
+  after: string | null;
+  candidates: string[];
+};
+
+type CrawlPreviewRow = {
+  row_id: string;
+  preview_row_id: string;
+  company: string | null;
+  website_url: string | null;
+  changes: CrawlPreviewChange[];
+};
+
 type ApiResponse = {
   ok: boolean;
   total?: number;
@@ -132,6 +156,7 @@ type ApiResponse = {
   totalPages?: number;
   rows?: Row[];
   values?: string[];
+  valueCounts?: Record<string, number>;
   regions?: string[];
   prefectures?: string[];
   bigIndustries?: string[];
@@ -145,6 +170,13 @@ type ApiResponse = {
   error?: string;
   inserted?: number;
   message?: string;
+  processed?: number;
+  updated?: number;
+  skipped?: number;
+  failed?: number;
+  deleted?: number;
+  preview?: boolean;
+  previewRows?: CrawlPreviewRow[];
 };
 
 async function readApiResponse(res: Response): Promise<ApiResponse> {
@@ -171,6 +203,7 @@ const GRID_TEMPLATE = `
   minmax(150px,1.1fr)
   minmax(150px,1.1fr)
   minmax(180px,1.2fr)
+  minmax(320px,2.2fr)
   minmax(320px,2.2fr)
   minmax(240px,1.6fr)
   minmax(260px,1.8fr)
@@ -221,6 +254,7 @@ const COLUMN_DEFS: { key: FilterKey; label: string }[] = [
   { key: "small_industry", label: "小業種名" },
   { key: "company_kana", label: "企業名（かな）" },
   { key: "summary", label: "企業概要" },
+  { key: "business_content", label: "事業内容"},
   { key: "website_url", label: "企業サイトURL" },
   { key: "form_url", label: "問い合わせフォームURL" },
   { key: "phone", label: "電話番号" },
@@ -250,6 +284,7 @@ function createEmptyColumnState(): ColumnFilterState {
     valueFilterEnabled: false,
     selectedValues: [],
     availableValues: [],
+    valueCounts: {},
     valueSearch: "",
   };
 }
@@ -269,6 +304,7 @@ function cloneColumnStates(
       ...states[column.key],
       selectedValues: [...states[column.key].selectedValues],
       availableValues: [...states[column.key].availableValues],
+      valueCounts: { ...states[column.key].valueCounts },
     };
     return acc;
   }, {} as Record<FilterKey, ColumnFilterState>);
@@ -338,6 +374,201 @@ const ADVANCED_FILTER_TITLES: Record<AdvancedFilterModalKey, string> = {
   employeeCount: "従業員数",
   tag: "タグ",
 };
+
+type SidebarPanelKey = "search" | "csv" | "inspection" | "theme";
+
+const SIDEBAR_PANEL_TITLES: Record<SidebarPanelKey, string> = {
+  search: "絞り込み",
+  csv: "CSV取込",
+  inspection: "精査",
+  theme: "テーマ",
+};
+
+const SIDEBAR_MENU_ITEMS: { key: SidebarPanelKey; label: string }[] = [
+  { key: "search", label: "検索" },
+  { key: "csv", label: "CSV" },
+  { key: "inspection", label: "精査" },
+  { key: "theme", label: "テーマ" },
+];
+
+function SidebarMenuIcon({
+  menuKey,
+  className = "h-5 w-5",
+}: {
+  menuKey: SidebarPanelKey;
+  className?: string;
+}) {
+  if (menuKey === "search") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className={className}
+      >
+        <circle cx="11" cy="11" r="6.5" />
+        <path d="M16 16L21 21" />
+      </svg>
+    );
+  }
+
+  if (menuKey === "csv") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className={className}
+      >
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+        <path d="M14 3v5h5" />
+        <path d="M8 13h8" />
+        <path d="M8 17h5" />
+      </svg>
+    );
+  }
+
+  if (menuKey === "theme") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className={className}
+      >
+        <path d="M12 3v2.5" />
+        <path d="M12 18.5V21" />
+        <path d="M3 12h2.5" />
+        <path d="M18.5 12H21" />
+        <path d="M5.6 5.6l1.8 1.8" />
+        <path d="M16.6 16.6l1.8 1.8" />
+        <path d="M18.4 5.6l-1.8 1.8" />
+        <path d="M7.4 16.6l-1.8 1.8" />
+        <circle cx="12" cy="12" r="4.5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      className={className}
+    >
+      <path d="M4 6h16" />
+      <path d="M4 12h16" />
+      <path d="M4 18h10" />
+      <circle cx="18" cy="18" r="2" />
+    </svg>
+  );
+}
+
+function MasterDataBrandLogo({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 520 280"
+      className={`master-data-brand-logo ${className}`}
+      role="img"
+      aria-label="MASTER DATA BARI SPECIAL"
+    >
+      <defs>
+        <linearGradient
+          id="masterDataBrandGold"
+          x1="8%"
+          y1="0%"
+          x2="92%"
+          y2="100%"
+        >
+          <stop
+            offset="0%"
+            className="master-data-brand-logo__gold-stop-1"
+          />
+          <stop
+            offset="46%"
+            className="master-data-brand-logo__gold-stop-2"
+          />
+          <stop
+            offset="100%"
+            className="master-data-brand-logo__gold-stop-3"
+          />
+        </linearGradient>
+      </defs>
+
+      <text
+        x="150"
+        y="140"
+        textAnchor="middle"
+        className="master-data-brand-logo__display"
+        fill="url(#masterDataBrandGold)"
+        fontSize="156"
+        fontWeight="600"
+        fontStyle="italic"
+        letterSpacing="-4"
+      >
+        M
+      </text>
+
+      <text
+        x="282"
+        y="138"
+        textAnchor="middle"
+        className="master-data-brand-logo__display-alt"
+        fill="url(#masterDataBrandGold)"
+        fontSize="122"
+        fontWeight="600"
+        letterSpacing="0"
+      >
+        D
+      </text>
+
+      <text
+        x="374"
+        y="138"
+        textAnchor="middle"
+        className="master-data-brand-logo__display-alt"
+        fill="url(#masterDataBrandGold)"
+        fontSize="122"
+        fontWeight="600"
+        letterSpacing="0"
+      >
+        B
+      </text>
+
+      <text
+        x="260"
+        y="198"
+        textAnchor="middle"
+        className="master-data-brand-logo__label master-data-brand-logo__wordmark"
+        fontSize="35"
+        fontWeight="700"
+        letterSpacing="5"
+      >
+        MASTER DATA
+      </text>
+
+      <text
+        x="260"
+        y="229"
+        textAnchor="middle"
+        className="master-data-brand-logo__sub master-data-brand-logo__wordmark"
+        fontSize="20"
+        fontWeight="700"
+        letterSpacing="3.2"
+      >
+        BARI SPECIAL
+      </text>
+    </svg>
+  );
+}
 
 function createInitialAdvancedFiltersState(): AdvancedFiltersState {
   return {
@@ -477,7 +708,10 @@ function buildYearMonthValue(year: string, month: string) {
   return "";
 }
 
-function buildRequestAdvancedFilters(state: AdvancedFiltersState) {
+function buildRequestAdvancedFilters(
+  state: AdvancedFiltersState,
+  options?: AdvancedValueOptions
+) {
   const result: Record<string, unknown> = {};
 
   const companyKeyword = state.companyName.keyword.trim();
@@ -487,14 +721,27 @@ function buildRequestAdvancedFilters(state: AdvancedFiltersState) {
     };
   }
 
-  if (
-    state.prefectures.prefectures.length > 0 ||
-    state.prefectures.cities.length > 0
-  ) {
+  const selectedPrefectures = Array.from(
+    new Set(state.prefectures.prefectures)
+  );
+  const selectedCities = Array.from(new Set(state.prefectures.cities));
+
+  const coveredCitySet = new Set(
+    (options?.prefectureItems ?? [])
+      .filter((item) => selectedPrefectures.includes(item.prefecture))
+      .flatMap((item) => item.cities)
+  );
+
+  const compactCities =
+    coveredCitySet.size === 0
+      ? selectedCities
+      : selectedCities.filter((city) => !coveredCitySet.has(city));
+
+  if (selectedPrefectures.length > 0 || compactCities.length > 0) {
     result.prefectures = {
       regions: [],
-      prefectures: state.prefectures.prefectures,
-      cities: state.prefectures.cities,
+      prefectures: selectedPrefectures,
+      cities: compactCities,
     };
   }
 
@@ -590,7 +837,7 @@ function Cell({
   title,
   onDoubleClick,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
   title?: string;
   onDoubleClick?: () => void;
@@ -629,6 +876,43 @@ function LinkCell({ url }: { url: string | null }) {
       {url}
     </a>
   );
+}
+
+function isPreviewUrlValue(changeKey: string, value: string | null) {
+  if (!value) return false;
+  return (
+    changeKey === "website_url" ||
+    changeKey === "form_url" ||
+    /^https?:\/\//i.test(value)
+  );
+}
+
+function PreviewChangeValue({
+  changeKey,
+  value,
+}: {
+  changeKey: string;
+  value: string | null;
+}) {
+  if (!value || value.trim() === "") {
+    return <span className="text-slate-500">-</span>;
+  }
+
+  if (isPreviewUrlValue(changeKey, value)) {
+    return (
+      <a
+        href={value}
+        target="_blank"
+        rel="noreferrer"
+        className="break-all text-sky-300 underline underline-offset-2 transition hover:text-sky-200"
+        title={value}
+      >
+        {value}
+      </a>
+    );
+  }
+
+  return <span className="whitespace-pre-wrap break-words">{value}</span>;
 }
 
 function HeaderCell({
@@ -849,8 +1133,11 @@ function HeaderCell({
                                 onChange={() => onToggleValue(filterKey, value)}
                                 className="h-4 w-4 accent-sky-500"
                               />
-                              <span className="truncate">
+                              <span className="min-w-0 flex-1 truncate">
                                 {value === "" ? "(空白)" : value}
+                              </span>
+                              <span className="shrink-0 text-sm font-bold text-slate-200">
+                                {(filterState.valueCounts[value] ?? 0).toLocaleString()}
                               </span>
                             </label>
                           );
@@ -906,6 +1193,7 @@ function VirtualRow({
         <Cell title={row.small_industry || ""}><EmptyValue value={row.small_industry} /></Cell>
         <Cell title={row.company_kana || ""}><EmptyValue value={row.company_kana} /></Cell>
         <Cell title={row.summary || ""} className="whitespace-pre-wrap"><EmptyValue value={row.summary} /></Cell>
+        <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
         <Cell title={row.website_url || ""}><LinkCell url={row.website_url} /></Cell>
         <Cell title={row.form_url || ""}><LinkCell url={row.form_url} /></Cell>
         <Cell title={row.phone || ""}><EmptyValue value={row.phone} /></Cell>
@@ -984,6 +1272,29 @@ export default function Home() {
   const [importMessage, setImportMessage] = useState("");
   const [importError, setImportError] = useState("");
 
+  const [crawlConfirmOpen, setCrawlConfirmOpen] = useState(false);
+  const [crawling, setCrawling] = useState(false);
+  const [crawlMessage, setCrawlMessage] = useState("");
+  const [crawlError, setCrawlError] = useState("");
+  const [crawlPreviewOpen, setCrawlPreviewOpen] = useState(false);
+  const [crawlPreviewRows, setCrawlPreviewRows] = useState<CrawlPreviewRow[]>([]);
+
+  const [crawlSelectedChanges, setCrawlSelectedChanges] = useState<
+    Record<string, Record<string, string>>
+  >({});
+
+  const [deduplicating, setDeduplicating] = useState(false);
+  const [dedupeMessage, setDedupeMessage] = useState("");
+  const [dedupeError, setDedupeError] = useState("");
+  const [dedupeConfirmOpen, setDedupeConfirmOpen] = useState(false);
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [openSidebarPanel, setOpenSidebarPanel] =
+    useState<SidebarPanelKey | null>(null);
+
+  const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
+
     const fetchData = async () => {
       setLoading(true);
       setError("");
@@ -998,7 +1309,7 @@ export default function Home() {
         );
         params.set(
           "advancedFilters",
-          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions))
         );
 
         const sortColumn = COLUMN_DEFS.find(
@@ -1046,7 +1357,12 @@ export default function Home() {
         );
         params.set(
           "advancedFilters",
-          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+          JSON.stringify(
+            buildRequestAdvancedFilters(
+              appliedAdvancedFilters,
+              advancedValueOptions
+            )
+          )
         );
 
         const res = await fetch(`/api/master_data?${params.toString()}`, {
@@ -1061,6 +1377,8 @@ export default function Home() {
         setDraftColumnStates((prev) => {
           const next = cloneColumnStates(prev);
           next[key].availableValues = data.values || [];
+          next[key].valueCounts = data.valueCounts || {};
+
           if (!next[key].valueFilterEnabled) {
             next[key].selectedValues = [];
           } else {
@@ -1068,6 +1386,7 @@ export default function Home() {
               (data.values || []).includes(value)
             );
           }
+
           return next;
         });
       } catch (e) {
@@ -1095,7 +1414,7 @@ export default function Home() {
       );
       params.set(
         "advancedFilters",
-        JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+        JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions))
       );
 
       const res = await fetch(`/api/master_data?${params.toString()}`, {
@@ -1150,6 +1469,16 @@ export default function Home() {
   useEffect(() => {
     setHeaderStickyTop(0);
   }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    document.body.setAttribute("data-app-theme", themeMode);
+
+    return () => {
+      document.body.removeAttribute("data-app-theme");
+    };
+  }, [themeMode]);
 
     const handleOpenFilter = async (key: FilterKey) => {
       if (openFilterKey === key) {
@@ -1319,6 +1648,7 @@ export default function Home() {
         return;
       }
 
+      setOpenSidebarPanel(null);
       setOpenFilterKey(null);
       setDraftAdvancedFilters(cloneAdvancedFiltersState(appliedAdvancedFilters));
       setOpenAdvancedFilterKey(key);
@@ -1339,6 +1669,12 @@ export default function Home() {
       }
 
       await fetchAdvancedFilterValues(key);
+    };
+
+    const handleOpenSidebarPanel = (key: SidebarPanelKey) => {
+      setOpenFilterKey(null);
+      setOpenAdvancedFilterKey(null);
+      setOpenSidebarPanel((prev) => (prev === key ? null : key));
     };
 
     const clearAdvancedFilter = (key: AdvancedFilterModalKey) => {
@@ -1391,16 +1727,16 @@ export default function Home() {
           </div>
 
           <input
-          value={draftAdvancedFilters.companyName.keyword}
-          onChange={(e) =>
-            setDraftAdvancedFilters((prev) => {
-              const next = cloneAdvancedFiltersState(prev);
-              next.companyName.keyword =e.target.value;
-              return next;
-            })
-          }
-          placeholder="例：株式会社"
-          className="h-11 w-full rounded-xl border border-white/1- bg-[#111827] px-3 text-sm text-slate-100 outline-none placeholder:text-slete-500 focus:border-sky-500" 
+            value={draftAdvancedFilters.companyName.keyword}
+            onChange={(e) =>
+              setDraftAdvancedFilters((prev) => {
+                const next = cloneAdvancedFiltersState(prev);
+                next.companyName.keyword = e.target.value;
+                return next;
+              })
+            }
+            placeholder="例：株式会社"
+            className="h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500"
           />
 
           <div className="mt-3 text-xs text-slate-400">
@@ -1425,6 +1761,10 @@ export default function Home() {
             const isRegionOpen = !!expandedPrefectureRegions[region];
             const regionPrefectures = regionItems.map((item) => item.prefecture);
             const regionCities = regionItems.flatMap((item) => item.cities);
+            const regionCount = regionItems.reduce(
+              (sum, item) => sum + item.prefectureCount,
+              0
+            );
             const isRegionChecked =
               includesAllValues(
                 draftAdvancedFilters.prefectures.prefectures,
@@ -1485,7 +1825,14 @@ export default function Home() {
                     }
                     className="flex-1 text-left text-sm font-semibold text-slate-100"
                   >
-                    {isRegionOpen ? "▼" : "▶"} {region}
+                    <span className="flex items-center justify-between gap-3">
+                      <span>
+                        {isRegionOpen ? "▼" : "▶"} {region}
+                      </span>
+                      <span className="text-sm font-bold text-slate-200">
+                        {regionCount.toLocaleString()}
+                      </span>
+                    </span>
                   </button>
                 </div>
 
@@ -1555,7 +1902,14 @@ export default function Home() {
                               }
                               className="flex-1 text-left text-sm font-medium text-slate-100"
                             >
-                              {isPrefectureOpen ? "▼" : "▶"} {item.prefecture}
+                              <span className="flex items-center justify-between gap-3">
+                                <span>
+                                  {isPrefectureOpen ? "▼" : "▶"} {item.prefecture}
+                                </span>
+                                <span className="text-sm font-bold text-slate-200">
+                                  {item.prefectureCount.toLocaleString()}
+                                </span>
+                              </span>
                             </button>
                           </div>
 
@@ -1592,7 +1946,10 @@ export default function Home() {
                                     }
                                     className="h-4 w-4 accent-sky-500"
                                   />
-                                  <span>{city}</span>
+                                  <span className="min-w-0 flex-1 truncate">{city}</span>
+                                  <span className="shrink-0 text-sm font-bold text-slate-200">
+                                    {(item.cityCounts[city] ?? 0).toLocaleString()}
+                                  </span>
                                 </label>
                               ))}
                             </div>
@@ -1628,6 +1985,10 @@ export default function Home() {
             );
             const parentSmallIndustries = parentItems.flatMap(
               (item) => item.smallIndustries
+            );
+            const parentCount = parentItems.reduce(
+              (sum, item) => sum + item.bigIndustryCount,
+              0
             );
             const isParentChecked =
               includesAllValues(
@@ -1688,7 +2049,14 @@ export default function Home() {
                     }
                     className="flex-1 text-left text-sm font-semibold text-slate-100"
                   >
-                    {isParentOpen ? "▼" : "▶"} {industryParent}
+                    <span className="flex items-center justify-between gap-3">
+                      <span>
+                        {isParentOpen ? "▼" : "▶"} {industryParent}
+                      </span>
+                      <span className="text-sm font-bold text-slate-200">
+                        {parentCount.toLocaleString()}
+                      </span>
+                    </span>
                   </button>
                 </div>
 
@@ -1758,7 +2126,14 @@ export default function Home() {
                               }
                               className="flex-1 text-left text-sm font-medium text-slate-100"
                             >
-                              {isOpen ? "▼" : "▶"} {item.bigIndustry}
+                              <span className="flex items-center justify-between gap-3">
+                                <span>
+                                  {isOpen ? "▼" : "▶"} {item.bigIndustry}
+                                </span>
+                                <span className="text-sm font-bold text-slate-200">
+                                  {item.bigIndustryCount.toLocaleString()}
+                                </span>
+                              </span>
                             </button>
                           </div>
 
@@ -1794,7 +2169,10 @@ export default function Home() {
                                     }
                                     className="h-4 w-4 accent-sky-500"
                                   />
-                                  <span>{smallIndustry}</span>
+                                  <span className="min-w-0 flex-1 truncate">{smallIndustry}</span>
+                                  <span className="shrink-0 text-sm font-bold text-slate-200">
+                                    {(item.smallIndustryCounts[smallIndustry] ?? 0).toLocaleString()}
+                                  </span>
                                 </label>
                               ))}
                             </div>
@@ -2088,7 +2466,14 @@ export default function Home() {
                     }
                     className="flex-1 text-left text-sm font-semibold text-slate-100"
                   >
-                    {isOpen ? "▼" : "▶"} {item.parent}
+                    <span className="flex items-center justify-between gap-3">
+                      <span>
+                        {isOpen ? "▼" : "▶"} {item.parent}
+                      </span>
+                      <span className="text-sm font-bold text-slate-200">
+                        {item.parentCount.toLocaleString()}
+                      </span>
+                    </span>
                   </button>
                 </div>
 
@@ -2115,7 +2500,10 @@ export default function Home() {
                           }
                           className="h-4 w-4 accent-sky-500"
                         />
-                        <span>{tag}</span>
+                        <span className="min-w-0 flex-1 truncate">{tag}</span>
+                        <span className="shrink-0 text-sm font-bold text-slate-200">
+                          {(item.tagCounts[tag] ?? 0).toLocaleString()}
+                        </span>
                       </label>
                     ))}
                   </div>
@@ -2130,9 +2518,180 @@ export default function Home() {
     return null;
   };
 
+  const renderSidebarPanelContent = () => {
+    if (openSidebarPanel === "search") {
+      return (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {ADVANCED_FILTER_BUTTONS.map((button) => {
+            const active = hasActiveAdvancedFilter(
+              button.key,
+              appliedAdvancedFilters
+            );
 
+            return (
+              <button
+                key={button.key}
+                type="button"
+                onClick={() => {
+                  setOpenSidebarPanel(null);
+                  handleOpenAdvancedFilter(button.key);
+                }}
+                className={`h-11 rounded-xl border px-3 text-sm font-medium transition ${
+                  active
+                    ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
+                    : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
+                }`}
+              >
+                {button.label}
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
 
-  const handleImport = async () => {
+    if (openSidebarPanel === "csv") {
+      return (
+        <div className="space-y-4">
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+            className="block w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-sky-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-sky-400"
+          />
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={handleImportClick}
+              disabled={importing}
+              className="h-11 rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {importing ? "取り込み中..." : "CSVを投入"}
+            </button>
+
+            <button
+              onClick={handleExport}
+              className="h-11 rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
+            >
+              CSVをエクスポート
+            </button>
+          </div>
+
+          {importMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {importMessage}
+            </div>
+          )}
+
+          {importError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {importError}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (openSidebarPanel === "inspection") {
+      return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setCrawlConfirmOpen(true)}
+              disabled={crawling}
+              className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
+            >
+              {crawling ? "クローリング中..." : "クローリング"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDedupeConfirmOpen(true)}
+              disabled={deduplicating}
+              className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
+            >
+              {deduplicating ? "重複削除中..." : "重複削除"}
+            </button>
+          </div>
+
+          {crawlMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {crawlMessage}
+            </div>
+          )}
+
+          {crawlError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {crawlError}
+            </div>
+          )}
+
+          {dedupeMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {dedupeMessage}
+            </div>
+          )}
+
+          {dedupeError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {dedupeError}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (openSidebarPanel === "theme") {
+      return (
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => {
+              setThemeMode("light");
+              setOpenSidebarPanel(null);
+            }}
+            className={`h-11 w-full rounded-xl border px-3 text-sm font-medium transition ${
+              themeMode === "light"
+                ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
+                : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
+            }`}
+          >
+            ライト
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setThemeMode("dark");
+              setOpenSidebarPanel(null);
+            }}
+            className={`h-11 w-full rounded-xl border px-3 text-sm font-medium transition ${
+              themeMode === "dark"
+                ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
+                : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
+            }`}
+          >
+            ダーク
+          </button>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+    const handleImportClick = () => {
+    if (!selectedFile) {
+      setImportError("CSVファイルを選択してください");
+      setImportMessage("");
+      return;
+    }
+
+    setImportConfirmOpen(true);
+  };
+
+  const handleImport = async (runDeduplicateFirst: boolean) => {
     if (!selectedFile) {
       setImportError("CSVファイルを選択してください");
       setImportMessage("");
@@ -2140,12 +2699,29 @@ export default function Home() {
     }
 
     setImporting(true);
+    setImportConfirmOpen(false);
     setImportError("");
     setImportMessage("");
 
     try {
+      if (runDeduplicateFirst) {
+        const dedupeRes = await fetch("/api/master_data", {
+          method: "DELETE",
+        });
+
+        const dedupeData = await readApiResponse(dedupeRes);
+
+        if (!dedupeRes.ok || !dedupeData.ok) {
+          throw new Error(dedupeData.error || "重複削除に失敗しました");
+        }
+      }
+
       const formData = new FormData();
       formData.append("file", selectedFile);
+      formData.append(
+        "skipDuplicateCheck",
+        runDeduplicateFirst ? "0" : "1"
+      );
 
       const res = await fetch("/api/master_data", {
         method: "POST",
@@ -2183,7 +2759,7 @@ export default function Home() {
         );
         params.set(
           "advancedFilters",
-          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters))
+          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions))
         );
 
         const sortColumn = COLUMN_DEFS.find(
@@ -2233,6 +2809,225 @@ export default function Home() {
       }
     };
 
+    const toggleCrawlPreviewReflect = (
+      previewRowId: string,
+      key: string,
+      fallbackValue: string | null
+    ) => {
+      setCrawlSelectedChanges((prev) => {
+        const currentRow = { ...(prev[previewRowId] ?? {}) };
+
+        if (currentRow[key]) {
+          delete currentRow[key];
+        } else if (fallbackValue) {
+          currentRow[key] = fallbackValue;
+        }
+
+        const next = { ...prev };
+
+        if (Object.keys(currentRow).length === 0) {
+          delete next[previewRowId];
+        } else {
+          next[previewRowId] = currentRow;
+        }
+
+        return next;
+      });
+    };
+
+    const toggleCrawlPreviewCandidate = (
+      previewRowId: string,
+      key: string,
+      candidate: string
+    ) => {
+      setCrawlSelectedChanges((prev) => {
+        const currentRow = { ...(prev[previewRowId] ?? {}) };
+
+        if (currentRow[key] === candidate) {
+          delete currentRow[key];
+        } else {
+          currentRow[key] = candidate;
+        }
+
+        const next = { ...prev };
+
+        if (Object.keys(currentRow).length === 0) {
+          delete next[previewRowId];
+        } else {
+          next[previewRowId] = currentRow;
+        }
+
+        return next;
+      });
+    };
+
+  const handleCrawl = async () => {
+    setCrawling(true);
+    setCrawlConfirmOpen(false);
+    setCrawlPreviewOpen(false);
+    setCrawlPreviewRows([]);
+    setCrawlSelectedChanges({});
+    setCrawlMessage("");
+    setCrawlError("");
+
+    try {
+      const body: Record<string, unknown> = {
+        filterModels: buildRequestFilterModels(appliedColumnStates),
+        advancedFilters: buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions),
+        previewOnly: true,
+      };
+
+      const sortColumn = COLUMN_DEFS.find(
+        (column) => appliedColumnStates[column.key].sortDirection !== ""
+      );
+
+      if (sortColumn) {
+        body.sortKey = sortColumn.key;
+        body.sortDirection = appliedColumnStates[sortColumn.key].sortDirection;
+      }
+
+      const res = await fetch("/api/master_data/crawl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "クローリング確認に失敗しました");
+      }
+
+      const previewRows = data.previewRows || [];
+
+      if (previewRows.length === 0) {
+        setCrawlMessage("保存候補はありませんでした");
+        return;
+      }
+
+      const initialSelectedChanges = previewRows.reduce(
+        (acc, row) => {
+          const selectedEntries = row.changes
+            .map((change) => {
+              const defaultValue =
+                change.candidates.length > 1
+                  ? ""
+                  : change.after ?? change.candidates[0] ?? "";
+
+              return defaultValue ? [change.key, defaultValue] as [string, string] : null;
+            })
+            .filter((entry): entry is [string, string] => entry !== null);
+
+          if (selectedEntries.length > 0) {
+            acc[row.preview_row_id] = Object.fromEntries(selectedEntries);
+          }
+
+          return acc;
+        },
+        {} as Record<string, Record<string, string>>
+      );
+
+      setCrawlSelectedChanges(initialSelectedChanges);
+      setCrawlPreviewRows(previewRows);
+      setCrawlPreviewOpen(true);
+    } catch (e) {
+      setCrawlError(
+        e instanceof Error ? e.message : "クローリング確認でエラーが発生しました"
+      );
+    } finally {
+      setCrawling(false);
+    }
+  };
+
+  const handleCrawlSave = async () => {
+    setCrawling(true);
+    setCrawlMessage("");
+    setCrawlError("");
+
+    try {
+      const body: Record<string, unknown> = {
+        filterModels: buildRequestFilterModels(appliedColumnStates),
+        advancedFilters: buildRequestAdvancedFilters(appliedAdvancedFilters),
+        previewOnly: false,
+        selectedChanges: crawlSelectedChanges,
+      };
+
+      const sortColumn = COLUMN_DEFS.find(
+        (column) => appliedColumnStates[column.key].sortDirection !== ""
+      );
+
+      if (sortColumn) {
+        body.sortKey = sortColumn.key;
+        body.sortDirection = appliedColumnStates[sortColumn.key].sortDirection;
+      }
+
+      const res = await fetch("/api/master_data/crawl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "クローリング保存に失敗しました");
+      }
+
+      setCrawlPreviewOpen(false);
+      setCrawlPreviewRows([]);
+      setCrawlSelectedChanges({});
+
+      setCrawlMessage(
+        data.message ||
+          `処理対象 ${data.processed ?? 0} 件 / 更新 ${data.updated ?? 0} 件 / スキップ ${data.skipped ?? 0} 件 / 失敗 ${data.failed ?? 0} 件`
+      );
+
+      await fetchData();
+    } catch (e) {
+      setCrawlError(
+        e instanceof Error ? e.message : "クローリング保存でエラーが発生しました"
+      );
+    } finally {
+      setCrawling(false);
+    }
+  };
+
+  const handleDeduplicate = async () => {
+    setDeduplicating(true);
+    setDedupeMessage("");
+    setDedupeError("");
+
+    try {
+      const res = await fetch("/api/master_data", {
+        method: "DELETE",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "重複削除に失敗しました");
+      }
+
+      setDedupeMessage(
+        data.message ||
+          `${data.deleted?.toLocaleString() ?? 0}件の重複データを削除しました`
+      );
+
+      setPage(1);
+      await fetchData();
+    } catch (e) {
+      setDedupeError(
+        e instanceof Error ? e.message : "重複削除でエラーが発生しました"
+      );
+    } finally {
+      setDeduplicating(false);
+    }
+  };
+
   const pageNumbers = useMemo(() => {
     if (limit === "all") return [1];
 
@@ -2249,6 +3044,19 @@ export default function Home() {
 
   const usingVirtual = false;
 
+  const activeSidebarPanelTitle = openSidebarPanel
+    ? SIDEBAR_PANEL_TITLES[openSidebarPanel]
+    : "";
+
+  const sidebarPanelMaxWidthClass =
+    openSidebarPanel === "csv"
+      ? "max-w-[920px]"
+      : openSidebarPanel === "search"
+      ? "max-w-[720px]"
+      : openSidebarPanel === "theme"
+      ? "max-w-[420px]"
+      : "max-w-[520px]";
+
   const activeAdvancedFilterTitle = openAdvancedFilterKey
     ? ADVANCED_FILTER_TITLES[openAdvancedFilterKey]
     : "";
@@ -2261,21 +3069,84 @@ export default function Home() {
     activeAdvancedFilterKey === "tag";
 
   return (
-    <main className="min-h-screen bg-transparent text-slate-100">
-      <div className="mx-auto max-w-[1880px] px-6 py-6">
+    <main
+      data-theme={themeMode}
+      className="h-[100dvh] overflow-hidden bg-transparent text-slate-100"
+    >
+      <div
+        className={`mx-auto flex h-full max-w-[1880px] flex-col pr-6 py-6 transition-all duration-300 ${
+          sidebarOpen ? "pl-[276px]" : "pl-[148px]"
+        }`}
+      >
+
+        <aside
+          className={`fixed left-6 top-6 z-40 transition-all duration-300 ${
+            sidebarOpen ? "w-[220px]" : "w-[92px]"
+          }`}
+        >
+          <div className="rounded-[28px] border border-white/10 bg-[#08101d]/90 p-2 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+            <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/85 p-3">
+              <div
+                className={`mb-3 flex items-center ${
+                  sidebarOpen ? "justify-between" : "justify-center"
+                }`}
+              >
+                {sidebarOpen && (
+                  <div className="px-2 text-sm font-semibold text-slate-200">
+                    メニュー
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen((prev) => !prev)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-200 transition hover:bg-white/10"
+                >
+                  {sidebarOpen ? "←" : "→"}
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {SIDEBAR_MENU_ITEMS.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => handleOpenSidebarPanel(item.key)}
+                    className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-medium transition ${
+                      openSidebarPanel === item.key
+                        ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
+                        : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                    } ${sidebarOpen ? "justify-start" : "justify-center"}`}
+                  >
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f172a]">
+                      <SidebarMenuIcon menuKey={item.key} />
+                    </span>
+
+                    {sidebarOpen && (
+                      <span className="truncate">{item.label}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </aside>
+
         <div
           ref={topPanelRef}
           className="sticky top-0 z-30 mb-6 rounded-[28px] border border-white/10 bg-[#08101d]/80 p-2 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
         >
           <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/85 p-6">
-            <div className="mb-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div>
-                <h1 className="text-3xl font-bold tracking-tight text-white">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex items-center gap-6">
+                <MasterDataBrandLogo className="h-auto w-[280px] shrink-0 md:w-[340px]" />
+
+                <h1 className="master-data-brand-title text-[40px] leading-none md:text-[54px]">
                   マスタデータ
                 </h1>
               </div>
 
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
                 <div className="flex min-h-[96px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-center">
                   <div className="text-xs text-slate-400">総件数</div>
                   <div className="mt-2 text-xl font-semibold text-white">
@@ -2318,90 +3189,42 @@ export default function Home() {
                 </div>
               </div>
             </div>
-
-            <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="mb-3 text-sm font-semibold text-slate-200">
-                絞り込み
-              </div>
-
-              <div className="grid grid-cols-8 gap-3">
-                {ADVANCED_FILTER_BUTTONS.map((button, index) => {
-                  const active = hasActiveAdvancedFilter(
-                    button.key,
-                    appliedAdvancedFilters
-                  );
-
-                  return (
-                    <button
-                      key={button.key}
-                      type="button"
-                      onClick={() => handleOpenAdvancedFilter(button.key)}
-                      className={`col-span-2 h-11 w-full whitespace-nowrap rounded-xl border px-3 text-sm font-medium transition ${
-                        index === 4
-                          ? "col-start-2 "
-                          : index === 5
-                          ? "col-start-4 "
-                          : index === 6
-                          ? "col-start-6 "
-                          : ""
-                      }${
-                        active
-                          ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
-                          : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
-                      }`}
-                    >
-                      {button.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="mb-3 text-sm font-semibold text-slate-200">
-                CSV取込
-              </div>
-
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-                  className="block w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-sky-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-sky-400"
-                />
-
-                <div className="flex shrink-0 gap-3">
-                  <button
-                    onClick={handleImport}
-                    disabled={importing}
-                    className="h-11 rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
-                  >
-                    {importing ? "取り込み中..." : "CSVを投入"}
-                  </button>
-
-                  <button
-                    onClick={handleExport}
-                    className="h-11 rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
-                  >
-                    CSVをエクスポート
-                  </button>
-                </div>
-              </div>
-
-              {importMessage && (
-                <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                  {importMessage}
-                </div>
-              )}
-
-              {importError && (
-                <div className="mt-3 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                  {importError}
-                </div>
-              )}
-            </div>
           </div>
-        </div>
+
+        {openSidebarPanel &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => setOpenSidebarPanel(null)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className={`flex w-full ${sidebarPanelMaxWidthClass} flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      {activeSidebarPanelTitle}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setOpenSidebarPanel(null)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    {renderSidebarPanelContent()}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
         {activeAdvancedFilterKey &&
           typeof document !== "undefined" &&
@@ -2491,14 +3314,340 @@ export default function Home() {
           </div>
         )}
 
+        {crawlConfirmOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => !crawling && setCrawlConfirmOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    クローリング確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    現在の絞り込み結果に対してクローリングを実行し、
+                    保存前に変更候補を一覧で表示します。
+                    <br />
+                    内容を確認してから「はい」で保存できます。
+                    <br />
+                    変更候補を確認してよろしいですか？
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setCrawlConfirmOpen(false)}
+                      disabled={crawling}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCrawl}
+                      disabled={crawling}
+                      className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      {crawling ? "実行中..." : "はい"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+          {crawlPreviewOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                onClick={() => !crawling && setCrawlPreviewOpen(false)}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                      クローリング結果確認
+                    </div>
+
+                    <div className="max-h-[70vh] overflow-y-auto px-4 py-4 space-y-4">
+                      {crawlPreviewRows.map((row, rowIndex) => (
+                        <div
+                          key={`${row.row_id}-${rowIndex}`}
+                          className="rounded-xl border border-white/10 bg-[#0f172a] p-4"
+                        >
+                          <div className="text-sm font-semibold text-slate-100">
+                            {row.company || "(企業名なし)"}
+                          </div>
+
+                          <div className="mt-1 text-xs break-all">
+                            {row.website_url ? (
+                              <a
+                                href={row.website_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-sky-300 underline underline-offset-2 transition hover:text-sky-200"
+                                title={row.website_url}
+                              >
+                                {row.website_url}
+                              </a>
+                            ) : (
+                              <span className="text-slate-500">-</span>
+                            )}
+                          </div>
+
+                          <div className="mt-4 space-y-2">
+                            <div className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]">
+                              <div className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-300">
+                                反映
+                              </div>
+                              <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                項目
+                              </div>
+                              <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                変更前
+                              </div>
+                              <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                変更候補
+                              </div>
+                            </div>
+
+                            {row.changes.map((change, changeIndex) => {
+                              const selectedValue =
+                                crawlSelectedChanges[row.preview_row_id]?.[
+                                  change.key
+                                ] ?? "";
+
+                              const checked = selectedValue !== "";
+                              const displayValue =
+                                change.after ?? change.candidates[0] ?? null;
+                              const hasMultipleCandidates =
+                                change.candidates.length > 1;
+
+                              return (
+                                <div
+                                  key={`${row.preview_row_id}-${change.key}-${changeIndex}`}
+                                  className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]"
+                                >
+                                  <div className="flex items-center justify-center rounded-lg bg-white/5 px-2 py-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() =>
+                                        toggleCrawlPreviewReflect(
+                                          row.preview_row_id,
+                                          change.key,
+                                          displayValue
+                                        )
+                                      }
+                                      className="h-4 w-4 accent-amber-500"
+                                    />
+                                  </div>
+
+                                  <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-medium text-slate-200">
+                                    {change.label}
+                                  </div>
+
+                                  <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                                    <PreviewChangeValue
+                                      changeKey={change.key}
+                                      value={change.before}
+                                    />
+                                  </div>
+
+                                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                                    {hasMultipleCandidates ? (
+                                      <div className="space-y-2">
+                                        {change.candidates.map(
+                                          (candidate, candidateIndex) => {
+                                            const candidateChecked =
+                                              selectedValue === candidate;
+
+                                            return (
+                                              <label
+                                                key={`${row.preview_row_id}-${change.key}-${candidateIndex}`}
+                                                className="flex items-start gap-2"
+                                              >
+                                                <input
+                                                  type="checkbox"
+                                                  checked={candidateChecked}
+                                                  onChange={() =>
+                                                    toggleCrawlPreviewCandidate(
+                                                      row.preview_row_id,
+                                                      change.key,
+                                                      candidate
+                                                    )
+                                                  }
+                                                  className="mt-0.5 h-4 w-4 accent-amber-500"
+                                                />
+                                                <span className="break-all">
+                                                  {candidate}
+                                                </span>
+                                              </label>
+                                            );
+                                          }
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <PreviewChangeValue
+                                        changeKey={change.key}
+                                        value={displayValue}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                      <button
+                        type="button"
+                        onClick={() => setCrawlPreviewOpen(false)}
+                        disabled={crawling}
+                        className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        いいえ
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleCrawlSave}
+                        disabled={crawling}
+                        className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                      >
+                        {crawling ? "保存中..." : "はい"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+        {dedupeConfirmOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => !deduplicating && setDedupeConfirmOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    重複削除確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    企業名の完全一致で重複データを削除します。
+                    <br />
+                    本当に重複削除しますか？
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setDedupeConfirmOpen(false)}
+                      disabled={deduplicating}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDeduplicate}
+                      disabled={deduplicating}
+                      className="h-10 flex-1 rounded-xl bg-rose-500 px-3 text-sm font-medium text-white transition hover:bg-rose-400 disabled:opacity-50"
+                    >
+                      {deduplicating ? "実行中..." : "はい"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {importConfirmOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => !importing && setImportConfirmOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    CSV投入確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    CSVを投入する前に、既存データの重複削除を行うか選んでください。
+                  </div>
+
+                  <div className="grid gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-3">
+                    <button
+                      type="button"
+                      onClick={() => setImportConfirmOpen(false)}
+                      disabled={importing}
+                      className="h-10 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleImport(false)}
+                      disabled={importing}
+                      className="h-10 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+                    >
+                      {importing ? "取り込み中..." : "重複削除しないで投入"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleImport(true)}
+                      disabled={importing}
+                      className="h-10 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+                    >
+                      {importing ? "取り込み中..." : "重複削除して投入"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
         {error && (
           <div className="mb-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
             エラー: {error}
           </div>
         )}
+        </div>
 
-        <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/90 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
-          <div className="overflow-auto max-h-[70vh]">
+        <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-white/10 bg-[#0b1326]/90 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
+          <div className="flex-1 overflow-auto">
             <div className="min-w-[5200px]">
               <div
                 className="sticky z-20 grid border-b border-white/10 bg-[#162033]/95 backdrop-blur-xl"
@@ -2558,6 +3707,7 @@ export default function Home() {
                       <Cell title={row.small_industry || ""}><EmptyValue value={row.small_industry} /></Cell>
                       <Cell title={row.company_kana || ""}><EmptyValue value={row.company_kana} /></Cell>
                       <Cell title={row.summary || ""} className="whitespace-pre-wrap"><EmptyValue value={row.summary} /></Cell>
+                      <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
                       <Cell title={row.website_url || ""}><LinkCell url={row.website_url} /></Cell>
                       <Cell title={row.form_url || ""}><LinkCell url={row.form_url} /></Cell>
                       <Cell title={row.phone || ""}><EmptyValue value={row.phone} /></Cell>
@@ -2585,7 +3735,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-2">
+        <div className="mt-5 shrink-0 flex flex-wrap items-center justify-center gap-2">
           <button
             onClick={() => setPage(1)}
             disabled={page <= 1 || limit === "all"}
@@ -2634,6 +3784,223 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      {/* テーマ：ライト */}
+      <style jsx global>{`
+        main[data-theme="light"] {
+          background: #f8fafc;
+          color: #0f172a;
+        }
+
+        body[data-app-theme="light"] {
+          color: #0f172a;
+        }
+
+        main[data-theme="light"] [class*="bg-[#08101d]"],
+        body[data-app-theme="light"] [class*="bg-[#08101d]"] {
+          background: rgba(255, 255, 255, 0.96) !important;
+        }
+
+        main[data-theme="light"] [class*="bg-[#0b1326]"],
+        body[data-app-theme="light"] [class*="bg-[#0b1326]"],
+        main[data-theme="light"] [class*="bg-[#0b1220]"],
+        body[data-app-theme="light"] [class*="bg-[#0b1220]"],
+        main[data-theme="light"] [class*="bg-[#0f172a]"],
+        body[data-app-theme="light"] [class*="bg-[#0f172a]"],
+        main[data-theme="light"] [class*="bg-[#111827]"],
+        body[data-app-theme="light"] [class*="bg-[#111827]"],
+        main[data-theme="light"] [class*="bg-[#162033]"],
+        body[data-app-theme="light"] [class*="bg-[#162033]"] {
+          background: #ffffff !important;
+        }
+
+        main[data-theme="light"] [class*="bg-slate-950/70"],
+        body[data-app-theme="light"] [class*="bg-slate-950/70"] {
+          background: rgba(15, 23, 42, 0.18) !important;
+        }
+
+        main[data-theme="light"] [class*="bg-white/5"],
+        body[data-app-theme="light"] [class*="bg-white/5"] {
+          background: rgba(15, 23, 42, 0.04) !important;
+        }
+
+        main[data-theme="light"] [class*="border-white/10"],
+        body[data-app-theme="light"] [class*="border-white/10"] {
+          border-color: rgba(15, 23, 42, 0.12) !important;
+        }
+
+        main[data-theme="light"] [class*="border-white/5"],
+        body[data-app-theme="light"] [class*="border-white/5"] {
+          border-color: rgba(15, 23, 42, 0.08) !important;
+        }
+
+        main[data-theme="light"] [class*="text-white"],
+        body[data-app-theme="light"] [class*="text-white"],
+        main[data-theme="light"] [class*="text-slate-100"],
+        body[data-app-theme="light"] [class*="text-slate-100"],
+        main[data-theme="light"] [class*="text-slate-200"],
+        body[data-app-theme="light"] [class*="text-slate-200"] {
+          color: #0f172a !important;
+        }
+
+        main[data-theme="light"] [class*="text-slate-300"],
+        body[data-app-theme="light"] [class*="text-slate-300"] {
+          color: #334155 !important;
+        }
+
+        main[data-theme="light"] [class*="text-slate-400"],
+        body[data-app-theme="light"] [class*="text-slate-400"],
+        main[data-theme="light"] [class*="text-slate-500"],
+        body[data-app-theme="light"] [class*="text-slate-500"] {
+          color: #64748b !important;
+        }
+
+        main[data-theme="light"] button[class*="bg-sky-500"],
+        body[data-app-theme="light"] button[class*="bg-sky-500"],
+        main[data-theme="light"] button[class*="bg-emerald-500"],
+        body[data-app-theme="light"] button[class*="bg-emerald-500"],
+        main[data-theme="light"] button[class*="bg-amber-500"],
+        body[data-app-theme="light"] button[class*="bg-amber-500"],
+        main[data-theme="light"] button[class*="bg-rose-500"],
+        body[data-app-theme="light"] button[class*="bg-rose-500"] {
+          color: #ffffff !important;
+        }
+
+        main[data-theme="light"] button[class*="bg-sky-500/20"],
+        body[data-app-theme="light"] button[class*="bg-sky-500/20"],
+        main[data-theme="light"] button[class*="bg-sky-500/20"] *,
+        body[data-app-theme="light"] button[class*="bg-sky-500/20"] * {
+          color: #0f172a !important;
+        }
+
+        main[data-theme="light"] [class*="text-sky-100"],
+        body[data-app-theme="light"] [class*="text-sky-100"] {
+          color: #0f172a !important;
+        }
+
+        main[data-theme="light"] input[type="checkbox"],
+        body[data-app-theme="light"] input[type="checkbox"] {
+          accent-color: #2563eb;
+        }
+
+        main[data-theme="light"] select,
+        body[data-app-theme="light"] select,
+        main[data-theme="light"] option,
+        body[data-app-theme="light"] option {
+          color: #0f172a !important;
+          background: #ffffff !important;
+        }
+
+        main[data-theme="light"] [class*="hover:bg-white/10"]:hover,
+        body[data-app-theme="light"] [class*="hover:bg-white/10"]:hover,
+        main[data-theme="light"] [class*="hover:bg-white/5"]:hover,
+        body[data-app-theme="light"] [class*="hover:bg-white/5"]:hover {
+          background: rgba(15, 23, 42, 0.08) !important;
+        }
+
+        main[data-theme="dark"] .master-data-brand-logo,
+        body[data-app-theme="dark"] .master-data-brand-logo {
+          --mdb-gold-1: #f8e7c5;
+          --mdb-gold-2: #ddb879;
+          --mdb-gold-3: #b98542;
+          --mdb-gold-text: #f1d4a4;
+          filter:
+            drop-shadow(0 18px 36px rgba(0, 0, 0, 0.34))
+            drop-shadow(0 4px 14px rgba(247, 227, 191, 0.18));
+        }
+
+        main[data-theme="light"] .master-data-brand-logo,
+        body[data-app-theme="light"] .master-data-brand-logo {
+          --mdb-gold-1: #d8ad64;
+          --mdb-gold-2: #b27c35;
+          --mdb-gold-3: #7e5320;
+          --mdb-gold-text: #8f6327;
+          filter:
+            drop-shadow(0 14px 28px rgba(15, 23, 42, 0.18))
+            drop-shadow(0 2px 10px rgba(255, 247, 230, 0.96));
+        }
+
+        .master-data-brand-logo__gold-stop-1 {
+          stop-color: var(--mdb-gold-1);
+        }
+
+        .master-data-brand-logo__gold-stop-2 {
+          stop-color: var(--mdb-gold-2);
+        }
+
+        .master-data-brand-logo__gold-stop-3 {
+          stop-color: var(--mdb-gold-3);
+        }
+
+        .master-data-brand-logo__label,
+        .master-data-brand-logo__sub {
+          fill: var(--mdb-gold-text);
+        }
+
+        .master-data-brand-logo__display {
+          font-family:
+            "Cormorant Garamond",
+            "Bodoni Moda",
+            "Didot",
+            "Times New Roman",
+            serif;
+          text-rendering: geometricPrecision;
+        }
+
+        .master-data-brand-logo__display-alt {
+          font-family:
+            "Cormorant Garamond",
+            "Playfair Display",
+            "Bodoni Moda",
+            "Didot",
+            "Times New Roman",
+            serif;
+          text-rendering: geometricPrecision;
+        }
+
+        .master-data-brand-logo__wordmark {
+          font-family:
+            "Playfair Display",
+            "Cormorant Garamond",
+            "Bodoni Moda",
+            "Didot",
+            "Times New Roman",
+            serif;
+          text-rendering: geometricPrecision;
+        }
+
+        .master-data-brand-title {
+          font-family:
+            "Cormorant Garamond",
+            "Bodoni Moda",
+            "Didot",
+            "Yu Mincho",
+            "Hiragino Mincho ProN",
+            "MS PMincho",
+            serif;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          line-height: 0.95;
+          white-space: nowrap;
+        }
+
+        main[data-theme="dark"] .master-data-brand-title,
+        body[data-app-theme="dark"] .master-data-brand-title {
+          color: #f1d4a4 !important;
+          text-shadow:
+            0 14px 32px rgba(0, 0, 0, 0.30),
+            0 2px 10px rgba(247, 227, 191, 0.12);
+        }
+
+        main[data-theme="light"] .master-data-brand-title,
+        body[data-app-theme="light"] .master-data-brand-title {
+          color: #8f6327 !important;
+          text-shadow:
+            0 10px 24px rgba(15, 23, 42, 0.12),
+            0 1px 0 rgba(255, 255, 255, 0.70);
+        }
+      `}</style>
+
     </main>
   );
 }

@@ -9,6 +9,7 @@ const FILTER_COLUMN_MAP = {
   small_industry: `"小業種名"`,
   company_kana: `"企業名（かな）"`,
   summary: `"企業概要"`,
+  business_content: `"事業内容"`,
   website_url: `"企業サイトURL"`,
   form_url: `"問い合わせフォームURL"`,
   phone: `"電話番号"`,
@@ -101,6 +102,7 @@ const CSV_COLUMNS = [
   "小業種名",
   "企業名（かな）",
   "企業概要",
+  "事業内容",
   "企業サイトURL",
   "問い合わせフォームURL",
   "電話番号",
@@ -738,41 +740,63 @@ export async function GET(req: NextRequest) {
     const advancedValuesFor = searchParams.get("advancedValuesFor");
 
     if (advancedValuesFor === "prefecture") {
-      const { whereSql, params } = buildWhereClause(searchParams);
-
       const sql = `
         SELECT
-          ${PREFECTURE_EXPR} AS prefecture,
-          ${CITY_EXPR} AS city
-        FROM public.master_data
-        ${whereSql}
+          prefecture,
+          city,
+          COUNT(*)::int AS count
+        FROM (
+          SELECT
+            ${PREFECTURE_EXPR} AS prefecture,
+            ${CITY_EXPR} AS city
+          FROM public.master_data
+        ) src
+        WHERE prefecture IS NOT NULL
+        GROUP BY prefecture, city
+        ORDER BY prefecture ASC, city ASC
       `;
 
-      const res = await pool.query(sql, params);
+      const res = await pool.query(sql);
       const cityMap = new Map<string, Set<string>>();
+      const prefectureCountMap = new Map<string, number>();
+      const cityCountMap = new Map<string, Record<string, number>>();
 
       res.rows.forEach((row) => {
         const prefecture =
           typeof row.prefecture === "string" ? row.prefecture.trim() : "";
         const city = typeof row.city === "string" ? row.city.trim() : "";
+        const count = Number(row.count ?? 0);
 
         if (!prefecture) return;
+
+        prefectureCountMap.set(
+          prefecture,
+          (prefectureCountMap.get(prefecture) ?? 0) + count
+        );
 
         if (!cityMap.has(prefecture)) {
           cityMap.set(prefecture, new Set<string>());
         }
 
+        if (!cityCountMap.has(prefecture)) {
+          cityCountMap.set(prefecture, {});
+        }
+
         if (city) {
           cityMap.get(prefecture)?.add(city);
+          cityCountMap.get(prefecture)![city] =
+            (cityCountMap.get(prefecture)?.[city] ?? 0) + count;
         }
       });
 
       const items = PREFECTURE_NAMES.filter((prefecture) =>
-        cityMap.has(prefecture)
+        prefectureCountMap.has(prefecture)
       ).map((prefecture) => ({
         region: PREFECTURE_TO_REGION[prefecture],
         prefecture,
+        prefectureCount: prefectureCountMap.get(prefecture) ?? 0,
         cities: Array.from(cityMap.get(prefecture) ?? []).sort(),
+        cityCounts: cityCountMap.get(prefecture) ?? {},
       }));
 
       return NextResponse.json({
@@ -784,18 +808,19 @@ export async function GET(req: NextRequest) {
     }
 
     if (advancedValuesFor === "industry") {
-      const { whereSql, params } = buildWhereClause(searchParams);
-
       const sql = `
         SELECT
           ${BIG_INDUSTRY_TEXT} AS big_industry,
-          ${SMALL_INDUSTRY_TEXT} AS small_industry
+          ${SMALL_INDUSTRY_TEXT} AS small_industry,
+          COUNT(*)::int AS count
         FROM public.master_data
-        ${whereSql}
+        GROUP BY 1, 2
       `;
 
-      const res = await pool.query(sql, params);
+      const res = await pool.query(sql);
       const smallMap = new Map<string, Set<string>>();
+      const bigCountMap = new Map<string, number>();
+      const smallCountMap = new Map<string, Record<string, number>>();
 
       res.rows.forEach((row) => {
         const bigIndustry =
@@ -804,25 +829,39 @@ export async function GET(req: NextRequest) {
           typeof row.small_industry === "string"
             ? row.small_industry.trim()
             : "";
+        const count = Number(row.count ?? 0);
 
         if (!bigIndustry) return;
+
+        bigCountMap.set(
+          bigIndustry,
+          (bigCountMap.get(bigIndustry) ?? 0) + count
+        );
 
         if (!smallMap.has(bigIndustry)) {
           smallMap.set(bigIndustry, new Set<string>());
         }
 
+        if (!smallCountMap.has(bigIndustry)) {
+          smallCountMap.set(bigIndustry, {});
+        }
+
         if (smallIndustry) {
           smallMap.get(bigIndustry)?.add(smallIndustry);
+          smallCountMap.get(bigIndustry)![smallIndustry] =
+            (smallCountMap.get(bigIndustry)?.[smallIndustry] ?? 0) + count;
         }
       });
 
-      const items = Array.from(smallMap.entries())
-        .map(([bigIndustry, smallIndustries]) => ({
+      const items = Array.from(smallMap.keys())
+        .map((bigIndustry) => ({
           industryParent: resolveIndustryParent(bigIndustry),
           bigIndustry,
-          smallIndustries: Array.from(smallIndustries).sort((a, b) =>
+          bigIndustryCount: bigCountMap.get(bigIndustry) ?? 0,
+          smallIndustries: Array.from(smallMap.get(bigIndustry) ?? []).sort((a, b) =>
             a.localeCompare(b, "ja")
           ),
+          smallIndustryCounts: smallCountMap.get(bigIndustry) ?? {},
         }))
         .sort((a, b) => {
           const parentIndexA = INDUSTRY_PARENT_SORT_ORDER.indexOf(
@@ -899,28 +938,27 @@ export async function GET(req: NextRequest) {
     }
 
     if (advancedValuesFor === "tag") {
-      const { whereSql, params } = buildWhereClause(searchParams);
-
-      const tagWhereSql = whereSql
-        ? `${whereSql} AND NULLIF(BTRIM(tag_value), '') IS NOT NULL`
-        : `WHERE NULLIF(BTRIM(tag_value), '') IS NOT NULL`;
-
       const sql = `
-        SELECT DISTINCT
+        SELECT
           BTRIM(tag_value) AS tag,
-          ${TAG_PARENT_CASE_FROM_SPLIT} AS parent
+          ${TAG_PARENT_CASE_FROM_SPLIT} AS parent,
+          COUNT(*)::int AS count
         FROM public.master_data
         CROSS JOIN LATERAL regexp_split_to_table(COALESCE("新規登録タグ"::text, ''), E'\\s*;\\s*') AS tag_value
-        ${tagWhereSql}
+        WHERE NULLIF(BTRIM(tag_value), '') IS NOT NULL
+        GROUP BY 1, 2
         ORDER BY parent ASC, tag ASC
       `;
 
-      const res = await pool.query(sql, params);
+      const res = await pool.query(sql);
       const tagsByParent: Record<string, string[]> = {};
+      const tagCountsByParent: Record<string, Record<string, number>> = {};
+      const parentCountMap = new Map<string, number>();
 
       res.rows.forEach((row) => {
         const parent = typeof row.parent === "string" ? row.parent.trim() : "";
         const tag = typeof row.tag === "string" ? row.tag.trim() : "";
+        const count = Number(row.count ?? 0);
 
         if (!parent || !tag) return;
 
@@ -928,9 +966,21 @@ export async function GET(req: NextRequest) {
           tagsByParent[parent] = [];
         }
 
+        if (!tagCountsByParent[parent]) {
+          tagCountsByParent[parent] = {};
+        }
+
         if (!tagsByParent[parent].includes(tag)) {
           tagsByParent[parent].push(tag);
         }
+
+        tagCountsByParent[parent][tag] =
+          (tagCountsByParent[parent][tag] ?? 0) + count;
+
+        parentCountMap.set(
+          parent,
+          (parentCountMap.get(parent) ?? 0) + count
+        );
       });
 
       Object.keys(tagsByParent).forEach((parent) => {
@@ -942,10 +992,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         parents,
-        tags: Array.from(new Set(res.rows.map((row) => row.tag).filter(Boolean))).sort(),
+        tags: Array.from(
+          new Set(res.rows.map((row) => row.tag).filter(Boolean))
+        ).sort(),
         items: parents.map((parent) => ({
           parent,
+          parentCount: parentCountMap.get(parent) ?? 0,
           tags: tagsByParent[parent],
+          tagCounts: tagCountsByParent[parent] ?? {},
         })),
       });
     }
@@ -956,18 +1010,30 @@ export async function GET(req: NextRequest) {
       const valueColumnText = `COALESCE(${FILTER_COLUMN_MAP[valuesFor]}::text, '')`;
 
       const valuesSql = `
-        SELECT DISTINCT ${valueColumnText} AS value
-        FROM public.master_data
-        ${whereSql}
-        ORDER BY ${valueColumnText} ASC
+        SELECT
+          value,
+          COUNT(*)::int AS count
+        FROM (
+          SELECT ${valueColumnText} AS value
+          FROM public.master_data
+          ${whereSql}
+        ) src
+        GROUP BY value
+        ORDER BY value ASC
         LIMIT 300
       `;
 
       const valuesRes = await pool.query(valuesSql, params);
 
+      const values = valuesRes.rows.map((row) => row.value ?? "");
+      const valueCounts = Object.fromEntries(
+        valuesRes.rows.map((row) => [row.value ?? "", Number(row.count ?? 0)])
+      );
+
       return NextResponse.json({
         ok: true,
-        values: valuesRes.rows.map((row) => row.value ?? ""),
+        values,
+        valueCounts,
       });
     }
 
@@ -995,6 +1061,7 @@ export async function GET(req: NextRequest) {
         "小業種名" AS small_industry,
         "企業名（かな）" AS company_kana,
         "企業概要" AS summary,
+        "事業内容" AS business_content,
         "企業サイトURL" AS website_url,
         "問い合わせフォームURL" AS form_url,
         "電話番号" AS phone,
@@ -1056,6 +1123,9 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const file = formData.get("file");
 
+    const skipDuplicateCheck =
+    formData.get("skipDuplicateCheck") === "1";
+
     if (!(file instanceof File)) {
       return NextResponse.json(
         { ok: false, error: "CSVファイルが選択されていません" },
@@ -1111,12 +1181,78 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let recordsToInsert = records;
+    let skipped = 0;
+
+    if (!skipDuplicateCheck) {
+      const csvCompanies = Array.from(
+        new Set(
+          records
+            .map((record) => record["企業名"]?.trim() ?? "")
+            .filter((company) => company !== "")
+        )
+      );
+
+      const existingCompanySet = new Set<string>();
+
+      if (csvCompanies.length > 0) {
+        const existingRes = await client.query(
+          `
+            SELECT "企業名"
+            FROM public.master_data
+            WHERE "企業名" = ANY($1::text[])
+          `,
+          [csvCompanies]
+        );
+
+        existingRes.rows.forEach((row) => {
+          const company =
+            typeof row["企業名"] === "string" ? row["企業名"].trim() : "";
+
+          if (company !== "") {
+            existingCompanySet.add(company);
+          }
+        });
+      }
+
+      const seenCsvCompanySet = new Set<string>();
+
+      recordsToInsert = records.filter((record) => {
+        const company = record["企業名"]?.trim() ?? "";
+
+        if (company === "") {
+          return true;
+        }
+
+        if (existingCompanySet.has(company)) {
+          return false;
+        }
+
+        if (seenCsvCompanySet.has(company)) {
+          return false;
+        }
+
+        seenCsvCompanySet.add(company);
+        return true;
+      });
+
+      skipped = records.length - recordsToInsert.length;
+    }
+
+    if (recordsToInsert.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        inserted: 0,
+        message: `0件を取り込みました（重複 ${skipped.toLocaleString()} 件をスキップ）`,
+      });
+    }
+
     await client.query("BEGIN");
 
     const batchSize = 300;
 
-    for (let i = 0; i < records.length; i += batchSize) {
-      const batch = records.slice(i, i + batchSize);
+    for (let i = 0; i < recordsToInsert.length; i += batchSize) {
+      const batch = recordsToInsert.slice(i, i + batchSize);
       const values: (string | null)[] = [];
 
       const placeholders = batch
@@ -1143,8 +1279,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      inserted: records.length,
-      message: `${records.length.toLocaleString()}件を取り込みました`,
+      inserted: recordsToInsert.length,
+      message: skipDuplicateCheck
+        ? `${recordsToInsert.length.toLocaleString()}件を取り込みました`
+        : `${recordsToInsert.length.toLocaleString()}件を取り込みました（重複 ${skipped.toLocaleString()} 件をスキップ）`,
     });
   } catch (error) {
     await client.query("ROLLBACK");
@@ -1154,6 +1292,62 @@ export async function POST(req: NextRequest) {
       {
         ok: false,
         error: error instanceof Error ? error.message : "CSV取込でエラーが発生しました",
+      },
+      { status: 500 }
+    );
+  } finally {
+    client.release();
+  }
+}
+
+export async function DELETE() {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const result = await client.query(`
+      WITH duplicate_rows AS (
+        SELECT
+          ctid,
+          ROW_NUMBER() OVER (
+            PARTITION BY BTRIM("企業名"::text)
+            ORDER BY ctid
+          ) AS rn
+        FROM public.master_data
+        WHERE "企業名" IS NOT NULL
+          AND BTRIM("企業名"::text) <> ''
+      ),
+      deleted AS (
+        DELETE FROM public.master_data target
+        USING duplicate_rows dup
+        WHERE target.ctid = dup.ctid
+          AND dup.rn > 1
+        RETURNING 1
+      )
+      SELECT COUNT(*)::int AS deleted_count
+      FROM deleted
+    `);
+
+    await client.query("COMMIT");
+
+    const deleted = result.rows[0]?.deleted_count ?? 0;
+
+    return NextResponse.json({
+      ok: true,
+      deleted,
+      message: `${deleted.toLocaleString()}件の重複データを削除しました`,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "重複削除でエラーが発生しました",
       },
       { status: 500 }
     );
