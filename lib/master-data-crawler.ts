@@ -26,6 +26,44 @@ export type CrawlExtractedFields = {
   offices: CrawlExtractedOffice[];
 };
 
+export type CrawlSelectableFieldKey =
+  | "company"
+  | "zipcode"
+  | "address"
+  | "website_url"
+  | "form_url"
+  | "phone"
+  | "fax"
+  | "email"
+  | "established_date"
+  | "representative_name"
+  | "capital"
+  | "employee_count"
+  | "business_content";
+
+const DEFAULT_CRAWL_SELECTABLE_FIELDS: CrawlSelectableFieldKey[] = [
+  "company",
+  "zipcode",
+  "address",
+  "website_url",
+  "form_url",
+  "phone",
+  "fax",
+  "email",
+  "established_date",
+  "representative_name",
+  "capital",
+  "employee_count",
+  "business_content",
+];
+
+function hasSelectedCrawlField(
+  selectedFieldSet: Set<CrawlSelectableFieldKey>,
+  field: CrawlSelectableFieldKey
+) {
+  return selectedFieldSet.has(field);
+}
+
 type LinkItem = {
   url: string;
   text: string;
@@ -160,6 +198,7 @@ const REPRESENTATIVE_NAME_LABELS = [
   /^社長$/,
   /^会長$/,
   /^代表$/,
+  /^役員$/,
   /代表者/,
   /代表取締役/,
   /代表社員/,
@@ -986,28 +1025,50 @@ function normalizeRepresentativeName(value: string) {
   let normalized = normalizeSpace(value)
     .replace(/（.*?）/g, " ")
     .replace(/\(.*?\)/g, " ")
+    .replace(/\bPROFILE\b.*$/i, " ")
     .replace(/代表(?:から)?のご挨拶.*$/i, " ")
+    .replace(/代表メッセージ.*$/i, " ")
     .replace(/ご挨拶.*$/i, " ")
     .replace(/メッセージ.*$/i, " ")
     .replace(/スタッフ紹介.*$/i, " ")
     .replace(/プロフィール.*$/i, " ")
+    .replace(/役員(?:紹介|一覧).*$/i, " ")
+    .replace(/マネジメント.*$/i, " ")
+    .replace(/[／/｜|]/g, " ")
     .replace(
-      /^(代表者名?|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|代表)(?!から)\s*[:：]?\s*/i,
+      /^(?:(?:代表者名?|代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|執行役員(?:専務|常務)?|専務取締役|常務取締役|専務|常務)\s*[:：]?\s*)+/i,
       ""
     )
     .replace(
       /\s+[一-龠々ぁ-んァ-ヶー]{1,20}(?:本社|本店|支店|営業所|工場|事業所|センター).*$/u,
       " "
     )
+    .replace(/\s{2,}/g, " ")
     .trim();
 
   if (!normalized) return null;
 
-  const leading = normalized.match(
-    /^([一-龠々ぁ-んァ-ヶー]{1,4}\s*[一-龠々ぁ-んァ-ヶー]{1,4})/u
+  if (
+    /^(?:代表者名?|代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|執行役員(?:専務|常務)?|専務取締役|常務取締役|専務|常務)$/i.test(
+      normalized
+    )
+  ) {
+    return null;
+  }
+
+  if (
+    /(ご挨拶|挨拶|メッセージ|message|greeting|staff|member|management|マネジメント|プロフィール|profile|役員紹介|役員一覧|会社概要|企業情報|会社情報|採用情報)/i.test(
+      normalized
+    )
+  ) {
+    return null;
+  }
+
+  const exact = normalized.match(
+    /^([一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4}|[一-龠々ぁ-んァ-ヶー]{2,8})$/u
   );
-  if (leading?.[1]) {
-    return normalizeSpace(leading[1]);
+  if (exact?.[1]) {
+    return normalizeSpace(exact[1]);
   }
 
   const spaced = normalized.match(
@@ -1017,7 +1078,9 @@ function normalizeRepresentativeName(value: string) {
     return normalizeSpace(spaced[1]);
   }
 
-  const compact = normalized.match(/([一-龠々ぁ-んァ-ヶー]{2,8})/u);
+  const compact = normalized.match(
+    /(?:^|[\s:：])([一-龠々ぁ-んァ-ヶー]{2,8})(?:$|[\s:：])/u
+  );
   if (compact?.[1]) {
     return compact[1];
   }
@@ -1031,41 +1094,49 @@ function extractRepresentativeNameFromText(text: string) {
     .map((line) => normalizeSpace(line))
     .filter((line) => line !== "");
 
+  const skipPattern =
+    /(代表ご挨拶|ご挨拶|代表メッセージ|メッセージ|スタッフ紹介|役員一覧|役員紹介|マネジメント|management|staff|member|members|profile)/i;
+
   const titlePattern =
-    /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|代表)(?!から)/i;
+    /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)(?!から)/i;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
 
-    if (/代表ご挨拶|ご挨拶|メッセージ/i.test(line)) continue;
+    if (skipPattern.test(line)) continue;
+
+    const labeledSameLine = line.match(
+      /(?:代表者名?|代表者|役員)\s*[:：]?\s*(.+)$/i
+    );
+    if (labeledSameLine?.[1]) {
+      const name = normalizeRepresentativeName(labeledSameLine[1]);
+      if (name) return name;
+    }
 
     const sameLine = line.match(
-      /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|代表)(?!から)\s*[:：]?\s*(.+)$/i
+      /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)(?!から)\s*[:：/／]?\s*(.+)$/i
     );
     if (sameLine?.[2]) {
       const name = normalizeRepresentativeName(sameLine[2]);
       if (name) return name;
     }
 
-    if (titlePattern.test(line)) {
-      const nextLine = lines[i + 1] ?? "";
-      const name = normalizeRepresentativeName(nextLine);
-      if (name) return name;
-    }
-
     if (/^代表者(?:名)?$/.test(line)) {
       const nextLine = lines[i + 1] ?? "";
-      const nextSameLine = nextLine.match(
-        /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|代表)(?!から)\s*[:：]?\s*(.+)$/i
-      );
-      if (nextSameLine?.[2]) {
-        const name = normalizeRepresentativeName(nextSameLine[2]);
-        if (name) return name;
-      }
+      const nextLineName = normalizeRepresentativeName(nextLine);
+      if (nextLineName) return nextLineName;
 
       const nextNextLine = lines[i + 2] ?? "";
-      const name = normalizeRepresentativeName(nextNextLine);
-      if (name) return name;
+      const nextNextLineName = normalizeRepresentativeName(nextNextLine);
+      if (nextNextLineName) return nextNextLineName;
+    }
+
+    if (titlePattern.test(line)) {
+      const nextLine = lines[i + 1] ?? "";
+      if (!skipPattern.test(nextLine)) {
+        const name = normalizeRepresentativeName(nextLine);
+        if (name) return name;
+      }
     }
   }
 
@@ -1073,14 +1144,15 @@ function extractRepresentativeNameFromText(text: string) {
   if (!normalized) return null;
 
   const patterns = [
-    /代表取締役(?:社長|会長)?\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
-    /取締役社長\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
-    /代表社員\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
-    /代表理事\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
-    /理事長\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
-    /社長\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
-    /会長\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
-    /代表(?!から)\s*[:：]?\s*([一-龠々ぁ-んァ-ヶー]{1,12}\s*[一-龠々ぁ-んァ-ヶー]{1,12})/,
+    /代表者名?\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)?\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /役員\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)?\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /代表取締役(?:社長|会長)?\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /取締役社長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /代表社員\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /代表理事\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /理事長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /社長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /会長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
   ];
 
   for (const pattern of patterns) {
@@ -1332,14 +1404,58 @@ async function fetchTopPage(seedUrl: string): Promise<PageData | null> {
   return null;
 }
 
-function getCandidateLinkScore(link: LinkItem) {
+function getCandidateLinkScore(
+  link: LinkItem,
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
   const target = decodeURIComponent(`${link.text} ${link.url}`);
   let score = 0;
 
-  if (COMPANY_KEYWORDS.test(target)) score += 120;
-  if (BUSINESS_KEYWORDS.test(target)) score += 90;
-  if (CONTACT_KEYWORDS.test(target)) score += 70;
-  if (STAFF_KEYWORDS.test(target)) score += 80;
+  const needsCompanyPages =
+    hasSelectedCrawlField(selectedFieldSet, "company") ||
+    hasSelectedCrawlField(selectedFieldSet, "established_date") ||
+    hasSelectedCrawlField(selectedFieldSet, "representative_name") ||
+    hasSelectedCrawlField(selectedFieldSet, "capital") ||
+    hasSelectedCrawlField(selectedFieldSet, "employee_count") ||
+    hasSelectedCrawlField(selectedFieldSet, "business_content");
+
+  const needsContactPages =
+    hasSelectedCrawlField(selectedFieldSet, "form_url") ||
+    hasSelectedCrawlField(selectedFieldSet, "phone") ||
+    hasSelectedCrawlField(selectedFieldSet, "fax") ||
+    hasSelectedCrawlField(selectedFieldSet, "email") ||
+    hasSelectedCrawlField(selectedFieldSet, "zipcode") ||
+    hasSelectedCrawlField(selectedFieldSet, "address");
+
+  const needsStaffPages = hasSelectedCrawlField(
+    selectedFieldSet,
+    "representative_name"
+  );
+  const needsBusinessPages = hasSelectedCrawlField(
+    selectedFieldSet,
+    "business_content"
+  );
+
+  if (COMPANY_KEYWORDS.test(target) && needsCompanyPages) score += 140;
+  if (BUSINESS_KEYWORDS.test(target) && (needsBusinessPages || needsCompanyPages))
+    score += 110;
+  if (CONTACT_KEYWORDS.test(target) && needsContactPages) score += 160;
+  if (STAFF_KEYWORDS.test(target) && needsStaffPages) score += 180;
+
+  if (
+    hasSelectedCrawlField(selectedFieldSet, "form_url") &&
+    CONTACT_KEYWORDS.test(target)
+  ) {
+    score += 80;
+  }
+
+  if (
+    hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
+    /message|greeting|staff|member|president|ceo|代表|社長|会長/i.test(target)
+  ) {
+    score += 70;
+  }
+
   if (NEWS_BLOG_KEYWORDS.test(target)) score -= 120;
   if (RECRUIT_KEYWORDS.test(target)) score -= 80;
   if (/\.pdf(?:$|\?)/i.test(link.url)) score -= 40;
@@ -1347,7 +1463,10 @@ function getCandidateLinkScore(link: LinkItem) {
   return score;
 }
 
-function pickCandidatePageUrls(topPage: PageData) {
+function pickCandidatePageUrls(
+  topPage: PageData,
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
   const urls: string[] = [];
   const seen = new Set<string>();
   const base = new URL(topPage.finalUrl);
@@ -1367,7 +1486,10 @@ function pickCandidatePageUrls(topPage: PageData) {
   };
 
   const sortedLinks = [...topPage.links]
-    .map((link) => ({ url: link.url, score: getCandidateLinkScore(link) }))
+    .map((link) => ({
+      url: link.url,
+      score: getCandidateLinkScore(link, selectedFieldSet),
+    }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
 
@@ -1383,15 +1505,75 @@ function pickCandidatePageUrls(topPage: PageData) {
     }
   }
 
-  return urls.slice(0, 20);
+  return urls.slice(0, getCandidatePageLimit(selectedFieldSet));
 }
 
-function pickNestedCandidatePageUrls(page: PageData) {
+function hasSelectedOfficeFields(
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
+  return (
+    hasSelectedCrawlField(selectedFieldSet, "phone") ||
+    hasSelectedCrawlField(selectedFieldSet, "fax") ||
+    hasSelectedCrawlField(selectedFieldSet, "email") ||
+    hasSelectedCrawlField(selectedFieldSet, "zipcode") ||
+    hasSelectedCrawlField(selectedFieldSet, "address")
+  );
+}
+
+function getCandidatePageLimit(
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
+  if (selectedFieldSet.size === 1) {
+    if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 5;
+    if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) return 6;
+    if (hasSelectedOfficeFields(selectedFieldSet)) return 8;
+    return 6;
+  }
+
+  if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
+    return 8;
+  }
+
+  if (selectedFieldSet.size <= 3) {
+    return 10;
+  }
+
+  return 20;
+}
+
+function canStopFetchingAdditionalPages(
+  best: Partial<Record<keyof CrawlExtractedFields, BestValue>>,
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
+  if (hasSelectedOfficeFields(selectedFieldSet)) {
+    return false;
+  }
+
+  return Array.from(selectedFieldSet).every((field) => {
+    if (field === "company") return !!best.company?.value;
+    if (field === "website_url") return !!best.website_url?.value;
+    if (field === "form_url") return !!best.form_url?.value;
+    if (field === "established_date") return !!best.established_date?.value;
+    if (field === "representative_name") return !!best.representative_name?.value;
+    if (field === "capital") return !!best.capital?.value;
+    if (field === "employee_count") return !!best.employee_count?.value;
+    if (field === "business_content") return !!best.business_content?.value;
+    return true;
+  });
+}
+
+function pickNestedCandidatePageUrls(
+  page: PageData,
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
   const urls: string[] = [];
   const seen = new Set<string>();
 
   const sortedLinks = [...page.links]
-    .map((link) => ({ url: link.url, score: getCandidateLinkScore(link) }))
+    .map((link) => ({
+      url: link.url,
+      score: getCandidateLinkScore(link, selectedFieldSet),
+    }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
 
@@ -1421,61 +1603,75 @@ function pageBoost(url: string) {
 
 function processPage(
   page: PageData,
-  best: Partial<Record<keyof CrawlExtractedFields, BestValue>>
+  best: Partial<Record<keyof CrawlExtractedFields, BestValue>>,
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
   const boost = pageBoost(page.finalUrl);
   const pairs = extractPairs(page.html);
 
-  addBest(best, "website_url", page.finalUrl, 200);
-
-  const textCompanyName = extractCompanyNameFromText(page.structuredText);
-  const ogSiteName = cleanCompanyName(extractOgSiteName(page.html));
-  const jsonLdName = cleanCompanyName(extractJsonLdOrganizationName(page.html));
-  const h1Name = cleanCompanyName(page.h1);
-  const titleName = cleanCompanyName(page.title);
-
-  addBest(best, "company", ogSiteName, 120 + boost);
-  addBest(best, "company", jsonLdName, 115 + boost);
-  addBest(best, "company", h1Name, 110 + boost);
-  addBest(best, "company", titleName, 90 + boost);
-  addBest(best, "company", textCompanyName, 105 + boost);
-
-  const formLink = page.links.find((link) => {
-    const target = `${link.text} ${link.url}`;
-    return CONTACT_KEYWORDS.test(target) && !HTML_PAGE_DENY_EXT.test(link.url);
-  });
-
-  if (hasHtmlForm(page.html) && CONTACT_KEYWORDS.test(page.finalUrl)) {
-    addBest(best, "form_url", page.finalUrl, 150);
+  if (hasSelectedCrawlField(selectedFieldSet, "website_url")) {
+    addBest(best, "website_url", page.finalUrl, 200);
   }
-  addBest(best, "form_url", formLink?.url ?? null, 120 + boost);
 
-  const mailtoMatch = page.html.match(/mailto:([^"'?\s>]+)/i);
-  addBest(
-    best,
-    "email",
-    normalizeEmail(decodeURIComponent(mailtoMatch?.[1] || "")),
-    150 + boost
-  );
-  addBest(best, "email", normalizeEmail(page.text), 80 + boost);
+  if (hasSelectedCrawlField(selectedFieldSet, "company")) {
+    const textCompanyName = extractCompanyNameFromText(page.structuredText);
+    const ogSiteName = cleanCompanyName(extractOgSiteName(page.html));
+    const jsonLdName = cleanCompanyName(extractJsonLdOrganizationName(page.html));
+    const h1Name = cleanCompanyName(page.h1);
+    const titleName = cleanCompanyName(page.title);
+
+    addBest(best, "company", ogSiteName, 120 + boost);
+    addBest(best, "company", jsonLdName, 115 + boost);
+    addBest(best, "company", h1Name, 110 + boost);
+    addBest(best, "company", titleName, 90 + boost);
+    addBest(best, "company", textCompanyName, 105 + boost);
+  }
+
+  if (hasSelectedCrawlField(selectedFieldSet, "form_url")) {
+    const formLink = page.links.find((link) => {
+      const target = `${link.text} ${link.url}`;
+      return CONTACT_KEYWORDS.test(target) && !HTML_PAGE_DENY_EXT.test(link.url);
+    });
+
+    if (hasHtmlForm(page.html) && CONTACT_KEYWORDS.test(page.finalUrl)) {
+      addBest(best, "form_url", page.finalUrl, 150);
+    }
+    addBest(best, "form_url", formLink?.url ?? null, 120 + boost);
+  }
+
+  if (hasSelectedCrawlField(selectedFieldSet, "email")) {
+    const mailtoMatch = page.html.match(/mailto:([^"'?\s>]+)/i);
+
+    addBest(
+      best,
+      "email",
+      normalizeEmail(decodeURIComponent(mailtoMatch?.[1] || "")),
+      150 + boost
+    );
+    addBest(best, "email", normalizeEmail(page.text), 80 + boost);
+  }
 
   const telMatch = page.html.match(/tel:([^"'?\s>]+)/i);
   const phonePairValue = pickPairValue(pairs, PHONE_LABELS) ?? "";
   const faxPairValue = pickPairValue(pairs, FAX_LABELS) ?? "";
   const contactPairValue = pickPairValue(pairs, CONTACT_INFO_LABELS) ?? "";
 
-  addBest(best, "phone", normalizePhone(phonePairValue), 220 + boost);
-  addBest(best, "phone", normalizePhone(contactPairValue), 210 + boost);
-  addBest(
-    best,
-    "phone",
-    normalizePhone(decodeURIComponent(telMatch?.[1] || "")),
-    150 + boost
-  );
-  addBest(best, "phone", normalizePhone(page.text), 40 + boost);
+  if (hasSelectedCrawlField(selectedFieldSet, "phone")) {
+    addBest(best, "phone", normalizePhone(phonePairValue), 220 + boost);
+    addBest(best, "phone", normalizePhone(contactPairValue), 210 + boost);
+    addBest(
+      best,
+      "phone",
+      normalizePhone(decodeURIComponent(telMatch?.[1] || "")),
+      150 + boost
+    );
+    addBest(best, "phone", normalizePhone(page.text), 40 + boost);
+  }
 
-  addBest(best, "fax", normalizeFax(faxPairValue), 220 + boost);
-  addBest(best, "fax", normalizeFax(contactPairValue), 210 + boost);
+  if (hasSelectedCrawlField(selectedFieldSet, "fax")) {
+    addBest(best, "fax", normalizeFax(faxPairValue), 220 + boost);
+    addBest(best, "fax", normalizeFax(contactPairValue), 210 + boost);
+  }
 
   const addressPairValue = pickPairValue(pairs, ADDRESS_LABELS) ?? "";
   const zipcodePairValue = pickPairValue(pairs, ZIPCODE_LABELS) ?? addressPairValue;
@@ -1483,153 +1679,177 @@ function processPage(
     [addressPairValue, zipcodePairValue, page.text].filter(Boolean).join(" ")
   );
 
-  addBest(best, "zipcode", normalizeZipcode(zipcodePairValue), 220 + boost);
-  addBest(best, "zipcode", normalizeZipcode(addressPairValue), 210 + boost);
-  addBest(best, "zipcode", normalizeZipcode(page.text), 40 + boost);
+  if (hasSelectedCrawlField(selectedFieldSet, "zipcode")) {
+    addBest(best, "zipcode", normalizeZipcode(zipcodePairValue), 220 + boost);
+    addBest(best, "zipcode", normalizeZipcode(addressPairValue), 210 + boost);
+    addBest(best, "zipcode", normalizeZipcode(page.text), 40 + boost);
+  }
 
-  addBest(best, "address", normalizeAddress(addressPairValue), 220 + boost);
-  addBest(best, "address", detectedAddress, 215 + boost);
+  if (hasSelectedCrawlField(selectedFieldSet, "address")) {
+    addBest(best, "address", normalizeAddress(addressPairValue), 220 + boost);
+    addBest(best, "address", detectedAddress, 215 + boost);
+  }
 
-  const establishedPairValue = pickPairValue(pairs, ESTABLISHED_LABELS) ?? "";
-  const establishedTextValue =
-    extractSingleLineLabeledValue(page.structuredText, ESTABLISHED_LABELS) ?? "";
+  if (hasSelectedCrawlField(selectedFieldSet, "established_date")) {
+    const establishedPairValue = pickPairValue(pairs, ESTABLISHED_LABELS) ?? "";
+    const establishedTextValue =
+      extractSingleLineLabeledValue(page.structuredText, ESTABLISHED_LABELS) ?? "";
 
-  addBest(
-    best,
-    "established_date",
-    normalizeEstablished(establishedPairValue),
-    170 + boost
-  );
-  addBest(
-    best,
-    "established_date",
-    normalizeEstablished(establishedTextValue),
-    165 + boost
-  );
+    addBest(
+      best,
+      "established_date",
+      normalizeEstablished(establishedPairValue),
+      170 + boost
+    );
+    addBest(
+      best,
+      "established_date",
+      normalizeEstablished(establishedTextValue),
+      165 + boost
+    );
+  }
 
-  const representativeNamePairValue =
-    pickPairValue(pairs, REPRESENTATIVE_NAME_LABELS) ?? "";
-  const representativeNameTextValue =
-    extractSingleLineLabeledValue(
-      page.structuredText,
-      REPRESENTATIVE_NAME_LABELS
-    ) ?? "";
-  const representativeNameFromText =
-    extractRepresentativeNameFromText(page.structuredText);
+    if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+      const representativeNamePairValue =
+        pickPairValue(pairs, REPRESENTATIVE_NAME_LABELS) ?? "";
+      const representativeNameTextValue =
+        extractSingleLineLabeledValue(
+          page.structuredText,
+          REPRESENTATIVE_NAME_LABELS
+        ) ?? "";
+      const representativeNameFromText =
+        extractRepresentativeNameFromText(page.structuredText);
 
-  addBest(
-    best,
-    "representative_name",
-    normalizeRepresentativeName(representativeNamePairValue),
-    200 + boost
-  );
-  addBest(
-    best,
-    "representative_name",
-    normalizeRepresentativeName(representativeNameTextValue),
-    195 + boost
-  );
-  addBest(
-    best,
-    "representative_name",
-    representativeNameFromText,
-    205 + boost
-  );
+      const representativeSourceTarget = decodeURIComponent(
+        `${page.finalUrl} ${page.title} ${page.h1}`
+      );
 
-  const representativeTitlePairValue =
-    pickPairValue(pairs, REPRESENTATIVE_TITLE_LABELS) ?? "";
-  const representativeTitleTextValue =
-    extractSingleLineLabeledValue(
-      page.structuredText,
-      REPRESENTATIVE_TITLE_LABELS
-    ) ?? "";
-  const representativeTitleFromText =
-    extractRepresentativeTitleFromText(page.structuredText);
+      const representativeScoreAdjustment =
+        (/(会社概要|企業情報|会社情報|会社案内|about|company|corporate|outline|who\.html)/i.test(
+          representativeSourceTarget
+        )
+          ? 60
+          : 0) -
+        (/(役員一覧|役員紹介|マネジメント|management|staff|member|members|greeting|message|ご挨拶|代表メッセージ)/i.test(
+          representativeSourceTarget
+        )
+          ? 80
+          : 0);
 
-  addBest(
-    best,
-    "representative_title",
-    normalizeRepresentativeTitle(representativeTitlePairValue),
-    200 + boost
-  );
-  addBest(
-    best,
-    "representative_title",
-    normalizeRepresentativeTitle(representativeTitleTextValue),
-    195 + boost
-  );
-  addBest(
-    best,
-    "representative_title",
-    representativeTitleFromText,
-    205 + boost
-  );
+      addBest(
+        best,
+        "representative_name",
+        normalizeRepresentativeName(representativeNamePairValue),
+        260 + boost + representativeScoreAdjustment
+      );
+      addBest(
+        best,
+        "representative_name",
+        normalizeRepresentativeName(representativeNameTextValue),
+        245 + boost + representativeScoreAdjustment
+      );
+      addBest(
+        best,
+        "representative_name",
+        representativeNameFromText,
+        180 + boost + representativeScoreAdjustment
+      );
+    }
 
-  const capitalPairValue = pickPairValue(pairs, CAPITAL_LABELS) ?? "";
-  const capitalTextValue =
-    extractSingleLineLabeledValue(page.structuredText, CAPITAL_LABELS) ?? "";
+  if (hasSelectedCrawlField(selectedFieldSet, "capital")) {
+    const capitalPairValue = pickPairValue(pairs, CAPITAL_LABELS) ?? "";
+    const capitalTextValue =
+      extractSingleLineLabeledValue(page.structuredText, CAPITAL_LABELS) ?? "";
 
-  addBest(
-    best,
-    "capital",
-    normalizeCapital(capitalPairValue),
-    200 + boost
-  );
-  addBest(
-    best,
-    "capital",
-    normalizeCapital(capitalTextValue),
-    195 + boost
-  );
+    addBest(
+      best,
+      "capital",
+      normalizeCapital(capitalPairValue),
+      200 + boost
+    );
+    addBest(
+      best,
+      "capital",
+      normalizeCapital(capitalTextValue),
+      195 + boost
+    );
+  }
 
-  const employeeCountPairValue =
-    pickPairValue(pairs, EMPLOYEE_COUNT_LABELS) ?? "";
-  const employeeCountTextValue =
-    extractSingleLineLabeledValue(page.structuredText, EMPLOYEE_COUNT_LABELS) ??
-    "";
+  if (hasSelectedCrawlField(selectedFieldSet, "employee_count")) {
+    const employeeCountPairValue =
+      pickPairValue(pairs, EMPLOYEE_COUNT_LABELS) ?? "";
+    const employeeCountTextValue =
+      extractSingleLineLabeledValue(page.structuredText, EMPLOYEE_COUNT_LABELS) ??
+      "";
 
-  addBest(
-    best,
-    "employee_count",
-    normalizeEmployeeCount(employeeCountPairValue),
-    200 + boost
-  );
-  addBest(
-    best,
-    "employee_count",
-    normalizeEmployeeCount(employeeCountTextValue),
-    195 + boost
-  );
+    addBest(
+      best,
+      "employee_count",
+      normalizeEmployeeCount(employeeCountPairValue),
+      200 + boost
+    );
+    addBest(
+      best,
+      "employee_count",
+      normalizeEmployeeCount(employeeCountTextValue),
+      195 + boost
+    );
+  }
 
-  const businessPairValue =
-    pickPairValue(pairs, BUSINESS_CONTENT_LABELS) ?? "";
-  const businessSectionValue =
-    extractLabeledSectionText(page.text, BUSINESS_CONTENT_LABELS, 600) ?? "";
-  const businessMetaValue = extractMetaDescription(page.html);
+  if (hasSelectedCrawlField(selectedFieldSet, "business_content")) {
+    const businessPairValue =
+      pickPairValue(pairs, BUSINESS_CONTENT_LABELS) ?? "";
+    const businessSectionValue =
+      extractLabeledSectionText(page.text, BUSINESS_CONTENT_LABELS, 600) ?? "";
+    const businessMetaValue = extractMetaDescription(page.html);
 
-  addBest(
-    best,
-    "business_content",
-    normalizeBusinessContent(businessPairValue),
-    220 + boost
-  );
-  addBest(
-    best,
-    "business_content",
-    normalizeBusinessContent(businessSectionValue),
-    210 + boost
-  );
-  addBest(
-    best,
-    "business_content",
-    normalizeBusinessContent(businessMetaValue),
-    90 + boost
-  );
+    addBest(
+      best,
+      "business_content",
+      normalizeBusinessContent(businessPairValue),
+      220 + boost
+    );
+    addBest(
+      best,
+      "business_content",
+      normalizeBusinessContent(businessSectionValue),
+      210 + boost
+    );
+    addBest(
+      best,
+      "business_content",
+      normalizeBusinessContent(businessMetaValue),
+      90 + boost
+    );
+  }
 }
 
 export async function crawlCompanyWebsite(
-  websiteUrl: string
+  websiteUrl: string,
+  selectedFields: CrawlSelectableFieldKey[] = DEFAULT_CRAWL_SELECTABLE_FIELDS
 ): Promise<CrawlExtractedFields> {
+  const selectedFieldSet = new Set(selectedFields);
+
+  if (selectedFieldSet.size === 0) {
+    return {
+      company: null,
+      website_url: null,
+      form_url: null,
+      phone: null,
+      fax: null,
+      email: null,
+      zipcode: null,
+      address: null,
+      established_date: null,
+      representative_name: null,
+      representative_title: null,
+      capital: null,
+      employee_count: null,
+      business_content: null,
+      offices: [],
+    };
+  }
+
   const best: Partial<Record<keyof CrawlExtractedFields, BestValue>> = {};
   const collectedPages: PageData[] = [];
 
@@ -1637,7 +1857,9 @@ export async function crawlCompanyWebsite(
   if (!topPage) {
     return {
       company: null,
-      website_url: normalizeSeedUrl(websiteUrl),
+      website_url: hasSelectedCrawlField(selectedFieldSet, "website_url")
+        ? normalizeSeedUrl(websiteUrl)
+        : null,
       form_url: null,
       phone: null,
       fax: null,
@@ -1655,40 +1877,82 @@ export async function crawlCompanyWebsite(
   }
 
   collectedPages.push(topPage);
-  processPage(topPage, best);
+  processPage(topPage, best, selectedFieldSet);
 
-  const candidateUrls = pickCandidatePageUrls(topPage);
+  const candidateUrls = pickCandidatePageUrls(topPage, selectedFieldSet);
   for (const candidateUrl of candidateUrls) {
+    if (canStopFetchingAdditionalPages(best, selectedFieldSet)) {
+      break;
+    }
+
     const page = await fetchPage(candidateUrl);
     if (!page) continue;
 
     collectedPages.push(page);
-    processPage(page, best);
+    processPage(page, best, selectedFieldSet);
   }
 
-  const offices = extractOfficeResults(collectedPages, best.company?.value ?? null, {
-    phone: best.phone?.value ?? null,
-    fax: best.fax?.value ?? null,
-    email: best.email?.value ?? null,
-    zipcode: best.zipcode?.value ?? null,
-    address: best.address?.value ?? null,
-  });
+  const shouldExtractOffices =
+    hasSelectedCrawlField(selectedFieldSet, "phone") ||
+    hasSelectedCrawlField(selectedFieldSet, "fax") ||
+    hasSelectedCrawlField(selectedFieldSet, "email") ||
+    hasSelectedCrawlField(selectedFieldSet, "zipcode") ||
+    hasSelectedCrawlField(selectedFieldSet, "address");
+
+  const offices = shouldExtractOffices
+    ? extractOfficeResults(collectedPages, best.company?.value ?? null, {
+        phone: best.phone?.value ?? null,
+        fax: best.fax?.value ?? null,
+        email: best.email?.value ?? null,
+        zipcode: best.zipcode?.value ?? null,
+        address: best.address?.value ?? null,
+      })
+    : [];
 
   return {
-    company: best.company?.value ?? null,
-    website_url: best.website_url?.value ?? null,
-    form_url: best.form_url?.value ?? null,
-    phone: best.phone?.value ?? null,
-    fax: best.fax?.value ?? null,
-    email: best.email?.value ?? null,
-    zipcode: best.zipcode?.value ?? null,
-    address: best.address?.value ?? null,
-    established_date: best.established_date?.value ?? null,
-    representative_name: best.representative_name?.value ?? null,
-    representative_title: best.representative_title?.value ?? null,
-    capital: best.capital?.value ?? null,
-    employee_count: best.employee_count?.value ?? null,
-    business_content: best.business_content?.value ?? null,
+    company: hasSelectedCrawlField(selectedFieldSet, "company")
+      ? best.company?.value ?? null
+      : null,
+    website_url: hasSelectedCrawlField(selectedFieldSet, "website_url")
+      ? best.website_url?.value ?? null
+      : null,
+    form_url: hasSelectedCrawlField(selectedFieldSet, "form_url")
+      ? best.form_url?.value ?? null
+      : null,
+    phone: hasSelectedCrawlField(selectedFieldSet, "phone")
+      ? best.phone?.value ?? null
+      : null,
+    fax: hasSelectedCrawlField(selectedFieldSet, "fax")
+      ? best.fax?.value ?? null
+      : null,
+    email: hasSelectedCrawlField(selectedFieldSet, "email")
+      ? best.email?.value ?? null
+      : null,
+    zipcode: hasSelectedCrawlField(selectedFieldSet, "zipcode")
+      ? best.zipcode?.value ?? null
+      : null,
+    address: hasSelectedCrawlField(selectedFieldSet, "address")
+      ? best.address?.value ?? null
+      : null,
+    established_date: hasSelectedCrawlField(selectedFieldSet, "established_date")
+      ? best.established_date?.value ?? null
+      : null,
+    representative_name: hasSelectedCrawlField(
+      selectedFieldSet,
+      "representative_name"
+    )
+      ? best.representative_name?.value ?? null
+      : null,
+    representative_title: null,
+    capital: hasSelectedCrawlField(selectedFieldSet, "capital")
+      ? best.capital?.value ?? null
+      : null,
+    employee_count: hasSelectedCrawlField(selectedFieldSet, "employee_count")
+      ? best.employee_count?.value ?? null
+      : null,
+    business_content: hasSelectedCrawlField(selectedFieldSet, "business_content")
+      ? best.business_content?.value ?? null
+      : null,
     offices,
   };
 }

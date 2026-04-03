@@ -132,8 +132,49 @@ type AdvancedValueOptions = {
   tagItems: TagValueItem[];
 };
 
+const CRAWL_CONFIRM_FIELD_OPTIONS = [
+  { key: "company", label: "企業名" },
+  { key: "zipcode", label: "郵便番号" },
+  { key: "address", label: "住所" },
+  { key: "website_url", label: "企業URL" },
+  { key: "form_url", label: "お問い合わせフォームURL" },
+  { key: "phone", label: "電話番号" },
+  { key: "fax", label: "FAX番号" },
+  { key: "email", label: "メールアドレス" },
+  { key: "established_date", label: "設立年月" },
+  { key: "representative_name", label: "代表者名" },
+  { key: "capital", label: "資本金" },
+  { key: "employee_count", label: "従業員数" },
+  { key: "business_content", label: "事業内容" },
+] as const;
+
+type CrawlFieldKey =
+  (typeof CRAWL_CONFIRM_FIELD_OPTIONS)[number]["key"];
+
+function createInitialCrawlFieldSelections(): Record<CrawlFieldKey, boolean> {
+  return CRAWL_CONFIRM_FIELD_OPTIONS.reduce((acc, field) => {
+    acc[field.key] = true;
+    return acc;
+  }, {} as Record<CrawlFieldKey, boolean>);
+}
+
+function createEmptyCrawlFieldSelections(): Record<CrawlFieldKey, boolean> {
+  return CRAWL_CONFIRM_FIELD_OPTIONS.reduce((acc, field) => {
+    acc[field.key] = false;
+    return acc;
+  }, {} as Record<CrawlFieldKey, boolean>);
+}
+
+function getSelectedCrawlFields(
+  selections: Record<CrawlFieldKey, boolean>
+): CrawlFieldKey[] {
+  return CRAWL_CONFIRM_FIELD_OPTIONS.filter(
+    (field) => selections[field.key]
+  ).map((field) => field.key);
+}
+
 type CrawlPreviewChange = {
-  key: string;
+  key: CrawlFieldKey;
   label: string;
   before: string | null;
   after: string | null;
@@ -1273,6 +1314,9 @@ export default function Home() {
   const [importError, setImportError] = useState("");
 
   const [crawlConfirmOpen, setCrawlConfirmOpen] = useState(false);
+  const [crawlFieldSelections, setCrawlFieldSelections] = useState<
+    Record<CrawlFieldKey, boolean>
+  >(() => createInitialCrawlFieldSelections());
   const [crawling, setCrawling] = useState(false);
   const [crawlMessage, setCrawlMessage] = useState("");
   const [crawlError, setCrawlError] = useState("");
@@ -2598,7 +2642,10 @@ export default function Home() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <button
               type="button"
-              onClick={() => setCrawlConfirmOpen(true)}
+              onClick={() => {
+                setCrawlFieldSelections(createInitialCrawlFieldSelections());
+                setCrawlConfirmOpen(true);
+              }}
               disabled={crawling}
               className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
             >
@@ -2873,8 +2920,12 @@ export default function Home() {
     try {
       const body: Record<string, unknown> = {
         filterModels: buildRequestFilterModels(appliedColumnStates),
-        advancedFilters: buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions),
+        advancedFilters: buildRequestAdvancedFilters(
+          appliedAdvancedFilters,
+          advancedValueOptions
+        ),
         previewOnly: true,
+        selectedFields: getSelectedCrawlFields(crawlFieldSelections),
       };
 
       const sortColumn = COLUMN_DEFS.find(
@@ -2916,7 +2967,9 @@ export default function Home() {
                   ? ""
                   : change.after ?? change.candidates[0] ?? "";
 
-              return defaultValue ? [change.key, defaultValue] as [string, string] : null;
+              return defaultValue
+                ? ([change.key, defaultValue] as [string, string])
+                : null;
             })
             .filter((entry): entry is [string, string] => entry !== null);
 
@@ -2952,6 +3005,7 @@ export default function Home() {
         advancedFilters: buildRequestAdvancedFilters(appliedAdvancedFilters),
         previewOnly: false,
         selectedChanges: crawlSelectedChanges,
+        selectedFields: getSelectedCrawlFields(crawlFieldSelections),
       };
 
       const sortColumn = COLUMN_DEFS.find(
@@ -3323,20 +3377,65 @@ export default function Home() {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
-                    クローリング確認
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      クローリング確認
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCrawlFieldSelections(createInitialCrawlFieldSelections())}
+                        disabled={crawling}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        全選択
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCrawlFieldSelections(createEmptyCrawlFieldSelections())}
+                        disabled={crawling}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        選択解除
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
-                    現在の絞り込み結果に対してクローリングを実行し、
-                    保存前に変更候補を一覧で表示します。
-                    <br />
-                    内容を確認してから「はい」で保存できます。
-                    <br />
-                    変更候補を確認してよろしいですか？
+                  <div className="px-4 py-6">
+                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                      チェックした項目のみクローリングします。
+                      <br />
+                      現在の絞り込み結果に対してクローリングを実行し、保存前に変更候補を一覧で表示します。
+                      <br />
+                      内容を確認してから「はい」で保存できます。
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      {CRAWL_CONFIRM_FIELD_OPTIONS.map((field) => (
+                        <label
+                          key={field.key}
+                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={crawlFieldSelections[field.key]}
+                            onChange={() =>
+                              setCrawlFieldSelections((prev) => ({
+                                ...prev,
+                                [field.key]: !prev[field.key],
+                              }))
+                            }
+                            className="h-4 w-4 accent-amber-500"
+                          />
+                          <span>{field.label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="flex gap-2 border-t border-white/10 px-4 py-4">
@@ -3547,7 +3646,7 @@ export default function Home() {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">

@@ -112,22 +112,27 @@ type CrawlPayload = {
   business_content: string | null;
 };
 
-type CrawlPayloadCandidateKey =
+type CrawlSelectableFieldKey =
+  | "company"
+  | "zipcode"
+  | "address"
+  | "website_url"
+  | "form_url"
   | "phone"
   | "fax"
   | "email"
-  | "zipcode"
-  | "address";
-
-type CrawlPreviewSelectableKey =
-  | CrawlPayloadCandidateKey
-  | "form_url"
   | "established_date"
   | "representative_name"
-  | "representative_title"
   | "capital"
   | "employee_count"
   | "business_content";
+
+type CrawlPayloadCandidateKey = Extract<
+  CrawlSelectableFieldKey,
+  "phone" | "fax" | "email" | "zipcode" | "address"
+>;
+
+type CrawlPreviewSelectableKey = CrawlSelectableFieldKey;
 
 type CrawlPreviewChange = {
   key: CrawlPreviewSelectableKey;
@@ -156,6 +161,7 @@ type CrawlRequestBody = {
   sortDirection?: SortDirection | "" | null;
   previewOnly?: boolean;
   selectedChanges?: SelectedCrawlChanges;
+  selectedFields?: CrawlSelectableFieldKey[];
 };
 
 const PREFECTURE_TO_REGION = {
@@ -669,14 +675,43 @@ const CRAWL_SINGLE_VALUE_FIELDS: Array<{
   key: Exclude<CrawlPreviewSelectableKey, CrawlPayloadCandidateKey>;
   label: string;
 }> = [
-  { key: "form_url", label: "問い合わせフォームURL" },
+  { key: "company", label: "企業名" },
+  { key: "website_url", label: "企業URL" },
+  { key: "form_url", label: "お問い合わせフォームURL" },
   { key: "established_date", label: "設立年月" },
   { key: "representative_name", label: "代表者名" },
-  { key: "representative_title", label: "代表者役職" },
   { key: "capital", label: "資本金" },
   { key: "employee_count", label: "従業員数" },
   { key: "business_content", label: "事業内容" },
 ];
+
+const CRAWL_SELECTABLE_FIELDS: CrawlSelectableFieldKey[] = [
+  "company",
+  "zipcode",
+  "address",
+  "website_url",
+  "form_url",
+  "phone",
+  "fax",
+  "email",
+  "established_date",
+  "representative_name",
+  "capital",
+  "employee_count",
+  "business_content",
+];
+
+function normalizeSelectedFields(selectedFields?: CrawlSelectableFieldKey[]) {
+  const requested = Array.isArray(selectedFields)
+    ? selectedFields.filter((field): field is CrawlSelectableFieldKey =>
+        CRAWL_SELECTABLE_FIELDS.includes(field)
+      )
+    : null;
+
+  return new Set<CrawlSelectableFieldKey>(
+    requested === null ? CRAWL_SELECTABLE_FIELDS : requested
+  );
+}
 
 type CrawlPayloadBundle = {
   payload: CrawlPayload;
@@ -789,11 +824,14 @@ function buildCrawlPayloadBundles(
 
 function buildPreviewChanges(
   row: Record<string, unknown>,
-  bundle: CrawlPayloadBundle
+  bundle: CrawlPayloadBundle,
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
 ): CrawlPreviewChange[] {
   const changes: CrawlPreviewChange[] = [];
 
   for (const field of CRAWL_CANDIDATE_FIELDS) {
+    if (!selectedFieldSet.has(field.key)) continue;
+
     const before = normalizeNullableText(row[field.key]);
     const candidates = uniqueTextValues(bundle.candidates[field.key]);
     const after = candidates[0] ?? null;
@@ -811,6 +849,8 @@ function buildPreviewChanges(
   }
 
   for (const field of CRAWL_SINGLE_VALUE_FIELDS) {
+    if (!selectedFieldSet.has(field.key)) continue;
+
     const before = normalizeNullableText(row[field.key]);
     const after = getResolvedValue(row[field.key], bundle.payload[field.key]);
 
@@ -838,6 +878,9 @@ function buildSelectedPayload(
 
   return {
     ...bundle.payload,
+    company: normalizeNullableText(selected.company) ?? bundle.payload.company,
+    website_url:
+      normalizeNullableText(selected.website_url) ?? bundle.payload.website_url,
     phone: normalizeNullableText(selected.phone) ?? bundle.payload.phone,
     fax: normalizeNullableText(selected.fax) ?? bundle.payload.fax,
     email: normalizeNullableText(selected.email) ?? bundle.payload.email,
@@ -850,9 +893,7 @@ function buildSelectedPayload(
     representative_name:
       normalizeNullableText(selected.representative_name) ??
       bundle.payload.representative_name,
-    representative_title:
-      normalizeNullableText(selected.representative_title) ??
-      bundle.payload.representative_title,
+    representative_title: bundle.payload.representative_title,
     capital: normalizeNullableText(selected.capital) ?? bundle.payload.capital,
     employee_count:
       normalizeNullableText(selected.employee_count) ??
@@ -860,7 +901,6 @@ function buildSelectedPayload(
     business_content:
       normalizeNullableText(selected.business_content) ??
       bundle.payload.business_content,
-    website_url: bundle.payload.website_url,
   };
 }
 
@@ -891,8 +931,10 @@ function buildInsertRow(
 ): Record<string, unknown> {
   return {
     ...sourceRow,
-    企業名: bundle.payload.company,
-    企業サイトURL: bundle.payload.website_url,
+    企業名: selectedKeys.has("company") ? payload.company : sourceRow["企業名"],
+    企業サイトURL: selectedKeys.has("website_url")
+      ? payload.website_url
+      : sourceRow["企業サイトURL"],
     問い合わせフォームURL: selectedKeys.has("form_url")
       ? payload.form_url
       : sourceRow["問い合わせフォームURL"],
@@ -911,9 +953,7 @@ function buildInsertRow(
     代表者名: selectedKeys.has("representative_name")
       ? payload.representative_name
       : sourceRow["代表者名"],
-    代表者役職: selectedKeys.has("representative_title")
-      ? payload.representative_title
-      : sourceRow["代表者役職"],
+    代表者役職: sourceRow["代表者役職"],
     資本金: selectedKeys.has("capital") ? payload.capital : sourceRow["資本金"],
     従業員数: selectedKeys.has("employee_count")
       ? payload.employee_count
@@ -931,6 +971,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as CrawlRequestBody;
     const filterModels = body.filterModels ?? {};
     const advancedFilters = body.advancedFilters ?? {};
+    const selectedFieldSet = normalizeSelectedFields(body.selectedFields);
 
     const { whereSql, params } = buildWhereClause(filterModels, advancedFilters);
 
@@ -976,7 +1017,10 @@ export async function POST(req: NextRequest) {
       processed += 1;
 
       try {
-        const extracted = await crawlCompanyWebsite(String(row.website_url ?? ""));
+        const extracted = await crawlCompanyWebsite(
+          String(row.website_url ?? ""),
+          Array.from(selectedFieldSet)
+        );
         const bundles = buildCrawlPayloadBundles(
           extracted,
           normalizeNullableText(row.company)
@@ -993,7 +1037,8 @@ export async function POST(req: NextRequest) {
           bundles.forEach((bundle, officeIndex) => {
             const changes = buildPreviewChanges(
               row as Record<string, unknown>,
-              bundle
+              bundle,
+              selectedFieldSet
             );
 
             if (changes.length === 0) {
@@ -1045,7 +1090,7 @@ export async function POST(req: NextRequest) {
               UPDATE public.master_data
               SET
                 "企業名" = CASE
-                  WHEN $15::boolean THEN COALESCE($1, "企業名")
+                  WHEN $14::boolean THEN COALESCE($1, "企業名")
                   WHEN NULLIF(BTRIM(COALESCE("企業名"::text, '')), '') IS NULL
                     THEN COALESCE($1, "企業名")
                   ELSE "企業名"
@@ -1063,16 +1108,15 @@ export async function POST(req: NextRequest) {
                 "住所" = COALESCE($8, "住所"),
                 "設立年月" = COALESCE($9, "設立年月"),
                 "代表者名" = COALESCE($10, "代表者名"),
-                "代表者役職" = COALESCE($11, "代表者役職"),
-                "資本金" = COALESCE($12, "資本金"),
-                "従業員数" = COALESCE($13, "従業員数"),
-                "事業内容" = COALESCE($14, "事業内容")
-              WHERE ctid = $16::tid
+                "資本金" = COALESCE($11, "資本金"),
+                "従業員数" = COALESCE($12, "従業員数"),
+                "事業内容" = COALESCE($13, "事業内容")
+              WHERE ctid = $15::tid
             `;
 
             const updateValues = [
-              bundle.forceCompanyUpdate ? bundle.payload.company : null,
-              null,
+              selectedKeys.has("company") ? payload.company : null,
+              selectedKeys.has("website_url") ? payload.website_url : null,
               selectedKeys.has("form_url") ? payload.form_url : null,
               selectedKeys.has("phone") ? payload.phone : null,
               selectedKeys.has("fax") ? payload.fax : null,
@@ -1081,11 +1125,10 @@ export async function POST(req: NextRequest) {
               selectedKeys.has("address") ? payload.address : null,
               selectedKeys.has("established_date") ? payload.established_date : null,
               selectedKeys.has("representative_name") ? payload.representative_name : null,
-              selectedKeys.has("representative_title") ? payload.representative_title : null,
               selectedKeys.has("capital") ? payload.capital : null,
               selectedKeys.has("employee_count") ? payload.employee_count : null,
               selectedKeys.has("business_content") ? payload.business_content : null,
-              bundle.forceCompanyUpdate,
+              selectedKeys.has("company") && bundle.forceCompanyUpdate,
               row.row_id,
             ];
 
