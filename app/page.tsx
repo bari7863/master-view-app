@@ -27,7 +27,7 @@ type Row = {
   latest_sales: string | null;
   closing_month: string | null;
   office_count: string | null;
-  new_tag: string | null;
+  tag: string | null;
   business_type: string | null;
   business_content: string | null;
   industry_category: string | null;
@@ -386,7 +386,7 @@ const COLUMN_DEFS: { key: FilterKey; label: string }[] = [
   { key: "latest_sales", label: "直近売上高" },
   { key: "closing_month", label: "決算月" },
   { key: "office_count", label: "事業所数" },
-  { key: "new_tag", label: "タグ" },
+  { key: "tag", label: "タグ" },
   { key: "business_type", label: "業種" },
   { key: "business_content", label: "事業内容" },
   { key: "industry_category", label: "業界" },
@@ -1402,7 +1402,7 @@ function VirtualRow({
         <Cell title={row.latest_sales || ""}><EmptyValue value={row.latest_sales} /></Cell>
         <Cell title={row.closing_month || ""}><EmptyValue value={row.closing_month} /></Cell>
         <Cell title={row.office_count || ""}><EmptyValue value={row.office_count} /></Cell>
-        <Cell title={row.new_tag || ""}><EmptyValue value={row.new_tag} /></Cell>
+        <Cell title={row.tag || ""}><EmptyValue value={row.tag} /></Cell>
         <Cell title={row.business_type || ""}><EmptyValue value={row.business_type} /></Cell>
         <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
         <Cell title={row.industry_category || ""}><EmptyValue value={row.industry_category} /></Cell>
@@ -4199,7 +4199,7 @@ const handleDownloadTemplate = async () => {
             <Cell title={row.latest_sales || ""}><EmptyValue value={row.latest_sales} /></Cell>
             <Cell title={row.closing_month || ""}><EmptyValue value={row.closing_month} /></Cell>
             <Cell title={row.office_count || ""}><EmptyValue value={row.office_count} /></Cell>
-            <Cell title={row.new_tag || ""}><EmptyValue value={row.new_tag} /></Cell>
+            <Cell title={row.tag || ""}><EmptyValue value={row.tag} /></Cell>
             <Cell title={row.business_type || ""}><EmptyValue value={row.business_type} /></Cell>
             <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
             <Cell title={row.industry_category || ""}><EmptyValue value={row.industry_category} /></Cell>
