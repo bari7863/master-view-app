@@ -638,10 +638,10 @@ function extractRepresentativeSingleLineValue(text: string) {
     .filter((line) => line !== "");
 
   const exactLabelOnlyPattern =
-    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)$/i;
+    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長|役員(?!一覧|紹介))$/i;
 
   const exactSameLinePattern =
-    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i;
+    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長|役員(?!一覧|紹介))\s*[:：]?\s*(.+)$/i;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -1109,19 +1109,56 @@ function looksLikeRepresentativeNoise(value: string) {
   );
 }
 
+function pickLikelyRepresentativeName(value: string) {
+  const normalized = normalizeSpace(value);
+  if (!normalized) return null;
+
+  const spacedCandidates =
+    normalized.match(/[一-龠々]{1,4}\s+[一-龠々]{1,4}/gu) ?? [];
+
+  for (const raw of spacedCandidates) {
+    const candidate = normalizeSpace(raw);
+    const joinedLength = candidate.replace(/\s/g, "").length;
+    if (joinedLength < 3 || joinedLength > 7) continue;
+    if (looksLikeRepresentativeNoise(candidate)) continue;
+    return candidate;
+  }
+
+  const compactCandidates =
+    normalized.match(/[一-龠々]{4,8}/gu) ?? [];
+
+  for (const raw of compactCandidates) {
+    const candidate = normalizeSpace(raw);
+    if (candidate.length < 4 || candidate.length > 8) continue;
+    if (looksLikeRepresentativeNoise(candidate)) continue;
+    return candidate;
+  }
+
+  return null;
+}
+
 function normalizeRepresentativeName(value: string) {
   const original = normalizeSpace(value);
   if (!original) return null;
 
-  const inlineCompanyTitleName = original.match(
-    /(?:株式会社|有限会社|合同会社|合資会社|合名会社)[^\s　]{0,40}\s+(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表)\s*([一-龠々]{1,4}\s*[一-龠々]{1,4}|[一-龠々]{3,7})/u
+  const source = original
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/www\.\S+/gi, " ")
+    .replace(/[【】\[\]<>＜＞]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const inlineCompanyTitleName = source.match(
+    /(?:株式会社|有限会社|合同会社|合資会社|合名会社)[^\s　]{0,40}\s+(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表)\s*([一-龠々]{1,4}\s*[一-龠々]{1,4}|[一-龠々]{4,8})/u
   );
   if (inlineCompanyTitleName?.[1]) {
-    const candidate = normalizeSpace(inlineCompanyTitleName[1]);
-    return looksLikeRepresentativeNoise(candidate) ? null : candidate;
+    const candidate = pickLikelyRepresentativeName(
+      normalizeSpace(inlineCompanyTitleName[1])
+    );
+    if (candidate) return candidate;
   }
 
-  let normalized = original
+  let normalized = source
     .replace(/（.*?）/g, " ")
     .replace(/\(.*?\)/g, " ")
     .replace(/\bPROFILE\b.*$/i, " ")
@@ -1135,31 +1172,41 @@ function normalizeRepresentativeName(value: string) {
     .replace(/マネジメント.*$/i, " ")
     .replace(/ブログ.*$/i, " ")
     .replace(/ひとりごと.*$/i, " ")
+    .replace(/(?:略歴|経歴|担当|就任|出身|profile).*$/i, " ")
     .replace(/[／/｜|]/g, " ")
-    .replace(/[、。,．]/g, " ")
+    .replace(/[、。,．・･]/g, " ")
     .replace(/\s*(?:様|さん|氏|先生)\s*$/u, "")
+    .replace(
+      /(?:TEL|Tel|tel|FAX|Fax|fax|メール|E-mail|Mail|住所|所在地|会社概要|事業内容|資本金|従業員数).*$/i,
+      " "
+    )
     .replace(
       /^(?:(?:代表者名?|代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|執行役員(?:専務|常務)?|専務取締役?|常務取締役?|専務|常務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|締役社長|締役|兼社長|常務取締|専務取締)\s*[:：]?\s*)+/i,
       ""
     )
-    .replace(/^(?:株式会社|有限会社|合同会社|合資会社|合名会社)\s*[^\s　]{1,40}\s+/u, "")
-    .replace(/^[^\s　]{1,40}(?:株式会社|有限会社|合同会社|合資会社|合名会社)\s+/u, "")
+    .replace(
+      /^(?:株式会社|有限会社|合同会社|合資会社|合名会社)\s*[^\s　]{1,40}\s+/u,
+      ""
+    )
+    .replace(
+      /^[^\s　]{1,40}(?:株式会社|有限会社|合同会社|合資会社|合名会社)\s+/u,
+      ""
+    )
     .replace(/\s{2,}/g, " ")
     .trim();
 
   if (!normalized) return null;
+  if (/[0-9０-９@]/.test(normalized)) return null;
   if (looksLikeRepresentativeNoise(normalized)) return null;
   if (!/[一-龠々]/u.test(normalized)) return null;
-  if (/[ぁ-ん]/.test(normalized)) return null;
+  if (/[ぁ-んァ-ヶ]/u.test(normalized)) return null;
 
   const leadingNameBeforeTitle = normalized.match(
-    /^([一-龠々]{1,4}\s*[一-龠々]{1,4}|[一-龠々]{3,7})\s+(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長)/u
+    /^([一-龠々]{1,4}\s*[一-龠々]{1,4}|[一-龠々]{4,8})\s+(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長)/u
   );
   if (leadingNameBeforeTitle?.[1]) {
-    const candidate = normalizeSpace(leadingNameBeforeTitle[1]);
-    if (!looksLikeRepresentativeNoise(candidate) && candidate.replace(/\s/g, "").length >= 3) {
-      return candidate;
-    }
+    const candidate = pickLikelyRepresentativeName(leadingNameBeforeTitle[1]);
+    if (candidate) return candidate;
   }
 
   normalized = normalized.replace(REPRESENTATIVE_TRAILING_TITLE_REGEX, "").trim();
@@ -1174,37 +1221,13 @@ function normalizeRepresentativeName(value: string) {
     return null;
   }
 
-  const exactSpaced = normalized.match(/^([一-龠々]{1,4})\s+([一-龠々]{1,4})$/u);
-  if (exactSpaced?.[1] && exactSpaced?.[2]) {
-    const joinedLength = `${exactSpaced[1]}${exactSpaced[2]}`.length;
-    if (joinedLength >= 8) return null;
-
-    const candidate = normalizeSpace(`${exactSpaced[1]} ${exactSpaced[2]}`);
-    return looksLikeRepresentativeNoise(candidate) ? null : candidate;
-  }
-
-  const exactCompact = normalized.match(/^([一-龠々]{3,7})$/u);
-  if (exactCompact?.[1]) {
-    return looksLikeRepresentativeNoise(exactCompact[1]) ? null : exactCompact[1];
-  }
-
-  const spaced = normalized.match(/([一-龠々]{1,4}\s+[一-龠々]{1,4})/u);
-  if (spaced?.[1]) {
-    const candidate = normalizeSpace(spaced[1]);
-    const joinedLength = candidate.replace(/\s/g, "").length;
-    if (joinedLength >= 8) return null;
-    return looksLikeRepresentativeNoise(candidate) ? null : candidate;
-  }
-
-  const compact = normalized.match(/(?:^|[\s:：])([一-龠々]{3,7})(?:$|[\s:：])/u);
-  if (compact?.[1]) {
-    return looksLikeRepresentativeNoise(compact[1]) ? null : compact[1];
-  }
-
-  return null;
+  return pickLikelyRepresentativeName(normalized);
 }
 
 function extractRepresentativeNameFromText(text: string) {
+  const singleLineCandidate = extractRepresentativeSingleLineValue(text);
+  if (singleLineCandidate) return singleLineCandidate;
+
   const lines = text
     .split("\n")
     .map((line) => normalizeSpace(line))
@@ -1222,7 +1245,7 @@ function extractRepresentativeNameFromText(text: string) {
     if (skipPattern.test(line)) continue;
 
     const labeledSameLine = line.match(
-      /(?:代表者名?|代表者|役員|理事長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i
+      /(?:代表者名?|代表者|役員(?!一覧|紹介)|理事長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i
     );
     if (labeledSameLine?.[1]) {
       const name = normalizeRepresentativeName(labeledSameLine[1]);
@@ -1237,7 +1260,11 @@ function extractRepresentativeNameFromText(text: string) {
       if (name) return name;
     }
 
-    if (/^(?:代表者(?:名)?|役員|理事長|所長|センター長|学院長|校長|学長|施設長|室長)$/.test(line)) {
+    if (
+      /^(?:代表者(?:名)?|役員(?!一覧|紹介)|理事長|所長|センター長|学院長|校長|学長|施設長|室長)$/.test(
+        line
+      )
+    ) {
       const nextLine = lines[i + 1] ?? "";
       const nextLineName = normalizeRepresentativeName(nextLine);
       if (nextLineName) return nextLineName;
@@ -1260,22 +1287,24 @@ function extractRepresentativeNameFromText(text: string) {
   if (!normalized) return null;
 
   const patterns = [
-    /代表者名?\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /役員\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /代表取締役(?:社長|会長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /取締役社長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /代表社員\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /代表理事\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /理事長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /所長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /センター長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /学院長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /校長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /学長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /施設長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /室長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /社長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
-    /会長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /(?:株式会社|有限会社|合同会社|合資会社|合名会社)[^\s　]{0,40}\s+(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /代表者名?\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /役員\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /代表取締役(?:社長|会長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /取締役社長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /代表社員\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /代表理事\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /理事長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /所長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /センター長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /学院長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /校長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /学長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /施設長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /室長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /社長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /会長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})/u,
+    /^([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{4,8})\s+(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長)/u,
   ];
 
   for (const pattern of patterns) {
@@ -1479,11 +1508,14 @@ function addBest(
   }
 }
 
-async function fetchPage(url: string): Promise<PageData | null> {
+async function fetchPage(
+  url: string,
+  timeoutMs = 10000
+): Promise<PageData | null> {
   try {
     const response = await fetch(url, {
       redirect: "follow",
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; MasterDataCrawler/1.0)",
         Accept: "text/html,application/xhtml+xml",
@@ -1513,15 +1545,21 @@ async function fetchPage(url: string): Promise<PageData | null> {
   }
 }
 
-async function fetchTopPage(seedUrl: string): Promise<PageData | null> {
+async function fetchTopPage(
+  seedUrl: string,
+  timeoutMs = 10000
+): Promise<PageData | null> {
   const normalized = normalizeSeedUrl(seedUrl);
   if (!normalized) return null;
 
-  const first = await fetchPage(normalized);
+  const first = await fetchPage(normalized, timeoutMs);
   if (first) return first;
 
   if (/^https:\/\//i.test(normalized)) {
-    return await fetchPage(normalized.replace(/^https:\/\//i, "http://"));
+    return await fetchPage(
+      normalized.replace(/^https:\/\//i, "http://"),
+      timeoutMs
+    );
   }
 
   return null;
@@ -1671,18 +1709,39 @@ function hasSelectedOfficeFields(
   );
 }
 
+function isRepresentativeOnlyMode(
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
+  return (
+    selectedFieldSet.size === 1 &&
+    hasSelectedCrawlField(selectedFieldSet, "representative_name")
+  );
+}
+
+function getRepresentativeEnoughScore(
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
+  return isRepresentativeOnlyMode(selectedFieldSet) ? 320 : 360;
+}
+
 function getCandidatePageLimit(
   selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
+  if (isRepresentativeOnlyMode(selectedFieldSet)) {
+    return 8;
+  }
+
   if (selectedFieldSet.size === 1) {
     if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 5;
-    if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) return 25;
     if (hasSelectedOfficeFields(selectedFieldSet)) return 8;
     return 6;
   }
 
-  if (selectedFieldSet.size <= 3 && hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
-    return 24;
+  if (
+    selectedFieldSet.size <= 3 &&
+    hasSelectedCrawlField(selectedFieldSet, "representative_name")
+  ) {
+    return 12;
   }
 
   if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
@@ -1704,6 +1763,9 @@ function canStopFetchingAdditionalPages(
     return false;
   }
 
+  const representativeEnoughScore =
+    getRepresentativeEnoughScore(selectedFieldSet);
+
   return Array.from(selectedFieldSet).every((field) => {
     if (field === "company") return !!best.company?.value;
     if (field === "website_url") return !!best.website_url?.value;
@@ -1713,7 +1775,7 @@ function canStopFetchingAdditionalPages(
     if (field === "representative_name") {
       return (
         !!best.representative_name?.value &&
-        (best.representative_name?.score ?? 0) >= 360
+        (best.representative_name?.score ?? 0) >= representativeEnoughScore
       );
     }
 
@@ -2018,7 +2080,15 @@ export async function crawlCompanyWebsite(
   const best: Partial<Record<keyof CrawlExtractedFields, BestValue>> = {};
   const collectedPages: PageData[] = [];
 
-  const topPage = await fetchTopPage(websiteUrl);
+  const representativeOnlyMode = isRepresentativeOnlyMode(selectedFieldSet);
+  const representativeEnoughScore =
+    getRepresentativeEnoughScore(selectedFieldSet);
+  const pageFetchTimeoutMs = representativeOnlyMode ? 3500 : 10000;
+
+  const topPage = await fetchTopPage(
+    websiteUrl,
+    representativeOnlyMode ? 4000 : pageFetchTimeoutMs
+  );
   if (!topPage) {
     return {
       company: null,
@@ -2042,7 +2112,8 @@ export async function crawlCompanyWebsite(
   }
 
   const topPageSelectedFieldSet =
-    hasSelectedCrawlField(selectedFieldSet, "representative_name")
+    hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
+    !representativeOnlyMode
       ? new Set<CrawlSelectableFieldKey>(
           Array.from(selectedFieldSet).filter(
             (field): field is CrawlSelectableFieldKey =>
@@ -2077,7 +2148,7 @@ export async function crawlCompanyWebsite(
         break;
       }
 
-      const page = await fetchPage(candidateUrl);
+      const page = await fetchPage(candidateUrl, pageFetchTimeoutMs);
       if (!page) continue;
       if (fetchedUrlSet.has(page.finalUrl)) continue;
 
@@ -2088,7 +2159,7 @@ export async function crawlCompanyWebsite(
       const shouldCollectNestedRepresentativePages =
         hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
         (!best.representative_name?.value ||
-          (best.representative_name?.score ?? 0) < 360);
+          (best.representative_name?.score ?? 0) < representativeEnoughScore);
 
       if (shouldCollectNestedRepresentativePages) {
         const nestedUrls = pickNestedCandidatePageUrls(page, selectedFieldSet);
@@ -2102,11 +2173,13 @@ export async function crawlCompanyWebsite(
   };
 
   if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
-    await fetchCandidatePages(overviewCandidateUrls);
+    if (!canStopFetchingAdditionalPages(best, selectedFieldSet)) {
+      await fetchCandidatePages(overviewCandidateUrls);
+    }
 
     const shouldFetchFallbackRepresentativePages =
       !best.representative_name?.value ||
-      (best.representative_name?.score ?? 0) < 360;
+      (best.representative_name?.score ?? 0) < representativeEnoughScore;
 
     if (shouldFetchFallbackRepresentativePages) {
       await fetchCandidatePages(fallbackCandidateUrls);
@@ -2118,15 +2191,20 @@ export async function crawlCompanyWebsite(
   const shouldFetchNestedRepresentativePages =
     hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
     (!best.representative_name?.value ||
-      (best.representative_name?.score ?? 0) < 360);
+      (best.representative_name?.score ?? 0) < representativeEnoughScore);
 
   if (shouldFetchNestedRepresentativePages) {
-    for (const nestedUrl of nestedCandidateUrls.slice(0, 40)) {
+    const nestedLimit = representativeOnlyMode ? 6 : 40;
+
+    for (const nestedUrl of nestedCandidateUrls.slice(0, nestedLimit)) {
       if (canStopFetchingAdditionalPages(best, selectedFieldSet)) {
         break;
       }
 
-      const nestedPage = await fetchPage(nestedUrl);
+      const nestedPage = await fetchPage(
+        nestedUrl,
+        representativeOnlyMode ? 3000 : pageFetchTimeoutMs
+      );
       if (!nestedPage) continue;
       if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
 
