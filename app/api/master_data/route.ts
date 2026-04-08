@@ -190,6 +190,26 @@ const DB_INSERT_TO_CSV_HEADER: Record<
   "メモ": "メモ",
 };
 
+async function ensureMasterDataIdColumn(
+  client: { query: (sql: string) => Promise<unknown> }
+) {
+  await client.query(`
+    ALTER TABLE public.master_data
+    ADD COLUMN IF NOT EXISTS id BIGSERIAL
+  `);
+
+  await client.query(`
+    UPDATE public.master_data
+    SET id = DEFAULT
+    WHERE id IS NULL
+  `);
+
+  await client.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS master_data_id_idx
+    ON public.master_data (id)
+  `);
+}
+
 function hasExactCsvHeaders(headerRow: string[]) {
   return (
     headerRow.length === CSV_HEADER_COLUMNS.length &&
@@ -1456,6 +1476,8 @@ export async function DELETE(req: NextRequest) {
           ? buildWhereClause(searchParams)
           : { whereSql: "", params: [] as (string | number)[] };
 
+      await ensureMasterDataIdColumn(client);
+
       const result = await client.query(
         `
           WITH deleted AS (
@@ -1486,10 +1508,10 @@ export async function DELETE(req: NextRequest) {
     const result = await client.query(`
       WITH duplicate_rows AS (
         SELECT
-          ctid,
+          id,
           ROW_NUMBER() OVER (
             PARTITION BY BTRIM("企業名"::text)
-            ORDER BY ctid
+            ORDER BY id
           ) AS rn
         FROM public.master_data
         WHERE "企業名" IS NOT NULL
@@ -1498,7 +1520,7 @@ export async function DELETE(req: NextRequest) {
       deleted AS (
         DELETE FROM public.master_data target
         USING duplicate_rows dup
-        WHERE target.ctid = dup.ctid
+        WHERE target.id = dup.id
           AND dup.rn > 1
         RETURNING 1
       )

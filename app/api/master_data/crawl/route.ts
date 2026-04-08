@@ -180,6 +180,24 @@ type CrawlRequestBody = {
 
 type DbClient = PoolClient;
 
+async function ensureMasterDataIdColumn(client: DbClient) {
+  await client.query(`
+    ALTER TABLE public.master_data
+    ADD COLUMN IF NOT EXISTS id BIGSERIAL
+  `);
+
+  await client.query(`
+    UPDATE public.master_data
+    SET id = DEFAULT
+    WHERE id IS NULL
+  `);
+
+  await client.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS master_data_id_idx
+    ON public.master_data (id)
+  `);
+}
+
 const PREFECTURE_TO_REGION = {
   北海道: "北海道",
   青森県: "東北",
@@ -1176,6 +1194,7 @@ async function fetchCrawlTargets(
   client: DbClient,
   body: CrawlRequestBody
 ) {
+  await ensureMasterDataIdColumn(client);
   const filterModels = body.filterModels ?? {};
   const advancedFilters = body.advancedFilters ?? {};
 
@@ -1329,6 +1348,7 @@ async function savePreviewItems(
   job: CrawlJobState,
   selectedChanges: SelectedCrawlChanges | undefined
 ) {
+  await ensureMasterDataIdColumn(client);
   let processed = 0;
   let updated = 0;
   let skipped = 0;
