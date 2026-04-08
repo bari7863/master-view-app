@@ -1728,7 +1728,7 @@ function getCandidatePageLimit(
   selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
   if (isRepresentativeOnlyMode(selectedFieldSet)) {
-    return 8;
+    return 15;
   }
 
   if (selectedFieldSet.size === 1) {
@@ -2083,7 +2083,7 @@ export async function crawlCompanyWebsite(
   const representativeOnlyMode = isRepresentativeOnlyMode(selectedFieldSet);
   const representativeEnoughScore =
     getRepresentativeEnoughScore(selectedFieldSet);
-  const pageFetchTimeoutMs = representativeOnlyMode ? 3500 : 10000;
+  const pageFetchTimeoutMs = representativeOnlyMode ? 8000 : 10000;
 
   const topPage = await fetchTopPage(
     websiteUrl,
@@ -2194,7 +2194,7 @@ export async function crawlCompanyWebsite(
       (best.representative_name?.score ?? 0) < representativeEnoughScore);
 
   if (shouldFetchNestedRepresentativePages) {
-    const nestedLimit = representativeOnlyMode ? 6 : 40;
+    const nestedLimit = representativeOnlyMode ? 20 : 40;
 
     for (const nestedUrl of nestedCandidateUrls.slice(0, nestedLimit)) {
       if (canStopFetchingAdditionalPages(best, selectedFieldSet)) {
