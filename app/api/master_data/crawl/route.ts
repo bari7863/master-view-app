@@ -1185,7 +1185,7 @@ async function fetchCrawlTargets(
 
   const targetSql = `
     SELECT
-      md.ctid::text AS row_id,
+      md.id::text AS row_id,
       to_jsonb(md) AS source_row,
       md."企業名" AS company,
       md."企業サイトURL" AS website_url,
@@ -1384,7 +1384,7 @@ async function savePreviewItems(
             "資本金" = COALESCE($11, "資本金"),
             "従業員数" = COALESCE($12, "従業員数"),
             "事業内容" = COALESCE($13, "事業内容")
-          WHERE ctid = $15::tid
+          WHERE id = $15::bigint
         `;
 
         const updateValues = [
