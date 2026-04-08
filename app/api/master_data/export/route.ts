@@ -24,10 +24,11 @@ const FILTER_COLUMN_MAP = {
   latest_sales: `"直近売上高"`,
   closing_month: `"決算月"`,
   office_count: `"事業所数"`,
-  new_tag: `"新規登録タグ"`,
+  tag: `"新規登録タグ"`,
   business_type: `"業種"`,
   business_content: `"事業内容"`,
   industry_category: `"業界"`,
+  memo: `"メモ"`,
 } as const;
 
 type FilterKey = keyof typeof FILTER_COLUMN_MAP;

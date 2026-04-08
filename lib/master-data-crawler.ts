@@ -2087,7 +2087,7 @@ export async function crawlCompanyWebsite(
 
   const topPage = await fetchTopPage(
     websiteUrl,
-    representativeOnlyMode ? 4000 : pageFetchTimeoutMs
+    representativeOnlyMode ? 10000 : pageFetchTimeoutMs
   );
   if (!topPage) {
     return {
@@ -2203,7 +2203,7 @@ export async function crawlCompanyWebsite(
 
       const nestedPage = await fetchPage(
         nestedUrl,
-        representativeOnlyMode ? 3000 : pageFetchTimeoutMs
+        representativeOnlyMode ? 8000 : pageFetchTimeoutMs
       );
       if (!nestedPage) continue;
       if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
