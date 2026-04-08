@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import type { PoolClient } from "pg";
 import { crawlCompanyWebsite } from "@/lib/master-data-crawler";
 
 const FILTER_COLUMN_MAP = {
@@ -27,6 +28,8 @@ const FILTER_COLUMN_MAP = {
   closing_month: `"決算月"`,
   office_count: `"事業所数"`,
   new_tag: `"新規登録タグ"`,
+  business_type: `"業種"`,
+  industry_category: `"業界"`,
   delete_tag: `"削除タグ"`,
   delete_flag: `"削除フラグ"`,
   force_flag: `"強制フラグ"`,
@@ -151,10 +154,21 @@ type CrawlPreviewRow = {
 };
 
 type SelectedCrawlChanges = Partial<
-  Record<string, Partial<Record<CrawlPreviewSelectableKey, string>>>
+  Record<
+    string,
+    Partial<Record<CrawlPreviewSelectableKey, string | null>>
+  >
 >;
 
 type CrawlRequestBody = {
+  action?:
+    | "start_preview_job"
+    | "get_job_status"
+    | "pause_job"
+    | "resume_job"
+    | "cancel_job"
+    | "save_partial";
+  jobId?: string | null;
   filterModels?: Partial<Record<FilterKey, FilterModel>>;
   advancedFilters?: AdvancedFilters;
   sortKey?: FilterKey | null;
@@ -162,7 +176,11 @@ type CrawlRequestBody = {
   previewOnly?: boolean;
   selectedChanges?: SelectedCrawlChanges;
   selectedFields?: CrawlSelectableFieldKey[];
+  previewPage?: number;
+  previewPageSize?: number;
 };
+
+type DbClient = PoolClient;
 
 const PREFECTURE_TO_REGION = {
   北海道: "北海道",
@@ -869,58 +887,87 @@ function buildPreviewChanges(
   return changes;
 }
 
+function getDefaultSelectedValue(change: CrawlPreviewChange) {
+  return change.candidates.length > 1
+    ? null
+    : normalizeNullableText(change.after) ??
+        normalizeNullableText(change.candidates[0]) ??
+        null;
+}
+
+function buildEffectiveSelectedMap(
+  item: CrawlJobPreviewItem,
+  selectedChanges: SelectedCrawlChanges | undefined
+) {
+  const selected = selectedChanges?.[item.preview_row_id] ?? {};
+  const result: Partial<Record<CrawlPreviewSelectableKey, string>> = {};
+
+  for (const change of item.changes) {
+    const hasExplicitValue = Object.prototype.hasOwnProperty.call(
+      selected,
+      change.key
+    );
+
+    const explicitValue = hasExplicitValue
+      ? normalizeNullableText(selected[change.key])
+      : undefined;
+
+    const effectiveValue =
+      explicitValue !== undefined
+        ? explicitValue
+        : getDefaultSelectedValue(change);
+
+    if (effectiveValue !== null) {
+      result[change.key] = effectiveValue;
+    }
+  }
+
+  return result;
+}
+
 function buildSelectedPayload(
   bundle: CrawlPayloadBundle,
-  selectedChanges: SelectedCrawlChanges | undefined,
-  previewRowId: string
+  item: CrawlJobPreviewItem,
+  selectedChanges: SelectedCrawlChanges | undefined
 ): CrawlPayload {
-  const selected = selectedChanges?.[previewRowId] ?? {};
+  const selected = buildEffectiveSelectedMap(item, selectedChanges);
 
   return {
     ...bundle.payload,
-    company: normalizeNullableText(selected.company) ?? bundle.payload.company,
-    website_url:
-      normalizeNullableText(selected.website_url) ?? bundle.payload.website_url,
-    phone: normalizeNullableText(selected.phone) ?? bundle.payload.phone,
-    fax: normalizeNullableText(selected.fax) ?? bundle.payload.fax,
-    email: normalizeNullableText(selected.email) ?? bundle.payload.email,
-    zipcode: normalizeNullableText(selected.zipcode) ?? bundle.payload.zipcode,
-    address: normalizeNullableText(selected.address) ?? bundle.payload.address,
-    form_url: normalizeNullableText(selected.form_url) ?? bundle.payload.form_url,
+    company: selected.company ?? bundle.payload.company,
+    website_url: selected.website_url ?? bundle.payload.website_url,
+    phone: selected.phone ?? bundle.payload.phone,
+    fax: selected.fax ?? bundle.payload.fax,
+    email: selected.email ?? bundle.payload.email,
+    zipcode: selected.zipcode ?? bundle.payload.zipcode,
+    address: selected.address ?? bundle.payload.address,
+    form_url: selected.form_url ?? bundle.payload.form_url,
     established_date:
-      normalizeNullableText(selected.established_date) ??
-      bundle.payload.established_date,
+      selected.established_date ?? bundle.payload.established_date,
     representative_name:
-      normalizeNullableText(selected.representative_name) ??
-      bundle.payload.representative_name,
+      selected.representative_name ?? bundle.payload.representative_name,
     representative_title: bundle.payload.representative_title,
-    capital: normalizeNullableText(selected.capital) ?? bundle.payload.capital,
-    employee_count:
-      normalizeNullableText(selected.employee_count) ??
-      bundle.payload.employee_count,
+    capital: selected.capital ?? bundle.payload.capital,
+    employee_count: selected.employee_count ?? bundle.payload.employee_count,
     business_content:
-      normalizeNullableText(selected.business_content) ??
-      bundle.payload.business_content,
+      selected.business_content ?? bundle.payload.business_content,
   };
 }
 
 function getSelectedChangeKeys(
-  previewRowId: string,
+  item: CrawlJobPreviewItem,
   selectedChanges: SelectedCrawlChanges | undefined
 ) {
-  const selected = selectedChanges?.[previewRowId];
-  if (!selected) return [];
-
-  return Object.entries(selected)
-    .filter(([, value]) => normalizeNullableText(value) !== null)
-    .map(([key]) => key as CrawlPreviewSelectableKey);
+  return Object.keys(
+    buildEffectiveSelectedMap(item, selectedChanges)
+  ) as CrawlPreviewSelectableKey[];
 }
 
 function hasAnySelectedCandidate(
-  selectedChanges: SelectedCrawlChanges | undefined,
-  previewRowId: string
+  item: CrawlJobPreviewItem,
+  selectedChanges: SelectedCrawlChanges | undefined
 ) {
-  return getSelectedChangeKeys(previewRowId, selectedChanges).length > 0;
+  return getSelectedChangeKeys(item, selectedChanges).length > 0;
 }
 
 function buildInsertRow(
@@ -964,74 +1011,251 @@ function buildInsertRow(
   };
 }
 
-export async function POST(req: NextRequest) {
-  const client = await pool.connect();
+type CrawlJobPreviewItem = {
+  row_id: string;
+  preview_row_id: string;
+  officeIndex: number;
+  company: string | null;
+  website_url: string | null;
+  source_row: Record<string, unknown>;
+  bundle: CrawlPayloadBundle;
+  changes: CrawlPreviewChange[];
+};
+
+type CrawlJobState = {
+  jobId: string;
+  selectedFields: CrawlSelectableFieldKey[];
+  selectedFieldLabels: string[];
+  targets: Record<string, unknown>[];
+  nextIndex: number;
+  total: number;
+  processed: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  currentCompany: string | null;
+  currentWebsiteUrl: string | null;
+  running: boolean;
+  paused: boolean;
+  pauseRequested: boolean;
+  completed: boolean;
+  error: string | null;
+  previewItems: CrawlJobPreviewItem[];
+  savedPreviewRowIds: Set<string>;
+  sortKey?: FilterKey | null;
+  sortDirection?: SortDirection | "" | null;
+};
+
+const CRAWL_FIELD_LABEL_MAP: Record<CrawlSelectableFieldKey, string> = {
+  company: "企業名",
+  zipcode: "郵便番号",
+  address: "住所",
+  website_url: "企業URL",
+  form_url: "お問い合わせフォームURL",
+  phone: "電話番号",
+  fax: "FAX番号",
+  email: "メールアドレス",
+  established_date: "設立年月",
+  representative_name: "代表者名",
+  capital: "資本金",
+  employee_count: "従業員数",
+  business_content: "事業内容",
+};
+
+const globalForCrawlJobs = globalThis as typeof globalThis & {
+  __masterDataCrawlJobs?: Map<string, CrawlJobState>;
+};
+
+const crawlJobs =
+  globalForCrawlJobs.__masterDataCrawlJobs ??
+  new Map<string, CrawlJobState>();
+
+if (!globalForCrawlJobs.__masterDataCrawlJobs) {
+  globalForCrawlJobs.__masterDataCrawlJobs = crawlJobs;
+}
+
+function buildSelectedFieldLabels(selectedFields: CrawlSelectableFieldKey[]) {
+  return selectedFields.map((field) => CRAWL_FIELD_LABEL_MAP[field]);
+}
+
+const DEFAULT_CRAWL_PREVIEW_PAGE_SIZE = 20;
+const MAX_CRAWL_PREVIEW_PAGE_SIZE = 100;
+
+function normalizePreviewPage(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.floor(num) : 1;
+}
+
+function normalizePreviewPageSize(value: unknown) {
+  const num = Number(value);
+
+  if (!Number.isFinite(num) || num <= 0) {
+    return DEFAULT_CRAWL_PREVIEW_PAGE_SIZE;
+  }
+
+  return Math.min(Math.floor(num), MAX_CRAWL_PREVIEW_PAGE_SIZE);
+}
+
+function buildPublicPreviewRows(
+  job: CrawlJobState,
+  page: number,
+  pageSize: number
+) {
+  const unsavedItems = job.previewItems.filter(
+    (item) => !job.savedPreviewRowIds.has(item.preview_row_id)
+  );
+
+  const total = unsavedItems.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const start = (safePage - 1) * pageSize;
+
+  const rows: CrawlPreviewRow[] = unsavedItems
+    .slice(start, start + pageSize)
+    .map((item) => ({
+      row_id: item.row_id,
+      preview_row_id: item.preview_row_id,
+      company: item.company,
+      website_url: item.website_url,
+      changes: item.changes,
+    }));
+
+  return {
+    rows,
+    total,
+    page: safePage,
+    pageSize,
+  };
+}
+
+function buildJobResponse(
+  job: CrawlJobState,
+  options: {
+    includePreviewRows?: boolean;
+    previewPage?: number;
+    previewPageSize?: number;
+  } = {}
+) {
+  const previewPage = normalizePreviewPage(options.previewPage);
+  const previewPageSize = normalizePreviewPageSize(options.previewPageSize);
+
+  const previewResult = options.includePreviewRows
+    ? buildPublicPreviewRows(job, previewPage, previewPageSize)
+    : null;
+
+  return {
+    ok: true,
+    jobId: job.jobId,
+    jobStatus: job.error
+      ? "error"
+      : job.completed
+      ? "completed"
+      : job.paused
+      ? "paused"
+      : "running",
+    totalTargets: job.total,
+    processed: job.processed,
+    updated: job.updated,
+    skipped: job.skipped,
+    failed: job.failed,
+    currentCompany: job.currentCompany,
+    currentWebsiteUrl: job.currentWebsiteUrl,
+    currentFields: job.selectedFieldLabels,
+    progressPercent:
+      job.total === 0 ? 0 : Math.round((job.processed / job.total) * 100),
+    previewRows: previewResult?.rows,
+    previewTotal: previewResult?.total ?? 0,
+    previewPage: previewResult?.page ?? previewPage,
+    previewPageSize: previewResult?.pageSize ?? previewPageSize,
+    remainingCount: Math.max(job.total - job.nextIndex, 0),
+    paused: job.paused,
+    completed: job.completed,
+    error: job.error,
+  };
+}
+
+async function fetchCrawlTargets(
+  client: DbClient,
+  body: CrawlRequestBody
+) {
+  const filterModels = body.filterModels ?? {};
+  const advancedFilters = body.advancedFilters ?? {};
+
+  const { whereSql, params } = buildWhereClause(filterModels, advancedFilters);
+
+  const websiteRequired = `NULLIF(BTRIM(COALESCE("企業サイトURL"::text, '')), '') IS NOT NULL`;
+  const targetWhereSql = whereSql
+    ? `${whereSql} AND ${websiteRequired}`
+    : `WHERE ${websiteRequired}`;
+
+  const targetSql = `
+    SELECT
+      md.ctid::text AS row_id,
+      to_jsonb(md) AS source_row,
+      md."企業名" AS company,
+      md."企業サイトURL" AS website_url,
+      md."問い合わせフォームURL" AS form_url,
+      md."電話番号" AS phone,
+      md."FAX番号" AS fax,
+      md."メールアドレス" AS email,
+      md."郵便番号" AS zipcode,
+      md."住所" AS address,
+      md."設立年月" AS established_date,
+      md."代表者名" AS representative_name,
+      md."代表者役職" AS representative_title,
+      md."資本金" AS capital,
+      md."従業員数" AS employee_count,
+      md."事業内容" AS business_content
+    FROM public.master_data AS md
+    ${targetWhereSql}
+    ${buildOrderBy(body.sortKey, body.sortDirection)}
+  `;
+
+  const targetRes = await client.query(targetSql, params);
+  return targetRes.rows as Record<string, unknown>[];
+}
+
+async function runCrawlJob(jobId: string) {
+  const firstJob = crawlJobs.get(jobId);
+  if (!firstJob || firstJob.running || firstJob.completed) return;
+
+  firstJob.running = true;
+  firstJob.paused = false;
+  firstJob.pauseRequested = false;
+  firstJob.error = null;
 
   try {
-    const body = (await req.json()) as CrawlRequestBody;
-    const filterModels = body.filterModels ?? {};
-    const advancedFilters = body.advancedFilters ?? {};
-    const selectedFieldSet = normalizeSelectedFields(body.selectedFields);
+    for (let index = firstJob.nextIndex; index < firstJob.targets.length; index += 1) {
+      const job = crawlJobs.get(jobId);
+      if (!job) return;
 
-    const { whereSql, params } = buildWhereClause(filterModels, advancedFilters);
+      if (job.pauseRequested) {
+        job.running = false;
+        job.paused = true;
+        job.currentCompany = null;
+        job.currentWebsiteUrl = null;
+        return;
+      }
 
-    const websiteRequired = `NULLIF(BTRIM(COALESCE("企業サイトURL"::text, '')), '') IS NOT NULL`;
-    const targetWhereSql = whereSql
-      ? `${whereSql} AND ${websiteRequired}`
-      : `WHERE ${websiteRequired}`;
-
-    const targetSql = `
-      SELECT
-        md.ctid::text AS row_id,
-        to_jsonb(md) AS source_row,
-        md."企業名" AS company,
-        md."企業サイトURL" AS website_url,
-        md."問い合わせフォームURL" AS form_url,
-        md."電話番号" AS phone,
-        md."FAX番号" AS fax,
-        md."メールアドレス" AS email,
-        md."郵便番号" AS zipcode,
-        md."住所" AS address,
-        md."設立年月" AS established_date,
-        md."代表者名" AS representative_name,
-        md."代表者役職" AS representative_title,
-        md."資本金" AS capital,
-        md."従業員数" AS employee_count,
-        md."事業内容" AS business_content
-      FROM public.master_data AS md
-      ${targetWhereSql}
-      ${buildOrderBy(body.sortKey, body.sortDirection)}
-    `;
-
-    const targetRes = await client.query(targetSql, params);
-    const targets = targetRes.rows;
-
-    let processed = 0;
-    let updated = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    const previewRows: CrawlPreviewRow[] = [];
-
-    for (const row of targets) {
-      processed += 1;
+      const row = job.targets[index];
+      job.currentCompany = normalizeNullableText(row.company);
+      job.currentWebsiteUrl = normalizeNullableText(row.website_url);
 
       try {
+        const selectedFieldSet = new Set(job.selectedFields);
         const extracted = await crawlCompanyWebsite(
           String(row.website_url ?? ""),
           Array.from(selectedFieldSet)
         );
+
         const bundles = buildCrawlPayloadBundles(
           extracted,
           normalizeNullableText(row.company)
         );
 
         if (bundles.length === 0) {
-          skipped += 1;
-          continue;
-        }
-
-        if (body.previewOnly) {
+          job.skipped += 1;
+        } else {
           let previewAdded = 0;
 
           bundles.forEach((bundle, officeIndex) => {
@@ -1045,11 +1269,14 @@ export async function POST(req: NextRequest) {
               return;
             }
 
-            previewRows.push({
+            job.previewItems.push({
               row_id: String(row.row_id ?? ""),
               preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
+              officeIndex,
               company: bundle.payload.company ?? normalizeNullableText(row.company),
               website_url: normalizeNullableText(row.website_url),
+              source_row: (row.source_row ?? {}) as Record<string, unknown>,
+              bundle,
               changes,
             });
 
@@ -1057,145 +1284,393 @@ export async function POST(req: NextRequest) {
           });
 
           if (previewAdded > 0) {
-            updated += previewAdded;
+            job.updated += previewAdded;
           } else {
-            skipped += 1;
+            job.skipped += 1;
           }
-
-          continue;
-        }
-
-        let rowHandled = false;
-        const sourceRow = (row.source_row ?? {}) as Record<string, unknown>;
-
-        for (const [officeIndex, bundle] of bundles.entries()) {
-          const previewRowId = `${String(row.row_id ?? "")}__${officeIndex}`;
-
-          if (!hasAnySelectedCandidate(body.selectedChanges, previewRowId)) {
-            continue;
-          }
-
-          const selectedKeys = new Set(
-            getSelectedChangeKeys(previewRowId, body.selectedChanges)
-          );
-
-          const payload = buildSelectedPayload(
-            bundle,
-            body.selectedChanges,
-            previewRowId
-          );
-
-          if (officeIndex === 0) {
-            const updateSql = `
-              UPDATE public.master_data
-              SET
-                "企業名" = CASE
-                  WHEN $14::boolean THEN COALESCE($1, "企業名")
-                  WHEN NULLIF(BTRIM(COALESCE("企業名"::text, '')), '') IS NULL
-                    THEN COALESCE($1, "企業名")
-                  ELSE "企業名"
-                END,
-                "企業サイトURL" = CASE
-                  WHEN NULLIF(BTRIM(COALESCE("企業サイトURL"::text, '')), '') IS NULL
-                    THEN COALESCE($2, "企業サイトURL")
-                  ELSE "企業サイトURL"
-                END,
-                "問い合わせフォームURL" = COALESCE($3, "問い合わせフォームURL"),
-                "電話番号" = COALESCE($4, "電話番号"),
-                "FAX番号" = COALESCE($5, "FAX番号"),
-                "メールアドレス" = COALESCE($6, "メールアドレス"),
-                "郵便番号" = COALESCE($7, "郵便番号"),
-                "住所" = COALESCE($8, "住所"),
-                "設立年月" = COALESCE($9, "設立年月"),
-                "代表者名" = COALESCE($10, "代表者名"),
-                "資本金" = COALESCE($11, "資本金"),
-                "従業員数" = COALESCE($12, "従業員数"),
-                "事業内容" = COALESCE($13, "事業内容")
-              WHERE ctid = $15::tid
-            `;
-
-            const updateValues = [
-              selectedKeys.has("company") ? payload.company : null,
-              selectedKeys.has("website_url") ? payload.website_url : null,
-              selectedKeys.has("form_url") ? payload.form_url : null,
-              selectedKeys.has("phone") ? payload.phone : null,
-              selectedKeys.has("fax") ? payload.fax : null,
-              selectedKeys.has("email") ? payload.email : null,
-              selectedKeys.has("zipcode") ? payload.zipcode : null,
-              selectedKeys.has("address") ? payload.address : null,
-              selectedKeys.has("established_date") ? payload.established_date : null,
-              selectedKeys.has("representative_name") ? payload.representative_name : null,
-              selectedKeys.has("capital") ? payload.capital : null,
-              selectedKeys.has("employee_count") ? payload.employee_count : null,
-              selectedKeys.has("business_content") ? payload.business_content : null,
-              selectedKeys.has("company") && bundle.forceCompanyUpdate,
-              row.row_id,
-            ];
-
-            const updateRes = await client.query(updateSql, updateValues);
-
-            if ((updateRes.rowCount ?? 0) > 0) {
-              updated += 1;
-              rowHandled = true;
-            }
-
-            continue;
-          }
-
-          const insertRow = buildInsertRow(sourceRow, bundle, payload, selectedKeys);
-          const insertColumns = MASTER_DATA_COLUMNS.map(
-            (column) => `"${column}"`
-          ).join(", ");
-          const insertPlaceholders = MASTER_DATA_COLUMNS.map(
-            (_, index) => `$${index + 1}`
-          ).join(", ");
-
-          const insertSql = `
-            INSERT INTO public.master_data (${insertColumns})
-            VALUES (${insertPlaceholders})
-          `;
-
-          const insertValues = MASTER_DATA_COLUMNS.map(
-            (column) => insertRow[column] ?? null
-          );
-
-          await client.query(insertSql, insertValues);
-          updated += 1;
-          rowHandled = true;
-        }
-
-        if (!rowHandled) {
-          skipped += 1;
         }
       } catch {
-        failed += 1;
+        job.failed += 1;
+      } finally {
+        job.processed += 1;
+        job.nextIndex = index + 1;
       }
     }
 
-    if (body.previewOnly) {
+    const job = crawlJobs.get(jobId);
+    if (!job) return;
+
+    job.completed = true;
+    job.running = false;
+    job.paused = false;
+    job.pauseRequested = false;
+    job.currentCompany = null;
+    job.currentWebsiteUrl = null;
+  } catch (error) {
+    const job = crawlJobs.get(jobId);
+    if (!job) return;
+
+    job.running = false;
+    job.paused = false;
+    job.completed = false;
+    job.currentCompany = null;
+    job.currentWebsiteUrl = null;
+    job.error =
+      error instanceof Error
+        ? error.message
+        : "クローリングでエラーが発生しました";
+  }
+}
+
+async function savePreviewItems(
+  client: DbClient,
+  job: CrawlJobState,
+  selectedChanges: SelectedCrawlChanges | undefined
+) {
+  let processed = 0;
+  let updated = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const item of job.previewItems) {
+    if (job.savedPreviewRowIds.has(item.preview_row_id)) {
+      continue;
+    }
+
+    processed += 1;
+
+    try {
+      if (!hasAnySelectedCandidate(item, selectedChanges)) {
+        job.savedPreviewRowIds.add(item.preview_row_id);
+        skipped += 1;
+        continue;
+      }
+
+      const selectedKeys = new Set(
+        getSelectedChangeKeys(item, selectedChanges)
+      );
+
+      const payload = buildSelectedPayload(
+        item.bundle,
+        item,
+        selectedChanges
+      );
+
+      if (item.officeIndex === 0) {
+        const updateSql = `
+          UPDATE public.master_data
+          SET
+            "企業名" = CASE
+              WHEN $14::boolean THEN COALESCE($1, "企業名")
+              WHEN NULLIF(BTRIM(COALESCE("企業名"::text, '')), '') IS NULL
+                THEN COALESCE($1, "企業名")
+              ELSE "企業名"
+            END,
+            "企業サイトURL" = CASE
+              WHEN NULLIF(BTRIM(COALESCE("企業サイトURL"::text, '')), '') IS NULL
+                THEN COALESCE($2, "企業サイトURL")
+              ELSE "企業サイトURL"
+            END,
+            "問い合わせフォームURL" = COALESCE($3, "問い合わせフォームURL"),
+            "電話番号" = COALESCE($4, "電話番号"),
+            "FAX番号" = COALESCE($5, "FAX番号"),
+            "メールアドレス" = COALESCE($6, "メールアドレス"),
+            "郵便番号" = COALESCE($7, "郵便番号"),
+            "住所" = COALESCE($8, "住所"),
+            "設立年月" = COALESCE($9, "設立年月"),
+            "代表者名" = COALESCE($10, "代表者名"),
+            "資本金" = COALESCE($11, "資本金"),
+            "従業員数" = COALESCE($12, "従業員数"),
+            "事業内容" = COALESCE($13, "事業内容")
+          WHERE ctid = $15::tid
+        `;
+
+        const updateValues = [
+          selectedKeys.has("company") ? payload.company : null,
+          selectedKeys.has("website_url") ? payload.website_url : null,
+          selectedKeys.has("form_url") ? payload.form_url : null,
+          selectedKeys.has("phone") ? payload.phone : null,
+          selectedKeys.has("fax") ? payload.fax : null,
+          selectedKeys.has("email") ? payload.email : null,
+          selectedKeys.has("zipcode") ? payload.zipcode : null,
+          selectedKeys.has("address") ? payload.address : null,
+          selectedKeys.has("established_date") ? payload.established_date : null,
+          selectedKeys.has("representative_name")
+            ? payload.representative_name
+            : null,
+          selectedKeys.has("capital") ? payload.capital : null,
+          selectedKeys.has("employee_count") ? payload.employee_count : null,
+          selectedKeys.has("business_content") ? payload.business_content : null,
+          selectedKeys.has("company") && item.bundle.forceCompanyUpdate,
+          item.row_id,
+        ];
+
+        const updateRes = await client.query(updateSql, updateValues);
+
+        if ((updateRes.rowCount ?? 0) > 0) {
+          updated += 1;
+          job.savedPreviewRowIds.add(item.preview_row_id);
+        } else {
+          skipped += 1;
+          job.savedPreviewRowIds.add(item.preview_row_id);
+        }
+
+        continue;
+      }
+
+      const insertRow = buildInsertRow(
+        item.source_row,
+        item.bundle,
+        payload,
+        selectedKeys
+      );
+
+      const insertColumns = MASTER_DATA_COLUMNS.map(
+        (column) => `"${column}"`
+      ).join(", ");
+      const insertPlaceholders = MASTER_DATA_COLUMNS.map(
+        (_, index) => `$${index + 1}`
+      ).join(", ");
+
+      const insertSql = `
+        INSERT INTO public.master_data (${insertColumns})
+        VALUES (${insertPlaceholders})
+      `;
+
+      const insertValues = MASTER_DATA_COLUMNS.map(
+        (column) => insertRow[column] ?? null
+      );
+
+      await client.query(insertSql, insertValues);
+      updated += 1;
+      job.savedPreviewRowIds.add(item.preview_row_id);
+    } catch {
+      failed += 1;
+    }
+  }
+
+  if (job.savedPreviewRowIds.size > 0) {
+    job.previewItems = job.previewItems.filter(
+      (item) => !job.savedPreviewRowIds.has(item.preview_row_id)
+    );
+    job.savedPreviewRowIds = new Set<string>();
+  }
+
+  return { processed, updated, skipped, failed };
+}
+
+export async function POST(req: NextRequest) {
+  let client: DbClient | null = null;
+
+  try {
+    const body = (await req.json()) as CrawlRequestBody;
+    const action = body.action;
+
+    if (action === "get_job_status") {
+      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+
+      if (!job) {
+        return NextResponse.json(
+          { ok: false, error: "クローリングジョブが見つかりません" },
+          { status: 404 }
+        );
+      }
+
+      const includePreviewRows =
+        job.paused || job.completed || !!job.error;
+
+      return NextResponse.json(
+        buildJobResponse(job, {
+          includePreviewRows,
+          previewPage: body.previewPage,
+          previewPageSize: body.previewPageSize,
+        })
+      );
+    }
+
+    if (action === "cancel_job") {
+      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+
+      if (!job) {
+        return NextResponse.json(
+          { ok: false, error: "クローリングジョブが見つかりません" },
+          { status: 404 }
+        );
+      }
+
+      job.pauseRequested = false;
+      job.running = false;
+      job.paused = false;
+      job.completed = false;
+      job.error = null;
+      job.currentCompany = null;
+      job.currentWebsiteUrl = null;
+      job.previewItems = [];
+      job.savedPreviewRowIds = new Set<string>();
+
+      crawlJobs.delete(job.jobId);
+
       return NextResponse.json({
         ok: true,
-        preview: true,
-        previewRows,
-        processed,
-        updated: previewRows.length,
-        skipped,
-        failed,
-        message:
-          previewRows.length > 0
-            ? `保存候補 ${previewRows.length} 件です`
-            : "保存候補はありませんでした",
+        message: "クローリングを中止しました",
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      processed,
-      updated,
-      skipped,
-      failed,
-      message: `クローリング完了：対象 ${processed} 件 / 更新 ${updated} 件 / スキップ ${skipped} 件 / 失敗 ${failed} 件`,
-    });
+    if (action === "pause_job") {
+      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+
+      if (!job) {
+        return NextResponse.json(
+          { ok: false, error: "クローリングジョブが見つかりません" },
+          { status: 404 }
+        );
+      }
+
+      job.pauseRequested = true;
+
+      return NextResponse.json({
+        ...buildJobResponse(job),
+        message: "中断指示を受け付けました",
+      });
+    }
+
+    if (action === "resume_job") {
+      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+
+      if (!job) {
+        return NextResponse.json(
+          { ok: false, error: "クローリングジョブが見つかりません" },
+          { status: 404 }
+        );
+      }
+
+      if (job.completed) {
+        return NextResponse.json({
+          ...buildJobResponse(job),
+          message: "すでに完了しています",
+        });
+      }
+
+      job.pauseRequested = false;
+      job.paused = false;
+      job.error = null;
+
+      void runCrawlJob(job.jobId);
+
+      return NextResponse.json({
+        ...buildJobResponse(job),
+        jobStatus: "running",
+        message: "途中から再開しました",
+      });
+    }
+
+    if (action === "save_partial") {
+      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+
+      if (!job) {
+        return NextResponse.json(
+          { ok: false, error: "クローリングジョブが見つかりません" },
+          { status: 404 }
+        );
+      }
+
+      if (job.running) {
+        return NextResponse.json(
+          { ok: false, error: "保存前にクローリングを中断してください" },
+          { status: 400 }
+        );
+      }
+
+      client = await pool.connect();
+
+      const result = await savePreviewItems(client, job, body.selectedChanges);
+
+      const remainingCount = Math.max(job.total - job.nextIndex, 0);
+
+      const previewResult = buildPublicPreviewRows(
+        job,
+        1,
+        DEFAULT_CRAWL_PREVIEW_PAGE_SIZE
+      );
+
+      if (remainingCount === 0 && job.previewItems.length === 0) {
+        crawlJobs.delete(job.jobId);
+      }
+
+      return NextResponse.json({
+        ok: true,
+        ...result,
+        remainingCount,
+        previewRows: previewResult.rows,
+        previewTotal: previewResult.total,
+        previewPage: previewResult.page,
+        previewPageSize: previewResult.pageSize,
+        message: `保存完了：対象 ${result.processed} 件 / 更新 ${result.updated} 件 / スキップ ${result.skipped} 件 / 失敗 ${result.failed} 件`,
+      });
+    }
+
+    if (action === "start_preview_job") {
+      client = await pool.connect();
+
+      const selectedFieldSet = normalizeSelectedFields(body.selectedFields);
+      const selectedFields = Array.from(selectedFieldSet);
+      const targets = await fetchCrawlTargets(client, body);
+
+      if (targets.length === 0) {
+        return NextResponse.json({
+          ok: true,
+          jobId: null,
+          totalTargets: 0,
+          processed: 0,
+          updated: 0,
+          skipped: 0,
+          failed: 0,
+          previewRows: [],
+          message: "対象がありませんでした",
+        });
+      }
+
+      const jobId = crypto.randomUUID();
+
+      const job: CrawlJobState = {
+        jobId,
+        selectedFields,
+        selectedFieldLabels: buildSelectedFieldLabels(selectedFields),
+        targets,
+        nextIndex: 0,
+        total: targets.length,
+        processed: 0,
+        updated: 0,
+        skipped: 0,
+        failed: 0,
+        currentCompany: null,
+        currentWebsiteUrl: null,
+        running: false,
+        paused: false,
+        pauseRequested: false,
+        completed: false,
+        error: null,
+        previewItems: [],
+        savedPreviewRowIds: new Set<string>(),
+        sortKey: body.sortKey,
+        sortDirection: body.sortDirection,
+      };
+
+      crawlJobs.set(jobId, job);
+
+      void runCrawlJob(jobId);
+
+      return NextResponse.json({
+        ...buildJobResponse(job),
+        jobStatus: "running",
+        message: "クローリングを開始しました",
+      });
+    }
+
+    return NextResponse.json(
+      { ok: false, error: "不正なリクエストです" },
+      { status: 400 }
+    );
   } catch (error) {
     return NextResponse.json(
       {
@@ -1208,6 +1683,6 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   } finally {
-    client.release();
+    client?.release();
   }
 }

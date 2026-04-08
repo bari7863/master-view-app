@@ -12,7 +12,6 @@ type Row = {
   small_industry: string | null;
   company_kana: string | null;
   summary: string | null;
-  business_content: string | null;
   website_url: string | null;
   form_url: string | null;
   phone: string | null;
@@ -29,9 +28,10 @@ type Row = {
   closing_month: string | null;
   office_count: string | null;
   new_tag: string | null;
-  delete_tag: string | null;
-  delete_flag: string | null;
-  force_flag: string | null;
+  business_type: string | null;
+  business_content: string | null;
+  industry_category: string | null;
+  memo: string | null;
 };
 
 type FilterKey = keyof Row;
@@ -189,6 +189,12 @@ type CrawlPreviewRow = {
   changes: CrawlPreviewChange[];
 };
 
+type CrawlSelectedChangeValue = string | null;
+type CrawlSelectedChanges = Record<
+  string,
+  Partial<Record<CrawlFieldKey, CrawlSelectedChangeValue>>
+>;
+
 type ApiResponse = {
   ok: boolean;
   total?: number;
@@ -218,16 +224,31 @@ type ApiResponse = {
   deleted?: number;
   preview?: boolean;
   previewRows?: CrawlPreviewRow[];
+
+  previewTotal?: number;
+  previewPage?: number;
+  previewPageSize?: number;
+
+  jobId?: string | null;
+  jobStatus?: "running" | "paused" | "completed" | "error";
+  totalTargets?: number;
+  currentCompany?: string | null;
+  currentWebsiteUrl?: string | null;
+  currentFields?: string[];
+  progressPercent?: number;
+  remainingCount?: number;
+  paused?: boolean;
+  completed?: boolean;
 };
 
-async function readApiResponse(res: Response): Promise<ApiResponse> {
+async function readApiResponse(
+  res: Response,
+  emptyFallback: ApiResponse = { ok: true }
+): Promise<ApiResponse> {
   const text = await res.text();
 
   if (!text) {
-    return {
-      ok: false,
-      error: "APIレスポンスが空です",
-    };
+    return emptyFallback;
   }
 
   try {
@@ -237,6 +258,31 @@ async function readApiResponse(res: Response): Promise<ApiResponse> {
   }
 }
 
+type CrawlJobStatus = "idle" | "running" | "paused" | "completed" | "error";
+
+function buildImportFileKey(file: File) {
+  return `${file.name}__${file.size}__${file.lastModified}`;
+}
+
+const CRAWL_PREVIEW_PAGE_SIZE = 20;
+
+const ACTIVE_CRAWL_JOB_STORAGE_KEY = "master-data-active-crawl-job-id";
+
+function saveActiveCrawlJobId(jobId: string | null) {
+  if (typeof window === "undefined") return;
+
+  if (jobId) {
+    window.localStorage.setItem(ACTIVE_CRAWL_JOB_STORAGE_KEY, jobId);
+  } else {
+    window.localStorage.removeItem(ACTIVE_CRAWL_JOB_STORAGE_KEY);
+  }
+}
+
+function loadActiveCrawlJobId() {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(ACTIVE_CRAWL_JOB_STORAGE_KEY);
+}
+
 const GRID_TEMPLATE = `
   minmax(220px,2fr)
   minmax(110px,0.8fr)
@@ -244,7 +290,6 @@ const GRID_TEMPLATE = `
   minmax(150px,1.1fr)
   minmax(150px,1.1fr)
   minmax(180px,1.2fr)
-  minmax(320px,2.2fr)
   minmax(320px,2.2fr)
   minmax(240px,1.6fr)
   minmax(260px,1.8fr)
@@ -262,9 +307,10 @@ const GRID_TEMPLATE = `
   minmax(120px,0.9fr)
   minmax(120px,0.9fr)
   minmax(140px,1fr)
-  minmax(120px,0.9fr)
-  minmax(120px,0.9fr)
-  minmax(120px,0.9fr)
+  minmax(140px,1fr)
+  minmax(320px,2.2fr)
+  minmax(160px,1.1fr)
+  minmax(320px,2.2fr)
 `;
 
 const pageSizeOptions = [
@@ -287,17 +333,46 @@ const CONDITION_OPTIONS: { value: ConditionType; label: string }[] = [
   { value: "is_not_empty", label: "空白ではない" },
 ];
 
+const CSV_TEMPLATE_HEADERS = [
+  "企業名",
+  "郵便番号",
+  "住所",
+  "大業種",
+  "小業種",
+  "企業名（かな）",
+  "企業概要",
+  "企業URL",
+  "お問い合わせフォームURL",
+  "電話番号",
+  "FAX番号",
+  "メールアドレス",
+  "設立年月",
+  "代表者名",
+  "代表者役職",
+  "資本金",
+  "従業員数",
+  "従業員数年度",
+  "前年売上高",
+  "直近売上高",
+  "決算月",
+  "事業所数",
+  "タグ",
+  "業種",
+  "事業内容",
+  "業界",
+  "メモ",
+] as const;
+
 const COLUMN_DEFS: { key: FilterKey; label: string }[] = [
   { key: "company", label: "企業名" },
   { key: "zipcode", label: "郵便番号" },
   { key: "address", label: "住所" },
-  { key: "big_industry", label: "大業種名" },
-  { key: "small_industry", label: "小業種名" },
+  { key: "big_industry", label: "大業種" },
+  { key: "small_industry", label: "小業種" },
   { key: "company_kana", label: "企業名（かな）" },
   { key: "summary", label: "企業概要" },
-  { key: "business_content", label: "事業内容"},
-  { key: "website_url", label: "企業サイトURL" },
-  { key: "form_url", label: "問い合わせフォームURL" },
+  { key: "website_url", label: "企業URL" },
+  { key: "form_url", label: "お問い合わせフォームURL" },
   { key: "phone", label: "電話番号" },
   { key: "fax", label: "FAX番号" },
   { key: "email", label: "メールアドレス" },
@@ -311,10 +386,11 @@ const COLUMN_DEFS: { key: FilterKey; label: string }[] = [
   { key: "latest_sales", label: "直近売上高" },
   { key: "closing_month", label: "決算月" },
   { key: "office_count", label: "事業所数" },
-  { key: "new_tag", label: "新規登録タグ" },
-  { key: "delete_tag", label: "削除タグ" },
-  { key: "delete_flag", label: "削除フラグ" },
-  { key: "force_flag", label: "強制フラグ" },
+  { key: "new_tag", label: "タグ" },
+  { key: "business_type", label: "業種" },
+  { key: "business_content", label: "事業内容" },
+  { key: "industry_category", label: "業界" },
+  { key: "memo", label: "メモ" },
 ];
 
 function createEmptyColumnState(): ColumnFilterState {
@@ -351,6 +427,19 @@ function cloneColumnStates(
   }, {} as Record<FilterKey, ColumnFilterState>);
 }
 
+function createClearedColumnStates(
+  states: Record<FilterKey, ColumnFilterState>
+): Record<FilterKey, ColumnFilterState> {
+  return COLUMN_DEFS.reduce((acc, column) => {
+    acc[column.key] = {
+      ...createEmptyColumnState(),
+      availableValues: [...states[column.key].availableValues],
+      valueCounts: { ...states[column.key].valueCounts },
+    };
+    return acc;
+  }, {} as Record<FilterKey, ColumnFilterState>);
+}
+
 function buildRequestFilterModels(
   states: Record<FilterKey, ColumnFilterState>
 ) {
@@ -358,26 +447,53 @@ function buildRequestFilterModels(
     const state = states[column.key];
     const model: Record<string, unknown> = {};
 
+    const availableValues = state.availableValues ?? [];
+    const selectedValues = state.selectedValues ?? [];
+
+    const hasEmptyValue = availableValues.includes("");
+    const nonEmptyAvailableValues = availableValues.filter((value) => value !== "");
+    const selectedNonEmptyValues = selectedValues.filter((value) => value !== "");
+    const selectedIncludesEmpty = selectedValues.includes("");
+
+    const isAllNonEmptySelected =
+      state.valueFilterEnabled &&
+      nonEmptyAvailableValues.length > 0 &&
+      selectedNonEmptyValues.length === nonEmptyAvailableValues.length &&
+      nonEmptyAvailableValues.every((value) => selectedNonEmptyValues.includes(value)) &&
+      hasEmptyValue &&
+      !selectedIncludesEmpty;
+
+    const isAllValuesSelected =
+      state.valueFilterEnabled &&
+      availableValues.length > 0 &&
+      selectedValues.length === availableValues.length &&
+      availableValues.every((value) => selectedValues.includes(value));
+
     if (state.sortDirection !== "") {
       model.sortDirection = state.sortDirection;
     }
 
-    if (state.conditionType !== "") {
+    if (isAllNonEmptySelected) {
+      model.conditionType = "is_not_empty";
+    } else if (!isAllValuesSelected && state.conditionType !== "") {
+      model.conditionType = state.conditionType;
+    } else if (state.conditionType !== "") {
       model.conditionType = state.conditionType;
     }
 
     if (
-      state.conditionType !== "" &&
-      state.conditionType !== "is_empty" &&
-      state.conditionType !== "is_not_empty" &&
+      model.conditionType !== undefined &&
+      model.conditionType !== "" &&
+      model.conditionType !== "is_empty" &&
+      model.conditionType !== "is_not_empty" &&
       state.conditionValue.trim() !== ""
     ) {
       model.conditionValue = state.conditionValue;
     }
 
-    if (state.valueFilterEnabled) {
+    if (state.valueFilterEnabled && !isAllNonEmptySelected && !isAllValuesSelected) {
       model.valueFilterEnabled = true;
-      model.selectedValues = state.selectedValues;
+      model.selectedValues = selectedValues;
     }
 
     acc[column.key] = model;
@@ -416,10 +532,15 @@ const ADVANCED_FILTER_TITLES: Record<AdvancedFilterModalKey, string> = {
   tag: "タグ",
 };
 
-type SidebarPanelKey = "search" | "csv" | "inspection" | "theme";
+type SidebarPanelKey = "search" | "list" | "csv" | "inspection" | "theme";
+
+type FilterClearConfirmTarget =
+  | { type: "column"; key: FilterKey }
+  | { type: "advanced"; key: AdvancedFilterModalKey };
 
 const SIDEBAR_PANEL_TITLES: Record<SidebarPanelKey, string> = {
   search: "絞り込み",
+  list: "リスト",
   csv: "CSV取込",
   inspection: "精査",
   theme: "テーマ",
@@ -427,6 +548,7 @@ const SIDEBAR_PANEL_TITLES: Record<SidebarPanelKey, string> = {
 
 const SIDEBAR_MENU_ITEMS: { key: SidebarPanelKey; label: string }[] = [
   { key: "search", label: "検索" },
+  { key: "list", label: "リスト" },
   { key: "csv", label: "CSV" },
   { key: "inspection", label: "精査" },
   { key: "theme", label: "テーマ" },
@@ -450,6 +572,25 @@ function SidebarMenuIcon({
       >
         <circle cx="11" cy="11" r="6.5" />
         <path d="M16 16L21 21" />
+      </svg>
+    );
+  }
+
+    if (menuKey === "list") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className={className}
+      >
+        <circle cx="5" cy="6" r="1.2" />
+        <circle cx="5" cy="12" r="1.2" />
+        <circle cx="5" cy="18" r="1.2" />
+        <path d="M9 6h10" />
+        <path d="M9 12h10" />
+        <path d="M9 18h10" />
       </svg>
     );
   }
@@ -969,6 +1110,7 @@ function HeaderCell({
   onToggleValue,
   onSelectAllVisible,
   onClearVisible,
+  onOpenClearConfirm,
   onApply,
   onClear,
 }: {
@@ -984,6 +1126,7 @@ function HeaderCell({
   onToggleValue: (key: FilterKey, value: string) => void;
   onSelectAllVisible: (key: FilterKey) => void;
   onClearVisible: (key: FilterKey) => void;
+  onOpenClearConfirm: (key: FilterKey) => void;
   onApply: (key: FilterKey) => void;
   onClear: (key: FilterKey) => void;
 }) {
@@ -1037,13 +1180,23 @@ function HeaderCell({
                     {label} のフィルタ
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => onToggleOpen(filterKey)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
-                  >
-                    ×
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onOpenClearConfirm(filterKey)}
+                      className="inline-flex h-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-300 transition hover:bg-white/10"
+                    >
+                      フィルタ解除
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onToggleOpen(filterKey)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -1234,7 +1387,6 @@ function VirtualRow({
         <Cell title={row.small_industry || ""}><EmptyValue value={row.small_industry} /></Cell>
         <Cell title={row.company_kana || ""}><EmptyValue value={row.company_kana} /></Cell>
         <Cell title={row.summary || ""} className="whitespace-pre-wrap"><EmptyValue value={row.summary} /></Cell>
-        <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
         <Cell title={row.website_url || ""}><LinkCell url={row.website_url} /></Cell>
         <Cell title={row.form_url || ""}><LinkCell url={row.form_url} /></Cell>
         <Cell title={row.phone || ""}><EmptyValue value={row.phone} /></Cell>
@@ -1251,9 +1403,10 @@ function VirtualRow({
         <Cell title={row.closing_month || ""}><EmptyValue value={row.closing_month} /></Cell>
         <Cell title={row.office_count || ""}><EmptyValue value={row.office_count} /></Cell>
         <Cell title={row.new_tag || ""}><EmptyValue value={row.new_tag} /></Cell>
-        <Cell title={row.delete_tag || ""}><EmptyValue value={row.delete_tag} /></Cell>
-        <Cell title={row.delete_flag || ""}><EmptyValue value={row.delete_flag} /></Cell>
-        <Cell title={row.force_flag || ""}><EmptyValue value={row.force_flag} /></Cell>
+        <Cell title={row.business_type || ""}><EmptyValue value={row.business_type} /></Cell>
+        <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
+        <Cell title={row.industry_category || ""}><EmptyValue value={row.industry_category} /></Cell>
+        <Cell title={row.memo || ""} className="whitespace-pre-wrap"><EmptyValue value={row.memo} /></Cell>
       </div>
     </div>
   );
@@ -1308,7 +1461,10 @@ export default function Home() {
   const topPanelRef = useRef<HTMLDivElement | null>(null);
   const [headerStickyTop, setHeaderStickyTop] = useState(0);
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [checkedImportFiles, setCheckedImportFiles] = useState<
+    Record<string, boolean>
+  >({});
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState("");
   const [importError, setImportError] = useState("");
@@ -1320,26 +1476,78 @@ export default function Home() {
   const [crawling, setCrawling] = useState(false);
   const [crawlMessage, setCrawlMessage] = useState("");
   const [crawlError, setCrawlError] = useState("");
+
+  const [crawlJobId, setCrawlJobId] = useState<string | null>(null);
+  const [crawlJobStatus, setCrawlJobStatus] =
+    useState<CrawlJobStatus>("idle");
+  const [crawlProgressOpen, setCrawlProgressOpen] = useState(false);
+  const [crawlTotalTargets, setCrawlTotalTargets] = useState(0);
+  const [crawlProcessedCount, setCrawlProcessedCount] = useState(0);
+  const [crawlUpdatedCount, setCrawlUpdatedCount] = useState(0);
+  const [crawlSkippedCount, setCrawlSkippedCount] = useState(0);
+  const [crawlFailedCount, setCrawlFailedCount] = useState(0);
+  const [crawlCurrentCompany, setCrawlCurrentCompany] = useState<string | null>(null);
+  const [crawlCurrentWebsiteUrl, setCrawlCurrentWebsiteUrl] = useState<string | null>(null);
+  const [crawlCurrentFields, setCrawlCurrentFields] = useState<string[]>([]);
+  const [crawlRemainingCount, setCrawlRemainingCount] = useState(0);
+  const crawlStatusTimerRef = useRef<number | null>(null);
+
+  const [crawlElapsedMs, setCrawlElapsedMs] = useState(0);
+  const crawlStartedAtRef = useRef<number | null>(null);
+  const crawlElapsedBaseMsRef = useRef(0);
+  const crawlElapsedTimerRef = useRef<number | null>(null);
+
   const [crawlPreviewOpen, setCrawlPreviewOpen] = useState(false);
   const [crawlPreviewRows, setCrawlPreviewRows] = useState<CrawlPreviewRow[]>([]);
+  const [crawlPreviewPage, setCrawlPreviewPage] = useState(1);
+  const [crawlPreviewTotalCount, setCrawlPreviewTotalCount] = useState(0);
+  const [crawlPreviewLoading, setCrawlPreviewLoading] = useState(false);
+  const [crawlSelectedChanges, setCrawlSelectedChanges] =
+    useState<CrawlSelectedChanges>({});
+  const [crawlResumeConfirmOpen, setCrawlResumeConfirmOpen] = useState(false);
 
-  const [crawlSelectedChanges, setCrawlSelectedChanges] = useState<
-    Record<string, Record<string, string>>
-  >({});
+  const crawlPreviewTotalPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(crawlPreviewTotalCount / CRAWL_PREVIEW_PAGE_SIZE)
+      ),
+    [crawlPreviewTotalCount]
+  );
+
+  const [listDeleteScopeOpen, setListDeleteScopeOpen] = useState(false);
+  const [listDeleteConfirmTarget, setListDeleteConfirmTarget] = useState<
+    "filtered" | "all" | null
+  >(null);
+  const [listDeleting, setListDeleting] = useState(false);
+  const [listDeleteMessage, setListDeleteMessage] = useState("");
+  const [listDeleteError, setListDeleteError] = useState("");
 
   const [deduplicating, setDeduplicating] = useState(false);
   const [dedupeMessage, setDedupeMessage] = useState("");
   const [dedupeError, setDedupeError] = useState("");
   const [dedupeConfirmOpen, setDedupeConfirmOpen] = useState(false);
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  const [importDuplicateConfirmOpen, setImportDuplicateConfirmOpen] = useState(false);
+  const [exportScopeOpen, setExportScopeOpen] = useState(false);
+  const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
+  const [exportDuplicateConfirmOpen, setExportDuplicateConfirmOpen] = useState(false);
+  const [exportMode, setExportMode] = useState<"all" | "filtered">("filtered");
+
+  const [singleFilterClearConfirm, setSingleFilterClearConfirm] =
+    useState<FilterClearConfirmTarget | null>(null);
+  const [allFiltersClearConfirmOpen, setAllFiltersClearConfirmOpen] = useState(false);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [openSidebarPanel, setOpenSidebarPanel] =
     useState<SidebarPanelKey | null>(null);
 
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
+  const fetchDataRequestIdRef = useRef(0);
 
     const fetchData = async () => {
+      const requestId = ++fetchDataRequestIdRef.current;
+
       setLoading(true);
       setError("");
 
@@ -1353,7 +1561,12 @@ export default function Home() {
         );
         params.set(
           "advancedFilters",
-          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions))
+          JSON.stringify(
+            buildRequestAdvancedFilters(
+              appliedAdvancedFilters,
+              advancedValueOptions
+            )
+          )
         );
 
         const sortColumn = COLUMN_DEFS.find(
@@ -1372,7 +1585,16 @@ export default function Home() {
           cache: "no-store",
         });
 
-        const data = await readApiResponse(res);
+        const data = await readApiResponse(res, {
+          ok: true,
+          total: 0,
+          totalPages: 1,
+          rows: [],
+        });
+
+        if (requestId !== fetchDataRequestIdRef.current) {
+          return;
+        }
 
         if (!res.ok || !data.ok) {
           throw new Error(data.error || "データ取得に失敗しました");
@@ -1382,12 +1604,18 @@ export default function Home() {
         setTotal(data.total || 0);
         setTotalPages(data.totalPages || 1);
       } catch (e) {
+        if (requestId !== fetchDataRequestIdRef.current) {
+          return;
+        }
+
         setRows([]);
         setTotal(0);
         setTotalPages(1);
         setError(e instanceof Error ? e.message : "不明なエラー");
       } finally {
-        setLoading(false);
+        if (requestId === fetchDataRequestIdRef.current) {
+          setLoading(false);
+        }
       }
     };
 
@@ -1429,6 +1657,10 @@ export default function Home() {
             next[key].selectedValues = next[key].selectedValues.filter((value) =>
               (data.values || []).includes(value)
             );
+
+            if (next[key].selectedValues.length === 0) {
+              next[key].valueFilterEnabled = false;
+            }
           }
 
           return next;
@@ -1589,12 +1821,17 @@ export default function Home() {
   const toggleSelectedValue = (key: FilterKey, value: string) => {
     setDraftColumnStates((prev) => {
       const next = cloneColumnStates(prev);
-      const exists = next[key].selectedValues.includes(value);
+
+      const baseSelectedValues = next[key].valueFilterEnabled
+        ? next[key].selectedValues
+        : [...next[key].availableValues];
+
+      const exists = baseSelectedValues.includes(value);
 
       next[key].valueFilterEnabled = true;
       next[key].selectedValues = exists
-        ? next[key].selectedValues.filter((item) => item !== value)
-        : [...next[key].selectedValues, value];
+        ? baseSelectedValues.filter((item) => item !== value)
+        : [...baseSelectedValues, value];
 
       return next;
     });
@@ -1718,7 +1955,17 @@ export default function Home() {
     const handleOpenSidebarPanel = (key: SidebarPanelKey) => {
       setOpenFilterKey(null);
       setOpenAdvancedFilterKey(null);
-      setOpenSidebarPanel((prev) => (prev === key ? null : key));
+
+      const nextPanel = openSidebarPanel === key ? null : key;
+      setOpenSidebarPanel(nextPanel);
+
+      if (nextPanel === "list") {
+        setListDeleteScopeOpen(false);
+        setListDeleteError("");
+        setListDeleteMessage("");
+      } else {
+        setListDeleteScopeOpen(false);
+      }
     };
 
     const clearAdvancedFilter = (key: AdvancedFilterModalKey) => {
@@ -1760,6 +2007,34 @@ export default function Home() {
       setAppliedAdvancedFilters(cloneAdvancedFiltersState(draftAdvancedFilters));
       setPage(1);
       setOpenAdvancedFilterKey(null);
+    };
+
+    const clearAllFilters = () => {
+      setDraftColumnStates((prev) => createClearedColumnStates(prev));
+      setAppliedColumnStates((prev) => createClearedColumnStates(prev));
+      setDraftAdvancedFilters(createInitialAdvancedFiltersState());
+      setAppliedAdvancedFilters(createInitialAdvancedFiltersState());
+      setPage(1);
+      setOpenFilterKey(null);
+      setOpenAdvancedFilterKey(null);
+      setOpenSidebarPanel(null);
+    };
+
+    const handleConfirmSingleFilterClear = () => {
+      if (!singleFilterClearConfirm) return;
+
+      if (singleFilterClearConfirm.type === "column") {
+        clearColumnFilter(singleFilterClearConfirm.key);
+      } else {
+        clearAdvancedFilter(singleFilterClearConfirm.key);
+      }
+
+      setSingleFilterClearConfirm(null);
+    };
+
+    const handleConfirmAllFiltersClear = () => {
+      clearAllFilters();
+      setAllFiltersClearConfirmOpen(false);
     };
 
   const renderAdvancedFilterContent = () => {
@@ -2594,30 +2869,113 @@ export default function Home() {
       );
     }
 
+    if (openSidebarPanel === "list") {
+      return (
+        <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setListDeleteScopeOpen(true)}
+            disabled={listDeleting}
+            className="h-11 w-full rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
+          >
+            リスト削除
+          </button>
+
+          {listDeleteMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {listDeleteMessage}
+            </div>
+          )}
+
+          {listDeleteError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {listDeleteError}
+            </div>
+          )}
+        </div>
+      );
+    }
+
     if (openSidebarPanel === "csv") {
       return (
         <div className="space-y-4">
           <input
             type="file"
             accept=".csv,text/csv"
-            onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+            multiple
+            onChange={(e) => {
+              const newFiles = Array.from(e.target.files ?? []);
+              setSelectedFiles((prev) => [...prev, ...newFiles]);
+              setCheckedImportFiles((prev) => ({
+                ...prev,
+                ...Object.fromEntries(
+                  newFiles.map((file) => [buildImportFileKey(file), true])
+                ),
+              }));
+              e.currentTarget.value = "";
+            }}
             className="block w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-sky-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-sky-400"
           />
 
-          <div className="flex flex-col gap-3 sm:flex-row">
+          {selectedFiles.length > 0 && (
+            <div className="space-y-2">
+              {selectedFiles.map((file, index) => (
+                <div
+                  key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3"
+                >
+                  <span
+                    className="min-w-0 flex-1 truncate text-sm text-slate-200"
+                    title={file.name}
+                  >
+                    {file.name}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const fileKey = buildImportFileKey(file);
+
+                      setSelectedFiles((prev) =>
+                        prev.filter((_, fileIndex) => fileIndex !== index)
+                      );
+
+                      setCheckedImportFiles((prev) => {
+                        const next = { ...prev };
+                        delete next[fileKey];
+                        return next;
+                      });
+                    }}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
             <button
               onClick={handleImportClick}
               disabled={importing}
-              className="h-11 rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+              className="h-11 min-w-[160px] rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
             >
-              {importing ? "取り込み中..." : "CSVを投入"}
+              {importing ? "投入中..." : "CSVを投入"}
             </button>
 
             <button
-              onClick={handleExport}
-              className="h-11 rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
+              onClick={handleExportClick}
+              className="h-11 min-w-[160px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
             >
-              CSVをエクスポート
+              CSVを抽出
+            </button>
+
+            <button
+              onClick={handleDownloadTemplate}
+              className="h-11 min-w-[160px] rounded-xl bg-indigo-500 px-5 text-sm font-medium text-white transition hover:bg-indigo-400"
+            >
+              CSVテンプレート
             </button>
           </div>
 
@@ -2728,203 +3086,816 @@ export default function Home() {
     return null;
   };
 
-    const handleImportClick = () => {
-    if (!selectedFile) {
-      setImportError("CSVファイルを選択してください");
-      setImportMessage("");
-      return;
-    }
+const handleExportClick = () => {
+  setImportError("");
+  setImportMessage("");
+  setExportConfirmOpen(false);
+  setExportDuplicateConfirmOpen(false);
+  setExportScopeOpen(true);
+};
 
-    setImportConfirmOpen(true);
-  };
-
-  const handleImport = async (runDeduplicateFirst: boolean) => {
-    if (!selectedFile) {
-      setImportError("CSVファイルを選択してください");
-      setImportMessage("");
-      return;
-    }
-
-    setImporting(true);
-    setImportConfirmOpen(false);
-    setImportError("");
+const handleImportClick = () => {
+  if (selectedFiles.length === 0) {
+    setImportError("CSVファイルを選択してください");
     setImportMessage("");
+    return;
+  }
 
-    try {
-      if (runDeduplicateFirst) {
-        const dedupeRes = await fetch("/api/master_data", {
-          method: "DELETE",
-        });
+  setImportDuplicateConfirmOpen(false);
+  setImportConfirmOpen(true);
+};
 
-        const dedupeData = await readApiResponse(dedupeRes);
+const handleImport = async (shouldDeduplicate: boolean) => {
+  if (selectedFiles.length === 0) {
+    setImportError("CSVファイルを選択してください");
+    setImportMessage("");
+    return;
+  }
 
-        if (!dedupeRes.ok || !dedupeData.ok) {
-          throw new Error(dedupeData.error || "重複削除に失敗しました");
-        }
+  const checkedFiles = selectedFiles.filter(
+    (file) => checkedImportFiles[buildImportFileKey(file)] !== false
+  );
+
+  if (checkedFiles.length === 0) {
+    setImportError("投入するCSVを1つ以上チェックしてください");
+    setImportMessage("");
+    return;
+  }
+
+  setImporting(true);
+  setImportConfirmOpen(false);
+  setImportDuplicateConfirmOpen(false);
+  setImportError("");
+  setImportMessage("");
+
+  try {
+    const formData = new FormData();
+
+    checkedFiles.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    formData.append("skipDuplicateCheck", shouldDeduplicate ? "0" : "1");
+
+    const res = await fetch("/api/master_data", {
+      method: "POST",
+      body: formData,
+    });
+
+    const data = await readApiResponse(res);
+
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || "CSV取込に失敗しました");
+    }
+
+    setImportMessage(data.message || "CSVを取り込みました");
+    setSelectedFiles([]);
+    setCheckedImportFiles({});
+    setPage(1);
+    await fetchData();
+  } catch (e) {
+    setImportError(
+      e instanceof Error ? e.message : "CSV取込でエラーが発生しました"
+    );
+  } finally {
+    setImporting(false);
+  }
+};
+
+const handleExport = async (shouldDeduplicate: boolean) => {
+  setImportError("");
+  setImportMessage("");
+  setExportConfirmOpen(false);
+  setExportDuplicateConfirmOpen(false);
+
+  try {
+    const showSaveFilePicker = (
+      window as Window & {
+        showSaveFilePicker?: (options?: {
+          suggestedName?: string;
+          types?: Array<{
+            description?: string;
+            accept: Record<string, string[]>;
+          }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+        }>;
       }
+    ).showSaveFilePicker;
 
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append(
-        "skipDuplicateCheck",
-        runDeduplicateFirst ? "0" : "1"
+    if (!showSaveFilePicker) {
+      throw new Error("この環境では保存場所の選択に対応していません");
+    }
+
+    const tempFileName = "master_data.csv";
+
+    const fileHandle = await showSaveFilePicker({
+      suggestedName: tempFileName,
+      types: [
+        {
+          description: "CSVファイル",
+          accept: {
+            "text/csv": [".csv"],
+          },
+        },
+      ],
+    });
+
+    const params = new URLSearchParams();
+    params.set("exportScope", exportMode);
+    params.set("dedupeByCompany", shouldDeduplicate ? "1" : "0");
+
+    if (exportMode === "filtered") {
+      params.set(
+        "filterModels",
+        JSON.stringify(buildRequestFilterModels(appliedColumnStates))
+      );
+      params.set(
+        "advancedFilters",
+        JSON.stringify(
+          buildRequestAdvancedFilters(
+            appliedAdvancedFilters,
+            advancedValueOptions
+          )
+        )
       );
 
-      const res = await fetch("/api/master_data", {
+      const sortColumn = COLUMN_DEFS.find(
+        (column) => appliedColumnStates[column.key].sortDirection !== ""
+      );
+
+      if (sortColumn) {
+        params.set("sortKey", sortColumn.key);
+        params.set(
+          "sortDirection",
+          appliedColumnStates[sortColumn.key].sortDirection
+        );
+      }
+    }
+
+    const res = await fetch(`/api/master_data/export?${params.toString()}`, {
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      const data = await readApiResponse(res);
+      throw new Error(data.error || "CSV抽出に失敗しました");
+    }
+
+    const blob = await res.blob();
+    const writable = await fileHandle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+
+    setImportMessage("CSVを保存しました");
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      return;
+    }
+
+    setImportError(
+      e instanceof Error ? e.message : "CSV抽出に失敗しました"
+    );
+  }
+};
+
+const handleDownloadTemplate = async () => {
+  setImportError("");
+  setImportMessage("");
+
+  try {
+    const headerLine = CSV_TEMPLATE_HEADERS.map((value) =>
+      `"${String(value).replace(/"/g, `""`)}"`
+    ).join(",");
+
+    const csv = "\uFEFF" + headerLine + "\r\n";
+    const csvBlob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+
+    const showSaveFilePicker = (
+      window as Window & {
+        showSaveFilePicker?: (options?: {
+          suggestedName?: string;
+          types?: Array<{
+            description?: string;
+            accept: Record<string, string[]>;
+          }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+        }>;
+      }
+    ).showSaveFilePicker;
+
+    if (!showSaveFilePicker) {
+      throw new Error(
+        "この環境では保存場所の選択に対応していません"
+      );
+    }
+
+    const fileHandle = await showSaveFilePicker({
+      suggestedName: "CSVテンプレート_マスタデータ.csv",
+      types: [
+        {
+          description: "CSVファイル",
+          accept: {
+            "text/csv": [".csv"],
+          },
+        },
+      ],
+    });
+
+    const writable = await fileHandle.createWritable();
+    await writable.write(csvBlob);
+    await writable.close();
+
+    setImportMessage("CSVテンプレートを保存しました");
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      return;
+    }
+
+    setImportError(
+      e instanceof Error
+        ? e.message
+        : "CSVテンプレートの保存に失敗しました"
+    );
+  }
+};
+
+  const getDefaultCrawlPreviewValue = (change: CrawlPreviewChange) => {
+    return change.candidates.length > 1
+      ? null
+      : change.after ?? change.candidates[0] ?? null;
+  };
+
+  const getCrawlPreviewSelectedValue = (
+    overrides: CrawlSelectedChanges,
+    previewRowId: string,
+    change: CrawlPreviewChange
+  ) => {
+    const rowOverride = overrides[previewRowId];
+
+    if (
+      rowOverride &&
+      Object.prototype.hasOwnProperty.call(rowOverride, change.key)
+    ) {
+      return rowOverride[change.key] ?? null;
+    }
+
+    return getDefaultCrawlPreviewValue(change);
+  };
+
+  const toggleCrawlPreviewReflect = (
+    previewRowId: string,
+    change: CrawlPreviewChange,
+    fallbackValue: string | null
+  ) => {
+    const defaultValue = getDefaultCrawlPreviewValue(change);
+    const targetValue = fallbackValue ?? defaultValue;
+
+    setCrawlSelectedChanges((prev) => {
+      const currentEffectiveValue = getCrawlPreviewSelectedValue(
+        prev,
+        previewRowId,
+        change
+      );
+      const nextEffectiveValue =
+        currentEffectiveValue !== null ? null : targetValue;
+
+      const currentRow = { ...(prev[previewRowId] ?? {}) };
+      const next = { ...prev };
+
+      if (nextEffectiveValue === defaultValue) {
+        delete currentRow[change.key];
+      } else {
+        currentRow[change.key] = nextEffectiveValue;
+      }
+
+      if (Object.keys(currentRow).length === 0) {
+        delete next[previewRowId];
+      } else {
+        next[previewRowId] = currentRow;
+      }
+
+      return next;
+    });
+  };
+
+  const toggleCrawlPreviewCandidate = (
+    previewRowId: string,
+    change: CrawlPreviewChange,
+    candidate: string
+  ) => {
+    const defaultValue = getDefaultCrawlPreviewValue(change);
+
+    setCrawlSelectedChanges((prev) => {
+      const currentEffectiveValue = getCrawlPreviewSelectedValue(
+        prev,
+        previewRowId,
+        change
+      );
+      const nextEffectiveValue =
+        currentEffectiveValue === candidate ? defaultValue : candidate;
+
+      const currentRow = { ...(prev[previewRowId] ?? {}) };
+      const next = { ...prev };
+
+      if (nextEffectiveValue === defaultValue) {
+        delete currentRow[change.key];
+      } else {
+        currentRow[change.key] = nextEffectiveValue;
+      }
+
+      if (Object.keys(currentRow).length === 0) {
+        delete next[previewRowId];
+      } else {
+        next[previewRowId] = currentRow;
+      }
+
+      return next;
+    });
+  };
+
+  const fetchCrawlPreviewPage = async (jobId: string, nextPage: number) => {
+    setCrawlPreviewLoading(true);
+
+    try {
+      const res = await fetch("/api/master_data/crawl", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "get_job_status",
+          jobId,
+          previewPage: nextPage,
+          previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
+        }),
       });
 
       const data = await readApiResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "CSV取込に失敗しました");
+        throw new Error(data.error || "クローリング結果確認の取得に失敗しました");
       }
 
-      setImportMessage(data.message || "CSVを取り込みました");
-      setSelectedFile(null);
-      setPage(1);
-      await fetchData();
+      applyCrawlStatus(data);
+      setCrawlPreviewRows(data.previewRows || []);
+      setCrawlPreviewTotalCount(data.previewTotal ?? 0);
+      setCrawlPreviewPage(data.previewPage ?? nextPage);
     } catch (e) {
-      setImportError(
-        e instanceof Error ? e.message : "CSV取込でエラーが発生しました"
+      setCrawlError(
+        e instanceof Error
+          ? e.message
+          : "クローリング結果確認の取得でエラーが発生しました"
       );
     } finally {
-      setImporting(false);
+      setCrawlPreviewLoading(false);
     }
   };
 
-    const handleExport = async () => {
-      setImportError("");
-      setImportMessage("");
+  const handleCrawlPreviewPageChange = async (nextPage: number) => {
+    if (!crawlJobId) return;
+    if (nextPage < 1 || nextPage > crawlPreviewTotalPages) return;
 
+    await fetchCrawlPreviewPage(crawlJobId, nextPage);
+  };
+
+  const clearCrawlElapsedTimer = () => {
+    if (crawlElapsedTimerRef.current !== null) {
+      window.clearInterval(crawlElapsedTimerRef.current);
+      crawlElapsedTimerRef.current = null;
+    }
+  };
+
+  const updateCrawlElapsedMs = () => {
+    const runningMs =
+      crawlStartedAtRef.current !== null
+        ? Date.now() - crawlStartedAtRef.current
+        : 0;
+
+    setCrawlElapsedMs(crawlElapsedBaseMsRef.current + runningMs);
+  };
+
+  const startCrawlElapsedTracking = (reset = false) => {
+    if (reset) {
+      crawlElapsedBaseMsRef.current = 0;
+      setCrawlElapsedMs(0);
+    }
+
+    crawlStartedAtRef.current = Date.now();
+    updateCrawlElapsedMs();
+    clearCrawlElapsedTimer();
+    crawlElapsedTimerRef.current = window.setInterval(updateCrawlElapsedMs, 1000);
+  };
+
+  const stopCrawlElapsedTracking = () => {
+    if (crawlStartedAtRef.current !== null) {
+      crawlElapsedBaseMsRef.current += Date.now() - crawlStartedAtRef.current;
+      crawlStartedAtRef.current = null;
+    }
+
+    updateCrawlElapsedMs();
+    clearCrawlElapsedTimer();
+  };
+
+  const formatCrawlDuration = (ms: number) => {
+    const safeMs = Math.max(0, ms);
+
+    if (safeMs < 60_000) {
+      const seconds = safeMs / 1000;
+      return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}秒`;
+    }
+
+    const totalSeconds = Math.floor(safeMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}時間${String(minutes).padStart(2, "0")}分${String(
+        seconds
+      ).padStart(2, "0")}秒`;
+    }
+
+    return `${minutes}分${String(seconds).padStart(2, "0")}秒`;
+  };
+
+  const crawlAverageDivisor = Math.max(
+    crawlProcessedCount,
+    crawlJobStatus === "running" && crawlCurrentCompany ? 1 : 0
+  );
+
+  const averageCrawlMs =
+    crawlAverageDivisor > 0 ? Math.round(crawlElapsedMs / crawlAverageDivisor) : 0;
+
+  const clearCrawlStatusPolling = () => {
+    if (crawlStatusTimerRef.current !== null) {
+      window.clearInterval(crawlStatusTimerRef.current);
+      crawlStatusTimerRef.current = null;
+    }
+  };
+
+  const applyCrawlStatus = (data: ApiResponse) => {
+    setCrawlJobStatus((data.jobStatus as CrawlJobStatus) ?? "idle");
+    setCrawlTotalTargets(data.totalTargets ?? 0);
+    setCrawlProcessedCount(data.processed ?? 0);
+    setCrawlUpdatedCount(data.updated ?? 0);
+    setCrawlSkippedCount(data.skipped ?? 0);
+    setCrawlFailedCount(data.failed ?? 0);
+    setCrawlCurrentCompany(data.currentCompany ?? null);
+    setCrawlCurrentWebsiteUrl(data.currentWebsiteUrl ?? null);
+    setCrawlCurrentFields(data.currentFields ?? []);
+    setCrawlRemainingCount(data.remainingCount ?? 0);
+  };
+
+  const startCrawlStatusPolling = (jobId: string) => {
+    clearCrawlStatusPolling();
+
+    const poll = async () => {
       try {
-        const params = new URLSearchParams();
-        params.set(
-          "filterModels",
-          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-        );
-        params.set(
-          "advancedFilters",
-          JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions))
-        );
-
-        const sortColumn = COLUMN_DEFS.find(
-          (column) => appliedColumnStates[column.key].sortDirection !== ""
-        );
-
-        if (sortColumn) {
-          params.set("sortKey", sortColumn.key);
-          params.set(
-            "sortDirection",
-            appliedColumnStates[sortColumn.key].sortDirection
-          );
-        }
-
-        const res = await fetch(`/api/master_data/export?${params.toString()}`, {
-          cache: "no-store",
+        const res = await fetch("/api/master_data/crawl", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "get_job_status",
+            jobId,
+            previewPage: 1,
+            previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
+          }),
         });
 
-        if (!res.ok) {
-          const data = await readApiResponse(res);
-          throw new Error(data.error || "CSVエクスポートに失敗しました");
+        const data = await readApiResponse(res);
+
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "クローリング進捗の取得に失敗しました");
         }
 
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
+        applyCrawlStatus(data);
 
-        const a = document.createElement("a");
-        a.href = url;
+        if (data.jobStatus === "paused") {
+          const previewRows = data.previewRows || [];
+          const previewTotal = data.previewTotal ?? 0;
 
-        const disposition = res.headers.get("content-disposition") || "";
-        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/);
-        const normalMatch = disposition.match(/filename="([^"]+)"/);
+          stopCrawlElapsedTracking();
+          clearCrawlStatusPolling();
+          setCrawling(false);
+          setCrawlProgressOpen(false);
+          setCrawlPreviewRows(previewRows);
+          setCrawlPreviewTotalCount(previewTotal);
+          setCrawlPreviewPage(data.previewPage ?? 1);
+          setCrawlSelectedChanges({});
+          setCrawlPreviewOpen(previewTotal > 0);
+          setCrawlResumeConfirmOpen(previewTotal === 0);
+          setCrawlMessage("クローリングを中止しました");
+          saveActiveCrawlJobId(jobId);
+          return;
+        }
 
-        const filename = decodeURIComponent(
-          utf8Match?.[1] || normalMatch?.[1] || "master_data.csv"
-        );
+        if (data.jobStatus === "completed") {
+          const previewRows = data.previewRows || [];
+          const previewTotal = data.previewTotal ?? 0;
 
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
+          stopCrawlElapsedTracking();
+          clearCrawlStatusPolling();
+          setCrawling(false);
+          setCrawlProgressOpen(false);
+
+          if (previewTotal === 0) {
+            setCrawlPreviewRows([]);
+            setCrawlPreviewTotalCount(0);
+            setCrawlPreviewPage(1);
+            setCrawlPreviewOpen(false);
+            setCrawlMessage("保存候補はありませんでした");
+            setCrawlSelectedChanges({});
+            setCrawlJobId(null);
+            saveActiveCrawlJobId(null);
+            setCrawlJobStatus("completed");
+          } else {
+            setCrawlPreviewRows(previewRows);
+            setCrawlPreviewTotalCount(previewTotal);
+            setCrawlPreviewPage(data.previewPage ?? 1);
+            setCrawlPreviewOpen(true);
+            saveActiveCrawlJobId(jobId);
+          }
+
+          return;
+        }
+
+        if (data.jobStatus === "error") {
+          stopCrawlElapsedTracking();
+          clearCrawlStatusPolling();
+          setCrawling(false);
+          setCrawlProgressOpen(false);
+          setCrawlError(data.error || "クローリング中にエラーが発生しました");
+        }
       } catch (e) {
-        setImportError(
-          e instanceof Error ? e.message : "CSVエクスポートに失敗しました"
-        );
+        stopCrawlElapsedTracking();
+        clearCrawlStatusPolling();
+        setCrawling(false);
+        setCrawlProgressOpen(false);
+
+        const message =
+          e instanceof Error ? e.message : "クローリング進捗取得でエラーが発生しました";
+
+        if (message.includes("クローリングジョブが見つかりません")) {
+          setCrawlJobId(null);
+          saveActiveCrawlJobId(null);
+        }
+
+        setCrawlError(message);
       }
     };
 
-    const toggleCrawlPreviewReflect = (
-      previewRowId: string,
-      key: string,
-      fallbackValue: string | null
-    ) => {
-      setCrawlSelectedChanges((prev) => {
-        const currentRow = { ...(prev[previewRowId] ?? {}) };
+    void poll();
+    crawlStatusTimerRef.current = window.setInterval(() => {
+      void poll();
+    }, 1200);
+  };
 
-        if (currentRow[key]) {
-          delete currentRow[key];
-        } else if (fallbackValue) {
-          currentRow[key] = fallbackValue;
-        }
+  const restoreSavedCrawlJob = async () => {
+    const storedJobId = loadActiveCrawlJobId();
+    if (!storedJobId) return;
 
-        const next = { ...prev };
-
-        if (Object.keys(currentRow).length === 0) {
-          delete next[previewRowId];
-        } else {
-          next[previewRowId] = currentRow;
-        }
-
-        return next;
+    try {
+      const res = await fetch("/api/master_data/crawl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "get_job_status",
+          jobId: storedJobId,
+          previewPage: 1,
+          previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
+        }),
       });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "保存済みクローリング状態の復元に失敗しました");
+      }
+
+      setCrawlJobId(storedJobId);
+      applyCrawlStatus(data);
+      setCrawlMessage("");
+      setCrawlError("");
+      setCrawlSelectedChanges({});
+
+      const previewRows = data.previewRows || [];
+      const previewTotal = data.previewTotal ?? 0;
+      const remainingCount = data.remainingCount ?? 0;
+
+      if (data.jobStatus === "running") {
+        setCrawling(true);
+        setCrawlProgressOpen(true);
+        setCrawlPreviewOpen(false);
+        setCrawlResumeConfirmOpen(false);
+        setCrawlPreviewRows([]);
+        setCrawlPreviewTotalCount(0);
+        setCrawlPreviewPage(1);
+        startCrawlElapsedTracking(true);
+        startCrawlStatusPolling(storedJobId);
+        return;
+      }
+
+      stopCrawlElapsedTracking();
+      clearCrawlStatusPolling();
+      setCrawling(false);
+      setCrawlProgressOpen(false);
+
+      setCrawlPreviewRows(previewRows);
+      setCrawlPreviewTotalCount(previewTotal);
+      setCrawlPreviewPage(data.previewPage ?? 1);
+      setCrawlPreviewOpen(previewTotal > 0);
+      setCrawlResumeConfirmOpen(
+        data.jobStatus === "paused" && previewTotal === 0 && remainingCount > 0
+      );
+
+      if (data.jobStatus === "completed" && previewTotal === 0 && remainingCount === 0) {
+        setCrawlJobId(null);
+        saveActiveCrawlJobId(null);
+      }
+    } catch {
+      setCrawlJobId(null);
+      saveActiveCrawlJobId(null);
+    }
+  };
+
+  useEffect(() => {
+    void restoreSavedCrawlJob();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearCrawlStatusPolling();
+      clearCrawlElapsedTimer();
     };
+  }, []);
 
-    const toggleCrawlPreviewCandidate = (
-      previewRowId: string,
-      key: string,
-      candidate: string
-    ) => {
-      setCrawlSelectedChanges((prev) => {
-        const currentRow = { ...(prev[previewRowId] ?? {}) };
+  const handleCancelCrawl = async () => {
+    if (!crawlJobId) return;
 
-        if (currentRow[key] === candidate) {
-          delete currentRow[key];
-        } else {
-          currentRow[key] = candidate;
-        }
-
-        const next = { ...prev };
-
-        if (Object.keys(currentRow).length === 0) {
-          delete next[previewRowId];
-        } else {
-          next[previewRowId] = currentRow;
-        }
-
-        return next;
+    try {
+      const res = await fetch("/api/master_data/crawl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "cancel_job",
+          jobId: crawlJobId,
+        }),
       });
-    };
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "中止に失敗しました");
+      }
+
+      clearCrawlStatusPolling();
+      stopCrawlElapsedTracking();
+      setCrawling(false);
+      setCrawlProgressOpen(false);
+      setCrawlPreviewOpen(false);
+      setCrawlResumeConfirmOpen(false);
+      setCrawlPreviewRows([]);
+      setCrawlPreviewTotalCount(0);
+      setCrawlPreviewPage(1);
+      setCrawlSelectedChanges({});
+      setCrawlJobId(null);
+      saveActiveCrawlJobId(null);
+      setCrawlJobStatus("idle");
+      setCrawlCurrentCompany(null);
+      setCrawlCurrentWebsiteUrl(null);
+      setCrawlCurrentFields([]);
+      setCrawlRemainingCount(0);
+      setCrawlMessage("クローリングを中止しました");
+      setCrawlError("");
+    } catch (e) {
+      setCrawlError(
+        e instanceof Error ? e.message : "中止処理でエラーが発生しました"
+      );
+    }
+  };
+
+  const handlePauseCrawl = async () => {
+    if (!crawlJobId) return;
+
+    try {
+      const res = await fetch("/api/master_data/crawl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "pause_job",
+          jobId: crawlJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "中断に失敗しました");
+      }
+
+      setCrawlMessage("中断指示を受け付けました");
+    } catch (e) {
+      setCrawlError(
+        e instanceof Error ? e.message : "中断処理でエラーが発生しました"
+      );
+    }
+  };
+
+  const handleResumeCrawl = async () => {
+    if (!crawlJobId) return;
+
+    setCrawlResumeConfirmOpen(false);
+    setCrawlPreviewOpen(false);
+    setCrawlPreviewRows([]);
+    setCrawlPreviewTotalCount(0);
+    setCrawlMessage("");
+    stopCrawlElapsedTracking();
+    setCrawlError("");
+    setCrawling(true);
+    setCrawlProgressOpen(true);
+    startCrawlElapsedTracking(false);
+
+    try {
+      const res = await fetch("/api/master_data/crawl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "resume_job",
+          jobId: crawlJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "再開に失敗しました");
+      }
+
+      saveActiveCrawlJobId(crawlJobId);
+      applyCrawlStatus(data);
+      startCrawlStatusPolling(crawlJobId);
+    } catch (e) {
+      setCrawling(false);
+      setCrawlProgressOpen(false);
+      setCrawlError(
+        e instanceof Error ? e.message : "再開処理でエラーが発生しました"
+      );
+    }
+  };
 
   const handleCrawl = async () => {
     setCrawling(true);
     setCrawlConfirmOpen(false);
     setCrawlPreviewOpen(false);
+    setCrawlResumeConfirmOpen(false);
     setCrawlPreviewRows([]);
+    setCrawlPreviewTotalCount(0);
+    setCrawlPreviewPage(1);
     setCrawlSelectedChanges({});
     setCrawlMessage("");
+    stopCrawlElapsedTracking();
     setCrawlError("");
+    setCrawlJobId(null);
+    saveActiveCrawlJobId(null);
+    setCrawlJobStatus("running");
+    setCrawlTotalTargets(0);
+    setCrawlProcessedCount(0);
+    setCrawlUpdatedCount(0);
+    setCrawlSkippedCount(0);
+    setCrawlFailedCount(0);
+    setCrawlCurrentCompany(null);
+    setCrawlCurrentWebsiteUrl(null);
+    setCrawlCurrentFields([]);
+    setCrawlRemainingCount(0);
+    setCrawlProgressOpen(true);
+    startCrawlElapsedTracking(true);
 
     try {
       const body: Record<string, unknown> = {
+        action: "start_preview_job",
         filterModels: buildRequestFilterModels(appliedColumnStates),
         advancedFilters: buildRequestAdvancedFilters(
           appliedAdvancedFilters,
           advancedValueOptions
         ),
-        previewOnly: true,
         selectedFields: getSelectedCrawlFields(crawlFieldSelections),
       };
 
@@ -2948,81 +3919,52 @@ export default function Home() {
       const data = await readApiResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "クローリング確認に失敗しました");
+        throw new Error(data.error || "クローリング開始に失敗しました");
       }
 
-      const previewRows = data.previewRows || [];
-
-      if (previewRows.length === 0) {
-        setCrawlMessage("保存候補はありませんでした");
+      if (!data.jobId) {
+        stopCrawlElapsedTracking();
+        setCrawling(false);
+        setCrawlProgressOpen(false);
+        setCrawlMessage(data.message || "対象がありませんでした");
+        saveActiveCrawlJobId(null);
         return;
       }
 
-      const initialSelectedChanges = previewRows.reduce(
-        (acc, row) => {
-          const selectedEntries = row.changes
-            .map((change) => {
-              const defaultValue =
-                change.candidates.length > 1
-                  ? ""
-                  : change.after ?? change.candidates[0] ?? "";
-
-              return defaultValue
-                ? ([change.key, defaultValue] as [string, string])
-                : null;
-            })
-            .filter((entry): entry is [string, string] => entry !== null);
-
-          if (selectedEntries.length > 0) {
-            acc[row.preview_row_id] = Object.fromEntries(selectedEntries);
-          }
-
-          return acc;
-        },
-        {} as Record<string, Record<string, string>>
-      );
-
-      setCrawlSelectedChanges(initialSelectedChanges);
-      setCrawlPreviewRows(previewRows);
-      setCrawlPreviewOpen(true);
+      setCrawlJobId(data.jobId);
+      saveActiveCrawlJobId(data.jobId);
+      applyCrawlStatus(data);
+      startCrawlStatusPolling(data.jobId);
     } catch (e) {
-      setCrawlError(
-        e instanceof Error ? e.message : "クローリング確認でエラーが発生しました"
-      );
-    } finally {
       setCrawling(false);
+      setCrawlProgressOpen(false);
+      setCrawlError(
+        e instanceof Error ? e.message : "クローリング開始でエラーが発生しました"
+      );
     }
   };
 
   const handleCrawlSave = async () => {
+    if (!crawlJobId) {
+      setCrawlError("保存対象のジョブが見つかりません");
+      return;
+    }
+
     setCrawling(true);
     setCrawlMessage("");
     setCrawlError("");
 
     try {
-      const body: Record<string, unknown> = {
-        filterModels: buildRequestFilterModels(appliedColumnStates),
-        advancedFilters: buildRequestAdvancedFilters(appliedAdvancedFilters),
-        previewOnly: false,
-        selectedChanges: crawlSelectedChanges,
-        selectedFields: getSelectedCrawlFields(crawlFieldSelections),
-      };
-
-      const sortColumn = COLUMN_DEFS.find(
-        (column) => appliedColumnStates[column.key].sortDirection !== ""
-      );
-
-      if (sortColumn) {
-        body.sortKey = sortColumn.key;
-        body.sortDirection = appliedColumnStates[sortColumn.key].sortDirection;
-      }
-
       const res = await fetch("/api/master_data/crawl", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          action: "save_partial",
+          jobId: crawlJobId,
+          selectedChanges: crawlSelectedChanges,
+        }),
       });
 
       const data = await readApiResponse(res);
@@ -3033,20 +3975,95 @@ export default function Home() {
 
       setCrawlPreviewOpen(false);
       setCrawlPreviewRows([]);
+      setCrawlPreviewTotalCount(0);
+      setCrawlPreviewPage(1);
       setCrawlSelectedChanges({});
-
       setCrawlMessage(
         data.message ||
           `処理対象 ${data.processed ?? 0} 件 / 更新 ${data.updated ?? 0} 件 / スキップ ${data.skipped ?? 0} 件 / 失敗 ${data.failed ?? 0} 件`
       );
 
+      setCrawlRemainingCount(data.remainingCount ?? 0);
+
       await fetchData();
+
+      const remainingCount = data.remainingCount ?? 0;
+      const previewTotal = data.previewTotal ?? 0;
+
+      if (previewTotal > 0) {
+        setCrawlPreviewRows(data.previewRows || []);
+        setCrawlPreviewTotalCount(previewTotal);
+        setCrawlPreviewPage(data.previewPage ?? 1);
+        setCrawlPreviewOpen(true);
+        setCrawlResumeConfirmOpen(false);
+        setCrawlJobStatus("paused");
+      } else if (remainingCount > 0) {
+        setCrawlResumeConfirmOpen(true);
+      } else {
+        setCrawlJobId(null);
+        saveActiveCrawlJobId(null);
+        setCrawlJobStatus("completed");
+      }
     } catch (e) {
       setCrawlError(
         e instanceof Error ? e.message : "クローリング保存でエラーが発生しました"
       );
     } finally {
       setCrawling(false);
+    }
+  };
+
+  const handleListDelete = async () => {
+    if (!listDeleteConfirmTarget) return;
+
+    const deleteTarget = listDeleteConfirmTarget;
+
+    setListDeleting(true);
+    setListDeleteConfirmTarget(null);
+    setListDeleteError("");
+    setListDeleteMessage("");
+
+    try {
+      const params = new URLSearchParams();
+      params.set("deleteMode", "list");
+      params.set("deleteScope", deleteTarget);
+
+      if (deleteTarget === "filtered") {
+        params.set(
+          "filterModels",
+          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
+        );
+        params.set(
+          "advancedFilters",
+          JSON.stringify(
+            buildRequestAdvancedFilters(
+              appliedAdvancedFilters,
+              advancedValueOptions
+            )
+          )
+        );
+      }
+
+      const res = await fetch(`/api/master_data?${params.toString()}`, {
+        method: "DELETE",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "リスト削除に失敗しました");
+      }
+
+      setListDeleteScopeOpen(false);
+      setListDeleteMessage(data.message || "リストを削除しました");
+      setPage(1);
+      await fetchData();
+    } catch (e) {
+      setListDeleteError(
+        e instanceof Error ? e.message : "リスト削除でエラーが発生しました"
+      );
+    } finally {
+      setListDeleting(false);
     }
   };
 
@@ -3096,7 +4113,7 @@ export default function Home() {
     return Array.from({ length: end - start + 1 }, (_, i) => start + i);
   }, [page, totalPages, limit]);
 
-  const usingVirtual = false;
+  const usingVirtual = true;
 
   const activeSidebarPanelTitle = openSidebarPanel
     ? SIDEBAR_PANEL_TITLES[openSidebarPanel]
@@ -3117,10 +4134,81 @@ export default function Home() {
 
   const activeAdvancedFilterKey = openAdvancedFilterKey;
 
+  const singleFilterClearLabel = singleFilterClearConfirm
+    ? singleFilterClearConfirm.type === "column"
+      ? COLUMN_DEFS.find((column) => column.key === singleFilterClearConfirm.key)?.label ?? ""
+      : ADVANCED_FILTER_TITLES[singleFilterClearConfirm.key]
+    : "";
+
   const isWideAdvancedFilterModal =
     activeAdvancedFilterKey === "prefecture" ||
     activeAdvancedFilterKey === "industry" ||
     activeAdvancedFilterKey === "tag";
+
+  const renderedTableBody = useMemo(() => {
+    if (rows.length === 0 && !loading) {
+      return (
+        <div className="px-4 py-12 text-center text-slate-500">
+          データがありません
+        </div>
+      );
+    }
+
+    if (usingVirtual) {
+      return (
+        <List
+          defaultHeight={650}
+          rowComponent={VirtualRow}
+          rowCount={rows.length}
+          rowHeight={58}
+          rowProps={{ rows }}
+          style={{ width: "100%" }}
+        />
+      );
+    }
+
+    return (
+      <div>
+        {rows.map((row, i) => (
+          <div
+            key={`${row.company}-${row.address}-${i}`}
+            className="grid border-b border-white/5 bg-[#0f172a]/60 transition hover:bg-[#162033]"
+            style={{ gridTemplateColumns: GRID_TEMPLATE }}
+          >
+            <Cell title={row.company || ""}>
+              <EmptyValue value={row.company} />
+            </Cell>
+            <Cell title={row.zipcode || ""}><EmptyValue value={row.zipcode} /></Cell>
+            <Cell title={row.address || ""}><EmptyValue value={row.address} /></Cell>
+            <Cell title={row.big_industry || ""}><EmptyValue value={row.big_industry} /></Cell>
+            <Cell title={row.small_industry || ""}><EmptyValue value={row.small_industry} /></Cell>
+            <Cell title={row.company_kana || ""}><EmptyValue value={row.company_kana} /></Cell>
+            <Cell title={row.summary || ""} className="whitespace-pre-wrap"><EmptyValue value={row.summary} /></Cell>
+            <Cell title={row.website_url || ""}><LinkCell url={row.website_url} /></Cell>
+            <Cell title={row.form_url || ""}><LinkCell url={row.form_url} /></Cell>
+            <Cell title={row.phone || ""}><EmptyValue value={row.phone} /></Cell>
+            <Cell title={row.fax || ""}><EmptyValue value={row.fax} /></Cell>
+            <Cell title={row.email || ""}><EmptyValue value={row.email} /></Cell>
+            <Cell title={row.established_date || ""}><EmptyValue value={row.established_date} /></Cell>
+            <Cell title={row.representative_name || ""}><EmptyValue value={row.representative_name} /></Cell>
+            <Cell title={row.representative_title || ""}><EmptyValue value={row.representative_title} /></Cell>
+            <Cell title={row.capital || ""}><EmptyValue value={row.capital} /></Cell>
+            <Cell title={row.employee_count || ""}><EmptyValue value={row.employee_count} /></Cell>
+            <Cell title={row.employee_count_year || ""}><EmptyValue value={row.employee_count_year} /></Cell>
+            <Cell title={row.previous_sales || ""}><EmptyValue value={row.previous_sales} /></Cell>
+            <Cell title={row.latest_sales || ""}><EmptyValue value={row.latest_sales} /></Cell>
+            <Cell title={row.closing_month || ""}><EmptyValue value={row.closing_month} /></Cell>
+            <Cell title={row.office_count || ""}><EmptyValue value={row.office_count} /></Cell>
+            <Cell title={row.new_tag || ""}><EmptyValue value={row.new_tag} /></Cell>
+            <Cell title={row.business_type || ""}><EmptyValue value={row.business_type} /></Cell>
+            <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
+            <Cell title={row.industry_category || ""}><EmptyValue value={row.industry_category} /></Cell>
+            <Cell title={row.memo || ""} className="whitespace-pre-wrap"><EmptyValue value={row.memo} /></Cell>
+          </div>
+        ))}
+      </div>
+    );
+  }, [loading, rows]);
 
   return (
     <main
@@ -3161,26 +4249,54 @@ export default function Home() {
               </div>
 
               <div className="space-y-2">
-                {SIDEBAR_MENU_ITEMS.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => handleOpenSidebarPanel(item.key)}
-                    className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-medium transition ${
-                      openSidebarPanel === item.key
-                        ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
-                        : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
-                    } ${sidebarOpen ? "justify-start" : "justify-center"}`}
-                  >
-                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f172a]">
-                      <SidebarMenuIcon menuKey={item.key} />
-                    </span>
+                {SIDEBAR_MENU_ITEMS.map((item) => {
+                  const isActive = openSidebarPanel === item.key;
 
-                    {sidebarOpen && (
-                      <span className="truncate">{item.label}</span>
-                    )}
-                  </button>
-                ))}
+                  return (
+                    <div key={item.key} className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSidebarPanel(item.key)}
+                        className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-medium transition ${
+                          isActive
+                            ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
+                            : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                        } ${sidebarOpen ? "justify-start" : "justify-center"}`}
+                      >
+                        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f172a]">
+                          <SidebarMenuIcon menuKey={item.key} />
+                        </span>
+
+                        {sidebarOpen && (
+                          <span className="truncate">{item.label}</span>
+                        )}
+                      </button>
+
+                      {item.key === "search" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpenSidebarPanel(null);
+                            setOpenFilterKey(null);
+                            setOpenAdvancedFilterKey(null);
+                            setAllFiltersClearConfirmOpen(true);
+                          }}
+                          className={`flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-left text-sm font-medium text-slate-200 transition hover:bg-white/10 ${
+                            sidebarOpen ? "justify-start" : "justify-center"
+                          }`}
+                        >
+                          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f172a] text-base">
+                            ↺
+                          </span>
+
+                          {sidebarOpen && (
+                            <span className="truncate">フィルタ解除</span>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -3301,13 +4417,29 @@ export default function Home() {
                       {activeAdvancedFilterTitle} のフィルタ
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setOpenAdvancedFilterKey(null)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
-                    >
-                      ×
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          activeAdvancedFilterKey &&
+                          setSingleFilterClearConfirm({
+                            type: "advanced",
+                            key: activeAdvancedFilterKey,
+                          })
+                        }
+                        className="inline-flex h-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-300 transition hover:bg-white/10"
+                      >
+                        フィルタ解除
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setOpenAdvancedFilterKey(null)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -3368,6 +4500,281 @@ export default function Home() {
           </div>
         )}
 
+        {listDeleteScopeOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => setListDeleteScopeOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      リスト削除対象選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setListDeleteScopeOpen(false)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListDeleteScopeOpen(false);
+                          setListDeleteConfirmTarget("all");
+                        }}
+                        className="h-11 rounded-xl bg-rose-600 px-4 text-sm font-medium text-white transition hover:bg-rose-500"
+                      >
+                        全てのリスト
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setListDeleteScopeOpen(false);
+                          setListDeleteConfirmTarget("filtered");
+                        }}
+                        className="h-11 rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400"
+                      >
+                        絞り込みリストのみ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {listDeleteConfirmTarget &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => !listDeleting && setListDeleteConfirmTarget(null)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    リスト削除確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    本当にリストを削除しますか？
+                    <br />
+                    <span className="text-xs text-slate-400">
+                      対象:
+                      {listDeleteConfirmTarget === "all"
+                        ? "全てのリスト"
+                        : "現在フィルタで絞り込んでいるリストのみ"}
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setListDeleteConfirmTarget(null)}
+                      disabled={listDeleting}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleListDelete}
+                      disabled={listDeleting}
+                      className="h-10 flex-1 rounded-xl bg-rose-500 px-3 text-sm font-medium text-white transition hover:bg-rose-400 disabled:opacity-50"
+                    >
+                      {listDeleting ? "削除中..." : "はい"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {singleFilterClearConfirm &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => setSingleFilterClearConfirm(null)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    フィルタ解除確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    {singleFilterClearLabel} のフィルタを解除しますか？
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setSingleFilterClearConfirm(null)}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleConfirmSingleFilterClear}
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                    >
+                      はい
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {crawlProgressOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+              <div className="flex min-h-full items-center justify-center">
+                <div className="flex w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    クローリング進行状況
+                  </div>
+
+                  <div className="space-y-4 px-4 py-5">
+                    <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                      <div className="mb-2 text-xs text-slate-400">現在処理中の企業</div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        {crawlCurrentCompany || "待機中"}
+                      </div>
+
+                      <div className="mt-3 text-xs text-slate-400">現在処理中のURL</div>
+                      <div className="mt-1 break-all text-xs text-sky-300">
+                        {crawlCurrentWebsiteUrl || "-"}
+                      </div>
+
+                      <div className="mt-3 text-xs text-slate-400">取得対象項目</div>
+                      <div className="mt-1 text-sm text-slate-200">
+                        {crawlCurrentFields.length > 0
+                          ? crawlCurrentFields.join(" / ")
+                          : "-"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-slate-300">進捗</span>
+
+                        <div className="flex items-center gap-4">
+                          <div className="text-right text-xs leading-5 text-slate-400">
+                            <div>
+                              平均 {crawlProcessedCount > 0 ? formatCrawlDuration(averageCrawlMs) : "-"} / 件
+                            </div>
+                            <div>
+                              経過 {formatCrawlDuration(crawlElapsedMs)}
+                            </div>
+                          </div>
+
+                          <span className="font-semibold text-slate-100">
+                            {crawlTotalTargets === 0
+                              ? 0
+                              : Math.round((crawlProcessedCount / crawlTotalTargets) * 100)}
+                            %
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-amber-500 transition-all"
+                          style={{
+                            width: `${
+                              crawlTotalTargets === 0
+                                ? 0
+                                : Math.round((crawlProcessedCount / crawlTotalTargets) * 100)
+                            }%`,
+                          }}
+                        />
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                        <div className="rounded-lg bg-white/5 px-3 py-3">
+                          <div className="text-xs text-slate-400">完了</div>
+                          <div className="mt-1 text-lg font-semibold text-slate-100">
+                            {crawlProcessedCount}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg bg-white/5 px-3 py-3">
+                          <div className="text-xs text-slate-400">処理中</div>
+                          <div className="mt-1 text-lg font-semibold text-slate-100">
+                            {crawlJobStatus === "running" && crawlCurrentCompany ? 1 : 0}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg bg-white/5 px-3 py-3">
+                          <div className="text-xs text-slate-400">対象総数</div>
+                          <div className="mt-1 text-lg font-semibold text-slate-100">
+                            {crawlTotalTargets}
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg bg-white/5 px-3 py-3">
+                          <div className="text-xs text-slate-400">候補件数</div>
+                          <div className="mt-1 text-lg font-semibold text-slate-100">
+                            {crawlUpdatedCount}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={handleCancelCrawl}
+                      disabled={!crawlJobId || crawling === false}
+                      className="h-10 w-[120px] flex-none rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-sm font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-50"
+                    >
+                      中止
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handlePauseCrawl}
+                      disabled={!crawlJobId || crawlJobStatus !== "running" || crawling === false}
+                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      中断
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
         {crawlConfirmOpen &&
           typeof document !== "undefined" &&
           createPortal(
@@ -3412,7 +4819,7 @@ export default function Home() {
                       <br />
                       現在の絞り込み結果に対してクローリングを実行し、保存前に変更候補を一覧で表示します。
                       <br />
-                      内容を確認してから「はい」で保存できます。
+                      内容を確認してから保存できます。
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -3438,12 +4845,12 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                  <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
                       onClick={() => setCrawlConfirmOpen(false)}
                       disabled={crawling}
-                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -3452,7 +4859,7 @@ export default function Home() {
                       type="button"
                       onClick={handleCrawl}
                       disabled={crawling}
-                      className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
                     >
                       {crawling ? "実行中..." : "はい"}
                     </button>
@@ -3466,10 +4873,7 @@ export default function Home() {
           {crawlPreviewOpen &&
             typeof document !== "undefined" &&
             createPortal(
-              <div
-                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
-                onClick={() => !crawling && setCrawlPreviewOpen(false)}
-              >
+              <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
                 <div className="flex min-h-full items-center justify-center">
                   <div
                     className="flex w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
@@ -3479,156 +4883,267 @@ export default function Home() {
                       クローリング結果確認
                     </div>
 
-                    <div className="max-h-[70vh] overflow-y-auto px-4 py-4 space-y-4">
-                      {crawlPreviewRows.map((row, rowIndex) => (
-                        <div
-                          key={`${row.row_id}-${rowIndex}`}
-                          className="rounded-xl border border-white/10 bg-[#0f172a] p-4"
-                        >
-                          <div className="text-sm font-semibold text-slate-100">
-                            {row.company || "(企業名なし)"}
-                          </div>
-
-                          <div className="mt-1 text-xs break-all">
-                            {row.website_url ? (
-                              <a
-                                href={row.website_url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-sky-300 underline underline-offset-2 transition hover:text-sky-200"
-                                title={row.website_url}
-                              >
-                                {row.website_url}
-                              </a>
-                            ) : (
-                              <span className="text-slate-500">-</span>
-                            )}
-                          </div>
-
-                          <div className="mt-4 space-y-2">
-                            <div className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]">
-                              <div className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-300">
-                                反映
-                              </div>
-                              <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
-                                項目
-                              </div>
-                              <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
-                                変更前
-                              </div>
-                              <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
-                                変更候補
-                              </div>
-                            </div>
-
-                            {row.changes.map((change, changeIndex) => {
-                              const selectedValue =
-                                crawlSelectedChanges[row.preview_row_id]?.[
-                                  change.key
-                                ] ?? "";
-
-                              const checked = selectedValue !== "";
-                              const displayValue =
-                                change.after ?? change.candidates[0] ?? null;
-                              const hasMultipleCandidates =
-                                change.candidates.length > 1;
-
-                              return (
-                                <div
-                                  key={`${row.preview_row_id}-${change.key}-${changeIndex}`}
-                                  className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]"
-                                >
-                                  <div className="flex items-center justify-center rounded-lg bg-white/5 px-2 py-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={() =>
-                                        toggleCrawlPreviewReflect(
-                                          row.preview_row_id,
-                                          change.key,
-                                          displayValue
-                                        )
-                                      }
-                                      className="h-4 w-4 accent-amber-500"
-                                    />
-                                  </div>
-
-                                  <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-medium text-slate-200">
-                                    {change.label}
-                                  </div>
-
-                                  <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
-                                    <PreviewChangeValue
-                                      changeKey={change.key}
-                                      value={change.before}
-                                    />
-                                  </div>
-
-                                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                                    {hasMultipleCandidates ? (
-                                      <div className="space-y-2">
-                                        {change.candidates.map(
-                                          (candidate, candidateIndex) => {
-                                            const candidateChecked =
-                                              selectedValue === candidate;
-
-                                            return (
-                                              <label
-                                                key={`${row.preview_row_id}-${change.key}-${candidateIndex}`}
-                                                className="flex items-start gap-2"
-                                              >
-                                                <input
-                                                  type="checkbox"
-                                                  checked={candidateChecked}
-                                                  onChange={() =>
-                                                    toggleCrawlPreviewCandidate(
-                                                      row.preview_row_id,
-                                                      change.key,
-                                                      candidate
-                                                    )
-                                                  }
-                                                  className="mt-0.5 h-4 w-4 accent-amber-500"
-                                                />
-                                                <span className="break-all">
-                                                  {candidate}
-                                                </span>
-                                              </label>
-                                            );
-                                          }
-                                        )}
-                                      </div>
-                                    ) : (
-                                      <PreviewChangeValue
-                                        changeKey={change.key}
-                                        value={displayValue}
-                                      />
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
+                    <div className="border-b border-white/10 px-4 py-4">
+                      <div
+                        className={`grid gap-3 ${
+                          crawlJobStatus === "paused"
+                            ? "grid-cols-2 md:grid-cols-4"
+                            : "grid-cols-1 md:grid-cols-3"
+                        }`}
+                      >
+                        <div className="rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3">
+                          <div className="text-xs text-slate-400">完了件数</div>
+                          <div className="mt-1 text-lg font-semibold text-slate-100">
+                            {crawlProcessedCount.toLocaleString()}件
                           </div>
                         </div>
-                      ))}
+
+                        <div className="rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3">
+                          <div className="text-xs text-slate-400">1件あたりの平均取得時間</div>
+                          <div className="mt-1 text-lg font-semibold text-slate-100">
+                            {formatCrawlDuration(averageCrawlMs)}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3">
+                          <div className="text-xs text-slate-400">全体の取得の総時間</div>
+                          <div className="mt-1 text-lg font-semibold text-slate-100">
+                            {formatCrawlDuration(crawlElapsedMs)}
+                          </div>
+                        </div>
+
+                        {crawlJobStatus === "paused" && (
+                          <div className="rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3">
+                            <div className="text-xs text-slate-400">残り件数</div>
+                            <div className="mt-1 text-lg font-semibold text-slate-100">
+                              {crawlRemainingCount.toLocaleString()}件
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <div className="border-b border-white/10 px-4 py-3">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div className="text-xs text-slate-400">
+                          保存候補 {crawlPreviewTotalCount.toLocaleString()}件中{" "}
+                          {crawlPreviewTotalCount === 0
+                            ? 0
+                            : (crawlPreviewPage - 1) * CRAWL_PREVIEW_PAGE_SIZE + 1}
+                          〜
+                          {Math.min(
+                            crawlPreviewPage * CRAWL_PREVIEW_PAGE_SIZE,
+                            crawlPreviewTotalCount
+                          )}
+                          件を表示
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleCrawlPreviewPageChange(crawlPreviewPage - 1)
+                            }
+                            disabled={crawlPreviewPage === 1 || crawlPreviewLoading}
+                            className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                          >
+                            前へ
+                          </button>
+
+                          <div className="text-xs text-slate-300">
+                            {crawlPreviewPage} / {crawlPreviewTotalPages}
+                            {crawlPreviewLoading ? " 読込中..." : ""}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleCrawlPreviewPageChange(crawlPreviewPage + 1)
+                            }
+                            disabled={
+                              crawlPreviewPage >= crawlPreviewTotalPages ||
+                              crawlPreviewLoading
+                            }
+                            className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                          >
+                            次へ
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="max-h-[70vh] overflow-y-auto px-4 py-4 space-y-4">
+                      {crawlPreviewLoading ? (
+                        <div className="px-4 py-12 text-center text-slate-400">
+                          クローリング結果確認を読み込み中です...
+                        </div>
+                      ) : crawlPreviewRows.length === 0 ? (
+                        <div className="px-4 py-12 text-center text-slate-500">
+                          保存候補はありません
+                        </div>
+                      ) : (
+                        crawlPreviewRows.map((row, rowIndex) => (
+                          <div
+                            key={row.preview_row_id || `${row.row_id}-${rowIndex}`}
+                            className="rounded-xl border border-white/10 bg-[#0f172a] p-4"
+                          >
+                            <div className="text-sm font-semibold text-slate-100">
+                              {row.company || "(企業名なし)"}
+                            </div>
+
+                            <div className="mt-1 text-xs break-all">
+                              {row.website_url ? (
+                                <a
+                                  href={row.website_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-sky-300 underline underline-offset-2 transition hover:text-sky-200"
+                                  title={row.website_url}
+                                >
+                                  {row.website_url}
+                                </a>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </div>
+
+                            <div className="mt-4 space-y-2">
+                              <div className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]">
+                                <div className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-300">
+                                  反映
+                                </div>
+                                <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                  項目
+                                </div>
+                                <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                  変更前
+                                </div>
+                                <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                  変更候補
+                                </div>
+                              </div>
+
+                              {row.changes.map((change, changeIndex) => {
+                                const selectedValue = getCrawlPreviewSelectedValue(
+                                  crawlSelectedChanges,
+                                  row.preview_row_id,
+                                  change
+                                );
+
+                                const checked = selectedValue !== null;
+                                const displayValue =
+                                  change.after ?? change.candidates[0] ?? null;
+                                const hasMultipleCandidates =
+                                  change.candidates.length > 1;
+
+                                return (
+                                  <div
+                                    key={`${row.preview_row_id}-${change.key}-${changeIndex}`}
+                                    className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]"
+                                  >
+                                    <div className="flex items-center justify-center rounded-lg bg-white/5 px-2 py-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() =>
+                                          toggleCrawlPreviewReflect(
+                                            row.preview_row_id,
+                                            change,
+                                            displayValue
+                                          )
+                                        }
+                                        className="h-4 w-4 accent-amber-500"
+                                      />
+                                    </div>
+
+                                    <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-medium text-slate-200">
+                                      {change.label}
+                                    </div>
+
+                                    <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                                      <PreviewChangeValue
+                                        changeKey={change.key}
+                                        value={change.before}
+                                      />
+                                    </div>
+
+                                    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                                      {hasMultipleCandidates ? (
+                                        <div className="space-y-2">
+                                          {change.candidates.map(
+                                            (candidate, candidateIndex) => {
+                                              const candidateChecked =
+                                                selectedValue === candidate;
+
+                                              return (
+                                                <label
+                                                  key={`${row.preview_row_id}-${change.key}-${candidateIndex}`}
+                                                  className="flex items-start gap-2"
+                                                >
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={candidateChecked}
+                                                    onChange={() =>
+                                                      toggleCrawlPreviewCandidate(
+                                                        row.preview_row_id,
+                                                        change,
+                                                        candidate
+                                                      )
+                                                    }
+                                                    className="mt-0.5 h-4 w-4 accent-amber-500"
+                                                  />
+                                                  <span className="break-all">
+                                                    {candidate}
+                                                  </span>
+                                                </label>
+                                              );
+                                            }
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <PreviewChangeValue
+                                          changeKey={change.key}
+                                          value={displayValue}
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                       <button
                         type="button"
                         onClick={() => setCrawlPreviewOpen(false)}
                         disabled={crawling}
-                        className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                        className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
                       >
-                        いいえ
+                        中止
                       </button>
+
+                      {crawlJobStatus === "paused" && crawlJobId && (
+                        <button
+                          type="button"
+                          onClick={handleResumeCrawl}
+                          disabled={crawling}
+                          className="h-10 w-[120px] flex-none rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+                        >
+                          再開
+                        </button>
+                      )}
 
                       <button
                         type="button"
                         onClick={handleCrawlSave}
                         disabled={crawling}
-                        className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                        className="h-10 w-[120px] flex-none rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
                       >
-                        {crawling ? "保存中..." : "はい"}
+                        {crawling ? "保存中..." : "保存"}
                       </button>
                     </div>
                   </div>
@@ -3636,6 +5151,51 @@ export default function Home() {
               </div>,
               document.body
             )}
+
+        {crawlResumeConfirmOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+              <div className="flex min-h-full items-center justify-center">
+                <div className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    再開確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    途中までのクローリング結果を保存しました。
+                    <br />
+                    途中から再開しますか？
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCrawlResumeConfirmOpen(false);
+                        setCrawlJobId(null);
+                        saveActiveCrawlJobId(null);
+                        setCrawlJobStatus("idle");
+                        setCrawlRemainingCount(0);
+                      }}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleResumeCrawl}
+                      className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400"
+                    >
+                      はい
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
         {dedupeConfirmOpen &&
           typeof document !== "undefined" &&
@@ -3693,43 +5253,103 @@ export default function Home() {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
-                    CSV投入確認
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      CSV投入確認
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCheckedImportFiles(
+                            Object.fromEntries(
+                              selectedFiles.map((file) => [buildImportFileKey(file), true])
+                            )
+                          )
+                        }
+                        disabled={importing}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        全選択
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCheckedImportFiles(
+                            Object.fromEntries(
+                              selectedFiles.map((file) => [buildImportFileKey(file), false])
+                            )
+                          )
+                        }
+                        disabled={importing}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        選択解除
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
-                    CSVを投入する前に、既存データの重複削除を行うか選んでください。
+                  <div className="px-4 py-6">
+                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                      チェックしたCSVのみ投入します。
+                      <br />
+                      本当にCSVを投入しますか？
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {selectedFiles.map((file, index) => {
+                        const fileKey = buildImportFileKey(file);
+
+                        return (
+                          <label
+                            key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                            className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checkedImportFiles[fileKey] !== false}
+                              onChange={() =>
+                                setCheckedImportFiles((prev) => ({
+                                  ...prev,
+                                  [fileKey]: !(prev[fileKey] !== false),
+                                }))
+                              }
+                              className="h-4 w-4 accent-emerald-500"
+                            />
+                            <span className="min-w-0 flex-1 truncate" title={file.name}>
+                              {file.name}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <div className="grid gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-3">
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
                       onClick={() => setImportConfirmOpen(false)}
                       disabled={importing}
-                      className="h-10 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
                     >
                       いいえ
                     </button>
 
                     <button
                       type="button"
-                      onClick={() => handleImport(false)}
+                      onClick={() => {
+                        setImportConfirmOpen(false);
+                        setImportDuplicateConfirmOpen(true);
+                      }}
                       disabled={importing}
-                      className="h-10 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
                     >
-                      {importing ? "取り込み中..." : "重複削除しないで投入"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleImport(true)}
-                      disabled={importing}
-                      className="h-10 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
-                    >
-                      {importing ? "取り込み中..." : "重複削除して投入"}
+                      {importing ? "投入中..." : "はい"}
                     </button>
                   </div>
                 </div>
@@ -3737,6 +5357,256 @@ export default function Home() {
             </div>,
             document.body
           )}
+
+        {importDuplicateConfirmOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => !importing && setImportDuplicateConfirmOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    CSV投入 重複削除確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    投入するCSV内で、企業名の完全一致を重複削除しますか？
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => handleImport(false)}
+                      disabled={importing}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      重複削除しない
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleImport(true)}
+                      disabled={importing}
+                      className="h-10 flex-1 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+                    >
+                      {importing ? "投入中..." : "重複削除する"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+          {exportScopeOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                onClick={() => setExportScopeOpen(false)}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                      <div className="text-sm font-semibold text-slate-100">
+                        CSV抽出対象選択
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setExportScopeOpen(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                      CSVを抽出する対象を選択してください。
+                    </div>
+
+                    <div className="grid gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExportMode("all");
+                          setExportScopeOpen(false);
+                          setExportConfirmOpen(true);
+                        }}
+                        className="h-10 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        全てのリスト
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExportMode("filtered");
+                          setExportScopeOpen(false);
+                          setExportConfirmOpen(true);
+                        }}
+                        className="h-10 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400"
+                      >
+                        絞り込みリストのみ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {exportConfirmOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                onClick={() => setExportConfirmOpen(false)}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                      CSV抽出確認
+                    </div>
+
+                    <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                      本当にCSVを抽出しますか？
+                      <br />
+                      <span className="text-xs text-slate-400">
+                        対象: {exportMode === "all"
+                          ? "全てのリスト"
+                          : "現在フィルタで絞り込んでいるリストのみ"}
+                      </span>
+                    </div>
+
+                    <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                      <button
+                        type="button"
+                        onClick={() => setExportConfirmOpen(false)}
+                        className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                      >
+                        いいえ
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExportConfirmOpen(false);
+                          setExportDuplicateConfirmOpen(true);
+                        }}
+                        className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        はい
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {exportDuplicateConfirmOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                onClick={() => setExportDuplicateConfirmOpen(false)}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                      CSV抽出 重複削除確認
+                    </div>
+
+                    <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                      抽出するCSV内で、企業名の完全一致を重複削除しますか？
+                      <br />
+                      <span className="text-xs text-slate-400">
+                        対象: {exportMode === "all"
+                          ? "全てのリスト"
+                          : "現在フィルタで絞り込んでいるリストのみ"}
+                      </span>
+                    </div>
+
+                    <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                      <button
+                        type="button"
+                        onClick={() => handleExport(false)}
+                        className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                      >
+                        重複削除しない
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleExport(true)}
+                        className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        重複削除する
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+            {allFiltersClearConfirmOpen &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <div
+                  className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                  onClick={() => setAllFiltersClearConfirmOpen(false)}
+                >
+                  <div className="flex min-h-full items-center justify-center">
+                    <div
+                      className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                        全フィルタ解除確認
+                      </div>
+
+                      <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                        現在適用中のフィルタをすべて解除しますか？
+                      </div>
+
+                      <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                        <button
+                          type="button"
+                          onClick={() => setAllFiltersClearConfirmOpen(false)}
+                          className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                        >
+                          いいえ
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleConfirmAllFiltersClear}
+                          className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                        >
+                          はい
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
 
         {error && (
           <div className="mb-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
@@ -3770,66 +5640,16 @@ export default function Home() {
                     onToggleValue={toggleSelectedValue}
                     onSelectAllVisible={selectAllVisibleValues}
                     onClearVisible={clearVisibleValues}
+                    onOpenClearConfirm={(key) =>
+                      setSingleFilterClearConfirm({ type: "column", key })
+                    }
                     onApply={applyColumnFilter}
                     onClear={clearColumnFilter}
                   />
                 ))}
               </div>
 
-              {rows.length === 0 && !loading ? (
-                <div className="px-4 py-12 text-center text-slate-500">
-                  データがありません
-                </div>
-              ) : usingVirtual ? (
-                <List
-                  defaultHeight={650}
-                  rowComponent={VirtualRow}
-                  rowCount={rows.length}
-                  rowHeight={58}
-                  rowProps={{ rows }}
-                  style={{ width: "100%" }}
-                />
-              ) : (
-                <div>
-                  {rows.map((row, i) => (
-                    <div
-                      key={`${row.company}-${row.address}-${i}`}
-                      className="grid border-b border-white/5 bg-[#0f172a]/60 transition hover:bg-[#162033]"
-                      style={{ gridTemplateColumns: GRID_TEMPLATE }}
-                    >
-                      <Cell title={row.company || ""}>
-                        <EmptyValue value={row.company} />
-                      </Cell>
-                      <Cell title={row.zipcode || ""}><EmptyValue value={row.zipcode} /></Cell>
-                      <Cell title={row.address || ""}><EmptyValue value={row.address} /></Cell>
-                      <Cell title={row.big_industry || ""}><EmptyValue value={row.big_industry} /></Cell>
-                      <Cell title={row.small_industry || ""}><EmptyValue value={row.small_industry} /></Cell>
-                      <Cell title={row.company_kana || ""}><EmptyValue value={row.company_kana} /></Cell>
-                      <Cell title={row.summary || ""} className="whitespace-pre-wrap"><EmptyValue value={row.summary} /></Cell>
-                      <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
-                      <Cell title={row.website_url || ""}><LinkCell url={row.website_url} /></Cell>
-                      <Cell title={row.form_url || ""}><LinkCell url={row.form_url} /></Cell>
-                      <Cell title={row.phone || ""}><EmptyValue value={row.phone} /></Cell>
-                      <Cell title={row.fax || ""}><EmptyValue value={row.fax} /></Cell>
-                      <Cell title={row.email || ""}><EmptyValue value={row.email} /></Cell>
-                      <Cell title={row.established_date || ""}><EmptyValue value={row.established_date} /></Cell>
-                      <Cell title={row.representative_name || ""}><EmptyValue value={row.representative_name} /></Cell>
-                      <Cell title={row.representative_title || ""}><EmptyValue value={row.representative_title} /></Cell>
-                      <Cell title={row.capital || ""}><EmptyValue value={row.capital} /></Cell>
-                      <Cell title={row.employee_count || ""}><EmptyValue value={row.employee_count} /></Cell>
-                      <Cell title={row.employee_count_year || ""}><EmptyValue value={row.employee_count_year} /></Cell>
-                      <Cell title={row.previous_sales || ""}><EmptyValue value={row.previous_sales} /></Cell>
-                      <Cell title={row.latest_sales || ""}><EmptyValue value={row.latest_sales} /></Cell>
-                      <Cell title={row.closing_month || ""}><EmptyValue value={row.closing_month} /></Cell>
-                      <Cell title={row.office_count || ""}><EmptyValue value={row.office_count} /></Cell>
-                      <Cell title={row.new_tag || ""}><EmptyValue value={row.new_tag} /></Cell>
-                      <Cell title={row.delete_tag || ""}><EmptyValue value={row.delete_tag} /></Cell>
-                      <Cell title={row.delete_flag || ""}><EmptyValue value={row.delete_flag} /></Cell>
-                      <Cell title={row.force_flag || ""}><EmptyValue value={row.force_flag} /></Cell>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {renderedTableBody}
             </div>
           </div>
         </div>

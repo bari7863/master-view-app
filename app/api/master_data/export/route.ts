@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+import { dbReady, pool } from "@/lib/db";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -9,7 +9,6 @@ const FILTER_COLUMN_MAP = {
   small_industry: `"小業種名"`,
   company_kana: `"企業名（かな）"`,
   summary: `"企業概要"`,
-  business_content: `"事業内容"`,
   website_url: `"企業サイトURL"`,
   form_url: `"問い合わせフォームURL"`,
   phone: `"電話番号"`,
@@ -26,9 +25,9 @@ const FILTER_COLUMN_MAP = {
   closing_month: `"決算月"`,
   office_count: `"事業所数"`,
   new_tag: `"新規登録タグ"`,
-  delete_tag: `"削除タグ"`,
-  delete_flag: `"削除フラグ"`,
-  force_flag: `"強制フラグ"`,
+  business_type: `"業種"`,
+  business_content: `"事業内容"`,
+  industry_category: `"業界"`,
 } as const;
 
 type FilterKey = keyof typeof FILTER_COLUMN_MAP;
@@ -98,13 +97,12 @@ const CSV_COLUMNS = [
   "企業名",
   "郵便番号",
   "住所",
-  "大業種名",
-  "小業種名",
+  "大業種",
+  "小業種",
   "企業名（かな）",
   "企業概要",
-  "事業内容",
-  "企業サイトURL",
-  "問い合わせフォームURL",
+  "企業URL",
+  "お問い合わせフォームURL",
   "電話番号",
   "FAX番号",
   "メールアドレス",
@@ -118,10 +116,11 @@ const CSV_COLUMNS = [
   "直近売上高",
   "決算月",
   "事業所数",
-  "新規登録タグ",
-  "削除タグ",
-  "削除フラグ",
-  "強制フラグ",
+  "タグ",
+  "業種",
+  "事業内容",
+  "業界",
+  "メモ",
 ] as const;
 
 function parseFilterModels(searchParams: URLSearchParams) {
@@ -620,6 +619,18 @@ function escapeCsvValue(value: unknown) {
   return `"${text.replace(/"/g, `""`)}"`;
 }
 
+function createCsvDownloadBody(lines: string[]) {
+  const csvText = lines.join("\r\n");
+  const csvBytes = new TextEncoder().encode(csvText);
+  const bomBytes = new Uint8Array([0xef, 0xbb, 0xbf]);
+
+  const body = new Uint8Array(bomBytes.length + csvBytes.length);
+  body.set(bomBytes, 0);
+  body.set(csvBytes, bomBytes.length);
+
+  return body;
+}
+
 function createFileName() {
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -633,38 +644,45 @@ function createFileName() {
 
 export async function GET(req: NextRequest) {
   try {
+    await dbReady;
     const { searchParams } = new URL(req.url);
-    const { whereSql, params } = buildWhereClause(searchParams);
+    const exportScope = searchParams.get("exportScope") || "filtered";
+    const dedupeByCompany = searchParams.get("dedupeByCompany") === "1";
+
+    const { whereSql, params } =
+      exportScope === "all"
+        ? { whereSql: "", params: [] as (string | number)[] }
+        : buildWhereClause(searchParams);
 
     const sql = `
       SELECT
-        "企業名",
-        "郵便番号",
-        "住所",
-        "大業種名",
-        "小業種名",
-        "企業名（かな）",
-        "企業概要",
-        "事業内容",
-        "企業サイトURL",
-        "問い合わせフォームURL",
-        "電話番号",
-        "FAX番号",
-        "メールアドレス",
-        "設立年月",
-        "代表者名",
-        "代表者役職",
-        "資本金",
-        "従業員数",
-        "従業員数年度",
-        "前年売上高",
-        "直近売上高",
-        "決算月",
-        "事業所数",
-        "新規登録タグ",
-        "削除タグ",
-        "削除フラグ",
-        "強制フラグ"
+        "企業名" AS "企業名",
+        "郵便番号" AS "郵便番号",
+        "住所" AS "住所",
+        "大業種名" AS "大業種",
+        "小業種名" AS "小業種",
+        "企業名（かな）" AS "企業名（かな）",
+        "企業概要" AS "企業概要",
+        "企業サイトURL" AS "企業URL",
+        "問い合わせフォームURL" AS "お問い合わせフォームURL",
+        "電話番号" AS "電話番号",
+        "FAX番号" AS "FAX番号",
+        "メールアドレス" AS "メールアドレス",
+        "設立年月" AS "設立年月",
+        "代表者名" AS "代表者名",
+        "代表者役職" AS "代表者役職",
+        "資本金" AS "資本金",
+        "従業員数" AS "従業員数",
+        "従業員数年度" AS "従業員数年度",
+        "前年売上高" AS "前年売上高",
+        "直近売上高" AS "直近売上高",
+        "決算月" AS "決算月",
+        "事業所数" AS "事業所数",
+        "新規登録タグ" AS "タグ",
+        "業種" AS "業種",
+        "事業内容" AS "事業内容",
+        "業界" AS "業界",
+        "メモ" AS "メモ"
       FROM public.master_data
       ${whereSql}
       ${buildOrderBy(searchParams)}
@@ -672,29 +690,52 @@ export async function GET(req: NextRequest) {
 
     const result = await pool.query(sql, params);
 
+    const exportRows = dedupeByCompany
+      ? (() => {
+          const seenCompanies = new Set<string>();
+
+          return result.rows.filter((row) => {
+            const company = String(row["企業名"] ?? "").trim();
+
+            if (company === "") {
+              return true;
+            }
+
+            if (seenCompanies.has(company)) {
+              return false;
+            }
+
+            seenCompanies.add(company);
+            return true;
+          });
+        })()
+      : result.rows;
+
     const lines = [
       CSV_COLUMNS.map((col) => escapeCsvValue(col)).join(","),
-      ...result.rows.map((row) =>
+      ...exportRows.map((row) =>
         CSV_COLUMNS.map((col) => escapeCsvValue(row[col])).join(",")
       ),
     ];
 
-    const csv = "\uFEFF" + lines.join("\r\n");
+    const csvBody = createCsvDownloadBody(lines);
     const fileName = createFileName();
 
-    return new NextResponse(csv, {
+    return new NextResponse(csvBody, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
         "Cache-Control": "no-store",
+        "Content-Length": String(csvBody.byteLength),
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (error) {
     return NextResponse.json(
       {
         ok: false,
-        error: error instanceof Error ? error.message : "CSVエクスポートでエラーが発生しました",
+        error: error instanceof Error ? error.message : "CSV抽出でエラーが発生しました",
       },
       { status: 500 }
     );

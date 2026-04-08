@@ -93,13 +93,17 @@ const COMPANY_KEYWORDS =
 const BUSINESS_KEYWORDS =
   /(事業内容|業務内容|営業内容|取扱業務|取扱内容|取扱商品|サービス|service|business|業容|事業概要|サービス内容)/i;
 const STAFF_KEYWORDS =
-  /(代表|代表者|社長|会長|役員|スタッフ|メンバー|ご挨拶|あいさつ|メッセージ|greeting|message|staff|member|president|ceo)/i;
+  /(代表|代表者|社長|会長|役員|理事長|所長|センター長|学院長|校長|学長|施設長|室長|ご挨拶|あいさつ|メッセージ|greeting|message|president|ceo|director|chief|officer|executive)/i;
 const RECRUIT_KEYWORDS =
   /(採用|求人|募集要項|recruit|career|job|jobs|entry)/i;
 const NEWS_BLOG_KEYWORDS =
-  /(お知らせ|新着|news|blog|ブログ|column|コラム|topics|トピックス|works|実績|case|事例|seminar|セミナー|event|イベント)/i;
+  /(お知らせ|新着|news|blog|ブログ|column|コラム|topics|トピックス|works|実績|case|事例|seminar|セミナー|event|イベント|voice|story|success|diary|interview|インタビュー|ひとりごと|卒業生|在校生|コーチ|先生)/i;
 const HTML_PAGE_DENY_EXT =
   /\.(pdf|zip|jpg|jpeg|png|gif|svg|webp|doc|docx|xls|xlsx|ppt|pptx)$/i;
+const REPRESENTATIVE_BAD_VALUE_REGEX =
+  /(基本情報|ご?挨拶|人事|新卒入社|会社概要(?:・沿革)?|会社案内|会社情報|企業情報|企業理念|経営理念|経営方針|経営者略歴|構成|声明|調査相談専用|番号|事業内容|製造|資本|者名|店舗詳細|営業所所在地|本社所在地|本社住所|月現在|月\s*移動|採用\s*情報|採用情報|名誉相談役|級建築士|登録番号|福山市|府中市|長野事業所|ショップ|shop|キャンパス|campus|一覧|大切にしていること|補償制度|道路工事|会社沿革|会社紹介動画|工場紹介|地域活動|協賛募集|募集要項|福利厚生|企業を知る|社員紹介|社員インタビュー|interview|voice|story|blog|news|topics|column|株式会社$|有限会社$|合同会社$|合資会社$|合名会社$|営業責任者|責任者\s*兼|生年月日|営\s*業|設立|創業|平成|昭和|令和)/i;
+const REPRESENTATIVE_TRAILING_TITLE_REGEX =
+  /\s*(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長).*$/i;
 
 const COMMON_CANDIDATE_PATHS = [
   "/company.html",
@@ -110,19 +114,52 @@ const COMMON_CANDIDATE_PATHS = [
   "/company/message.html",
   "/company/greeting.html",
   "/company/access.html",
+  "/company/gaiyou.html",
+  "/company/overview.html",
+  "/company/about/",
+  "/company/data/",
   "/companyinfo.html",
   "/profile.html",
   "/about.html",
+  "/about/",
+  "/aboutus/",
+  "/aboutus/company-outline/",
   "/corporate.html",
+  "/corporate/",
+  "/corporate/profile/",
   "/outline.html",
-  "/greeting.html",
+  "/gaiyou.html",
+  "/overview.html",
+  "/information.html",
   "/message.html",
+  "/greeting.html",
   "/staff.html",
   "/member.html",
   "/office.html",
   "/access.html",
   "/contact.html",
+  "/data/",
+  "/data/index.html",
+  "/about/chubu/index.html",
+  "/chubu/office/greeting.html",
+  "/domestic/chubu/office/greeting.html",
+  "/office/greeting.html",
 ];
+
+const REPRESENTATIVE_OVERVIEW_PAGE_KEYWORDS =
+  /(会社概要(?:・沿革)?|会社案内|会社情報|企業情報|法人概要|企業概要|会社データ|会社紹介|会社基本情報|基本情報|会社を知る|outline|profile|company|corporate|about|gaiyou|overview|information)/i;
+
+const REPRESENTATIVE_FALLBACK_DENY_KEYWORDS =
+  /(recruit|career|job|jobs|entry|新卒|中途|採用|blog|news|topics|column|interview|voice|story|success|diary|staff|member|members|社員紹介|社員インタビュー|shop|shopinfo|campus|店舗|商品|製品|service|faq|contact)/i;
+
+function isRepresentativeOverviewPageTarget(target: string) {
+  const normalized = decodeURIComponent(target);
+
+  return (
+    REPRESENTATIVE_OVERVIEW_PAGE_KEYWORDS.test(normalized) &&
+    !REPRESENTATIVE_FALLBACK_DENY_KEYWORDS.test(normalized)
+  );
+}
 
 const ZIPCODE_LABELS = [
   /^郵便番号$/,
@@ -198,14 +235,18 @@ const REPRESENTATIVE_NAME_LABELS = [
   /^社長$/,
   /^会長$/,
   /^代表$/,
-  /^役員$/,
+  /^所長$/,
+  /^センター長$/,
+  /^学院長$/,
+  /^校長$/,
+  /^学長$/,
+  /^施設長$/,
+  /^室長$/,
   /代表者/,
   /代表取締役/,
   /代表社員/,
   /代表理事/,
   /理事長/,
-  /社長/,
-  /会長/,
 ];
 
 const REPRESENTATIVE_TITLE_LABELS = [
@@ -584,6 +625,41 @@ function extractSingleLineLabeledValue(
 
     if (matched?.[1]) {
       return normalizeSpace(matched[1]);
+    }
+  }
+
+  return null;
+}
+
+function extractRepresentativeSingleLineValue(text: string) {
+  const lines = text
+    .split("\n")
+    .map((line) => normalizeSpace(line))
+    .filter((line) => line !== "");
+
+  const exactLabelOnlyPattern =
+    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)$/i;
+
+  const exactSameLinePattern =
+    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    const sameLine = line.match(exactSameLinePattern);
+    if (sameLine?.[1]) {
+      const candidate = normalizeRepresentativeName(sameLine[1]);
+      if (candidate) return candidate;
+    }
+
+    if (exactLabelOnlyPattern.test(line)) {
+      const nextLine = lines[i + 1] ?? "";
+      const nextCandidate = normalizeRepresentativeName(nextLine);
+      if (nextCandidate) return nextCandidate;
+
+      const nextNextLine = lines[i + 2] ?? "";
+      const nextNextCandidate = normalizeRepresentativeName(nextNextLine);
+      if (nextNextCandidate) return nextNextCandidate;
     }
   }
 
@@ -1021,8 +1097,31 @@ function normalizeRepresentativeTitle(value: string) {
   return matched ? normalizeSpace(matched[1]) : null;
 }
 
+function looksLikeRepresentativeNoise(value: string) {
+  const normalized = normalizeSpace(value);
+  if (!normalized) return true;
+
+  return (
+    REPRESENTATIVE_BAD_VALUE_REGEX.test(normalized) ||
+    /^(?:会社情報|会社概要(?:・沿革)?|会社沿革|企業情報|会社案内|ご挨拶|社長挨拶|代表挨拶|役員一覧|一覧|大切にしていること|経営理念|経営方針|補償制度|道路工事|地域活動|協賛募集|募集要項|福利厚生|会社紹介動画|工場紹介|企業を知る|採用情報|社員紹介|社員インタビュー|インタビュー|ブログ|お知らせ|ニュース|株式会社|有限会社|合同会社|合資会社|合名会社)$/i.test(
+      normalized
+    )
+  );
+}
+
 function normalizeRepresentativeName(value: string) {
-  let normalized = normalizeSpace(value)
+  const original = normalizeSpace(value);
+  if (!original) return null;
+
+  const inlineCompanyTitleName = original.match(
+    /(?:株式会社|有限会社|合同会社|合資会社|合名会社)[^\s　]{0,40}\s+(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表)\s*([一-龠々]{1,4}\s*[一-龠々]{1,4}|[一-龠々]{3,7})/u
+  );
+  if (inlineCompanyTitleName?.[1]) {
+    const candidate = normalizeSpace(inlineCompanyTitleName[1]);
+    return looksLikeRepresentativeNoise(candidate) ? null : candidate;
+  }
+
+  let normalized = original
     .replace(/（.*?）/g, " ")
     .replace(/\(.*?\)/g, " ")
     .replace(/\bPROFILE\b.*$/i, " ")
@@ -1034,55 +1133,72 @@ function normalizeRepresentativeName(value: string) {
     .replace(/プロフィール.*$/i, " ")
     .replace(/役員(?:紹介|一覧).*$/i, " ")
     .replace(/マネジメント.*$/i, " ")
+    .replace(/ブログ.*$/i, " ")
+    .replace(/ひとりごと.*$/i, " ")
     .replace(/[／/｜|]/g, " ")
+    .replace(/[、。,．]/g, " ")
+    .replace(/\s*(?:様|さん|氏|先生)\s*$/u, "")
     .replace(
-      /^(?:(?:代表者名?|代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|執行役員(?:専務|常務)?|専務取締役|常務取締役|専務|常務)\s*[:：]?\s*)+/i,
+      /^(?:(?:代表者名?|代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|執行役員(?:専務|常務)?|専務取締役?|常務取締役?|専務|常務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|締役社長|締役|兼社長|常務取締|専務取締)\s*[:：]?\s*)+/i,
       ""
     )
-    .replace(
-      /\s+[一-龠々ぁ-んァ-ヶー]{1,20}(?:本社|本店|支店|営業所|工場|事業所|センター).*$/u,
-      " "
-    )
+    .replace(/^(?:株式会社|有限会社|合同会社|合資会社|合名会社)\s*[^\s　]{1,40}\s+/u, "")
+    .replace(/^[^\s　]{1,40}(?:株式会社|有限会社|合同会社|合資会社|合名会社)\s+/u, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 
   if (!normalized) return null;
+  if (looksLikeRepresentativeNoise(normalized)) return null;
+  if (!/[一-龠々]/u.test(normalized)) return null;
+  if (/[ぁ-ん]/.test(normalized)) return null;
+
+  const leadingNameBeforeTitle = normalized.match(
+    /^([一-龠々]{1,4}\s*[一-龠々]{1,4}|[一-龠々]{3,7})\s+(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長)/u
+  );
+  if (leadingNameBeforeTitle?.[1]) {
+    const candidate = normalizeSpace(leadingNameBeforeTitle[1]);
+    if (!looksLikeRepresentativeNoise(candidate) && candidate.replace(/\s/g, "").length >= 3) {
+      return candidate;
+    }
+  }
+
+  normalized = normalized.replace(REPRESENTATIVE_TRAILING_TITLE_REGEX, "").trim();
+  if (!normalized) return null;
+  if (looksLikeRepresentativeNoise(normalized)) return null;
 
   if (
-    /^(?:代表者名?|代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|執行役員(?:専務|常務)?|専務取締役|常務取締役|専務|常務)$/i.test(
+    /^(?:代表者名?|代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)$/i.test(
       normalized
     )
   ) {
     return null;
   }
 
-  if (
-    /(ご挨拶|挨拶|メッセージ|message|greeting|staff|member|management|マネジメント|プロフィール|profile|役員紹介|役員一覧|会社概要|企業情報|会社情報|採用情報)/i.test(
-      normalized
-    )
-  ) {
-    return null;
+  const exactSpaced = normalized.match(/^([一-龠々]{1,4})\s+([一-龠々]{1,4})$/u);
+  if (exactSpaced?.[1] && exactSpaced?.[2]) {
+    const joinedLength = `${exactSpaced[1]}${exactSpaced[2]}`.length;
+    if (joinedLength >= 8) return null;
+
+    const candidate = normalizeSpace(`${exactSpaced[1]} ${exactSpaced[2]}`);
+    return looksLikeRepresentativeNoise(candidate) ? null : candidate;
   }
 
-  const exact = normalized.match(
-    /^([一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4}|[一-龠々ぁ-んァ-ヶー]{2,8})$/u
-  );
-  if (exact?.[1]) {
-    return normalizeSpace(exact[1]);
+  const exactCompact = normalized.match(/^([一-龠々]{3,7})$/u);
+  if (exactCompact?.[1]) {
+    return looksLikeRepresentativeNoise(exactCompact[1]) ? null : exactCompact[1];
   }
 
-  const spaced = normalized.match(
-    /([一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u
-  );
+  const spaced = normalized.match(/([一-龠々]{1,4}\s+[一-龠々]{1,4})/u);
   if (spaced?.[1]) {
-    return normalizeSpace(spaced[1]);
+    const candidate = normalizeSpace(spaced[1]);
+    const joinedLength = candidate.replace(/\s/g, "").length;
+    if (joinedLength >= 8) return null;
+    return looksLikeRepresentativeNoise(candidate) ? null : candidate;
   }
 
-  const compact = normalized.match(
-    /(?:^|[\s:：])([一-龠々ぁ-んァ-ヶー]{2,8})(?:$|[\s:：])/u
-  );
+  const compact = normalized.match(/(?:^|[\s:：])([一-龠々]{3,7})(?:$|[\s:：])/u);
   if (compact?.[1]) {
-    return compact[1];
+    return looksLikeRepresentativeNoise(compact[1]) ? null : compact[1];
   }
 
   return null;
@@ -1095,10 +1211,10 @@ function extractRepresentativeNameFromText(text: string) {
     .filter((line) => line !== "");
 
   const skipPattern =
-    /(代表ご挨拶|ご挨拶|代表メッセージ|メッセージ|スタッフ紹介|役員一覧|役員紹介|マネジメント|management|staff|member|members|profile)/i;
+    /(代表ご挨拶|ご挨拶|代表メッセージ|メッセージ|スタッフ紹介|役員一覧|役員紹介|マネジメント|management|staff|member|members|profile|blog|voice|story|success|diary|interview|ひとりごと|卒業生|在校生|コーチ|先生|人事|採用|新卒|店舗|shop|campus)/i;
 
   const titlePattern =
-    /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)(?!から)/i;
+    /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)(?!から)/i;
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -1106,7 +1222,7 @@ function extractRepresentativeNameFromText(text: string) {
     if (skipPattern.test(line)) continue;
 
     const labeledSameLine = line.match(
-      /(?:代表者名?|代表者|役員)\s*[:：]?\s*(.+)$/i
+      /(?:代表者名?|代表者|役員|理事長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i
     );
     if (labeledSameLine?.[1]) {
       const name = normalizeRepresentativeName(labeledSameLine[1]);
@@ -1114,14 +1230,14 @@ function extractRepresentativeNameFromText(text: string) {
     }
 
     const sameLine = line.match(
-      /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)(?!から)\s*[:：/／]?\s*(.+)$/i
+      /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)(?!から)\s*[:：/／]?\s*(.+)$/i
     );
     if (sameLine?.[2]) {
       const name = normalizeRepresentativeName(sameLine[2]);
       if (name) return name;
     }
 
-    if (/^代表者(?:名)?$/.test(line)) {
+    if (/^(?:代表者(?:名)?|役員|理事長|所長|センター長|学院長|校長|学長|施設長|室長)$/.test(line)) {
       const nextLine = lines[i + 1] ?? "";
       const nextLineName = normalizeRepresentativeName(nextLine);
       if (nextLineName) return nextLineName;
@@ -1144,15 +1260,22 @@ function extractRepresentativeNameFromText(text: string) {
   if (!normalized) return null;
 
   const patterns = [
-    /代表者名?\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)?\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /役員\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表)?\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /代表取締役(?:社長|会長)?\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /取締役社長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /代表社員\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /代表理事\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /理事長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /社長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
-    /会長\s*[:：/／]?\s*([一-龠々ぁ-んァ-ヶー]{2,8}|[一-龠々ぁ-んァ-ヶー]{1,4}\s+[一-龠々ぁ-んァ-ヶー]{1,4})/u,
+    /代表者名?\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /役員\s*[:：]?\s*(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /代表取締役(?:社長|会長)?\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /取締役社長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /代表社員\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /代表理事\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /理事長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /所長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /センター長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /学院長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /校長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /学長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /施設長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /室長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /社長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
+    /会長\s*[:：/／]?\s*([一-龠々]{1,4}\s+[一-龠々]{1,4}|[一-龠々]{3,8})/u,
   ];
 
   for (const pattern of patterns) {
@@ -1427,7 +1550,7 @@ function getCandidateLinkScore(
     hasSelectedCrawlField(selectedFieldSet, "zipcode") ||
     hasSelectedCrawlField(selectedFieldSet, "address");
 
-  const needsStaffPages = hasSelectedCrawlField(
+  const needsRepresentativePages = hasSelectedCrawlField(
     selectedFieldSet,
     "representative_name"
   );
@@ -1440,7 +1563,7 @@ function getCandidateLinkScore(
   if (BUSINESS_KEYWORDS.test(target) && (needsBusinessPages || needsCompanyPages))
     score += 110;
   if (CONTACT_KEYWORDS.test(target) && needsContactPages) score += 160;
-  if (STAFF_KEYWORDS.test(target) && needsStaffPages) score += 180;
+  if (STAFF_KEYWORDS.test(target) && needsRepresentativePages) score += 180;
 
   if (
     hasSelectedCrawlField(selectedFieldSet, "form_url") &&
@@ -1449,12 +1572,40 @@ function getCandidateLinkScore(
     score += 80;
   }
 
-  if (
-    hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
-    /message|greeting|staff|member|president|ceo|代表|社長|会長/i.test(target)
-  ) {
-    score += 70;
+  if (needsRepresentativePages) {
+  if (isRepresentativeOverviewPageTarget(target)) {
+    score += 520;
   }
+
+  if (/(役員一覧|officer|executive)/i.test(target)) {
+    score += 180;
+  }
+
+  if (
+    /(greeting|message|挨拶|メッセージ)/i.test(target) &&
+    /(代表|社長|会長|理事長|所長|センター長|学院長|校長|学長|施設長|室長|president|director|chief)/i.test(
+      target
+    )
+  ) {
+    score += 90;
+  }
+
+  if (
+    /(staff|member|members|社員紹介|社員インタビュー|経営者略歴)/i.test(
+      target
+    )
+  ) {
+    score -= 320;
+  }
+
+  if (
+    /(recruit|career|job|jobs|entry|新卒|中途|採用|shop|shopinfo|campus|店舗|商品|製品|service|blog|news|topics|column|interview|voice|story|success|diary|faq|contact)/i.test(
+      target
+    )
+  ) {
+    score -= 380;
+  }
+}
 
   if (NEWS_BLOG_KEYWORDS.test(target)) score -= 120;
   if (RECRUIT_KEYWORDS.test(target)) score -= 80;
@@ -1525,9 +1676,13 @@ function getCandidatePageLimit(
 ) {
   if (selectedFieldSet.size === 1) {
     if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 5;
-    if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) return 6;
+    if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) return 25;
     if (hasSelectedOfficeFields(selectedFieldSet)) return 8;
     return 6;
+  }
+
+  if (selectedFieldSet.size <= 3 && hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+    return 24;
   }
 
   if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
@@ -1554,10 +1709,18 @@ function canStopFetchingAdditionalPages(
     if (field === "website_url") return !!best.website_url?.value;
     if (field === "form_url") return !!best.form_url?.value;
     if (field === "established_date") return !!best.established_date?.value;
-    if (field === "representative_name") return !!best.representative_name?.value;
+
+    if (field === "representative_name") {
+      return (
+        !!best.representative_name?.value &&
+        (best.representative_name?.score ?? 0) >= 360
+      );
+    }
+
     if (field === "capital") return !!best.capital?.value;
     if (field === "employee_count") return !!best.employee_count?.value;
     if (field === "business_content") return !!best.business_content?.value;
+
     return true;
   });
 }
@@ -1709,52 +1872,54 @@ function processPage(
     );
   }
 
-    if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
-      const representativeNamePairValue =
-        pickPairValue(pairs, REPRESENTATIVE_NAME_LABELS) ?? "";
-      const representativeNameTextValue =
-        extractSingleLineLabeledValue(
-          page.structuredText,
-          REPRESENTATIVE_NAME_LABELS
-        ) ?? "";
-      const representativeNameFromText =
-        extractRepresentativeNameFromText(page.structuredText);
+if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+  const representativeNamePairValue =
+    pickPairValue(pairs, REPRESENTATIVE_NAME_LABELS) ?? "";
+  const representativeNameTextValue =
+    extractRepresentativeSingleLineValue(page.structuredText) ?? "";
+  const representativeNameFromText =
+    extractRepresentativeNameFromText(page.structuredText);
 
-      const representativeSourceTarget = decodeURIComponent(
-        `${page.finalUrl} ${page.title} ${page.h1}`
-      );
+  const representativeSourceTarget = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
 
-      const representativeScoreAdjustment =
-        (/(会社概要|企業情報|会社情報|会社案内|about|company|corporate|outline|who\.html)/i.test(
-          representativeSourceTarget
-        )
-          ? 60
-          : 0) -
-        (/(役員一覧|役員紹介|マネジメント|management|staff|member|members|greeting|message|ご挨拶|代表メッセージ)/i.test(
-          representativeSourceTarget
-        )
-          ? 80
-          : 0);
+  const representativeScoreAdjustment =
+    (/(会社概要|会社概要・沿革|会社案内|企業情報|法人概要|about|company|corporate|outline|who\.html|gaiyou|data|profile|officer|executive|役員一覧)/i.test(
+      representativeSourceTarget
+    )
+      ? 120
+      : 0) +
+    (/(office\/greeting|社長挨拶|代表挨拶|理事長挨拶|所長挨拶|ご挨拶|greeting|message)/i.test(
+      representativeSourceTarget
+    )
+      ? 90
+      : 0) -
+    (/(recruit|career|job|jobs|entry|新卒|中途|採用|shop|shopinfo|campus|店舗|商品|製品|service|blog|news|topics|column|interview|voice|story|success|diary|staff|member|members|社員紹介|社員インタビュー)/i.test(
+      representativeSourceTarget
+    )
+      ? 320
+      : 0);
 
-      addBest(
-        best,
-        "representative_name",
-        normalizeRepresentativeName(representativeNamePairValue),
-        260 + boost + representativeScoreAdjustment
-      );
-      addBest(
-        best,
-        "representative_name",
-        normalizeRepresentativeName(representativeNameTextValue),
-        245 + boost + representativeScoreAdjustment
-      );
-      addBest(
-        best,
-        "representative_name",
-        representativeNameFromText,
-        180 + boost + representativeScoreAdjustment
-      );
-    }
+  addBest(
+    best,
+    "representative_name",
+    normalizeRepresentativeName(representativeNamePairValue),
+    280 + boost + representativeScoreAdjustment
+  );
+  addBest(
+    best,
+    "representative_name",
+    normalizeRepresentativeName(representativeNameTextValue),
+    270 + boost + representativeScoreAdjustment
+  );
+  addBest(
+    best,
+    "representative_name",
+    representativeNameFromText,
+    220 + boost + representativeScoreAdjustment
+  );
+}
 
   if (hasSelectedCrawlField(selectedFieldSet, "capital")) {
     const capitalPairValue = pickPairValue(pairs, CAPITAL_LABELS) ?? "";
@@ -1876,20 +2041,99 @@ export async function crawlCompanyWebsite(
     };
   }
 
+  const topPageSelectedFieldSet =
+    hasSelectedCrawlField(selectedFieldSet, "representative_name")
+      ? new Set<CrawlSelectableFieldKey>(
+          Array.from(selectedFieldSet).filter(
+            (field): field is CrawlSelectableFieldKey =>
+              field !== "representative_name"
+          )
+        )
+      : selectedFieldSet;
+
   collectedPages.push(topPage);
-  processPage(topPage, best, selectedFieldSet);
+  processPage(topPage, best, topPageSelectedFieldSet);
 
-  const candidateUrls = pickCandidatePageUrls(topPage, selectedFieldSet);
-  for (const candidateUrl of candidateUrls) {
-    if (canStopFetchingAdditionalPages(best, selectedFieldSet)) {
-      break;
+  const fetchedUrlSet = new Set<string>([topPage.finalUrl]);
+  const nestedCandidateUrls: string[] = [];
+  const rawCandidateUrls = pickCandidatePageUrls(topPage, selectedFieldSet);
+  const overviewCandidateUrls = hasSelectedCrawlField(
+    selectedFieldSet,
+    "representative_name"
+  )
+    ? rawCandidateUrls.filter((url) => isRepresentativeOverviewPageTarget(url))
+    : rawCandidateUrls;
+  const fallbackCandidateUrls = hasSelectedCrawlField(
+    selectedFieldSet,
+    "representative_name"
+  )
+    ? rawCandidateUrls.filter((url) => !isRepresentativeOverviewPageTarget(url))
+    : [];
+  const queuedUrlSet = new Set<string>(rawCandidateUrls);
+
+  const fetchCandidatePages = async (urls: string[]) => {
+    for (const candidateUrl of urls) {
+      if (canStopFetchingAdditionalPages(best, selectedFieldSet)) {
+        break;
+      }
+
+      const page = await fetchPage(candidateUrl);
+      if (!page) continue;
+      if (fetchedUrlSet.has(page.finalUrl)) continue;
+
+      fetchedUrlSet.add(page.finalUrl);
+      collectedPages.push(page);
+      processPage(page, best, selectedFieldSet);
+
+      const shouldCollectNestedRepresentativePages =
+        hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
+        (!best.representative_name?.value ||
+          (best.representative_name?.score ?? 0) < 360);
+
+      if (shouldCollectNestedRepresentativePages) {
+        const nestedUrls = pickNestedCandidatePageUrls(page, selectedFieldSet);
+        for (const nestedUrl of nestedUrls) {
+          if (queuedUrlSet.has(nestedUrl)) continue;
+          queuedUrlSet.add(nestedUrl);
+          nestedCandidateUrls.push(nestedUrl);
+        }
+      }
     }
+  };
 
-    const page = await fetchPage(candidateUrl);
-    if (!page) continue;
+  if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+    await fetchCandidatePages(overviewCandidateUrls);
 
-    collectedPages.push(page);
-    processPage(page, best, selectedFieldSet);
+    const shouldFetchFallbackRepresentativePages =
+      !best.representative_name?.value ||
+      (best.representative_name?.score ?? 0) < 360;
+
+    if (shouldFetchFallbackRepresentativePages) {
+      await fetchCandidatePages(fallbackCandidateUrls);
+    }
+  } else {
+    await fetchCandidatePages(rawCandidateUrls);
+  }
+
+  const shouldFetchNestedRepresentativePages =
+    hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
+    (!best.representative_name?.value ||
+      (best.representative_name?.score ?? 0) < 360);
+
+  if (shouldFetchNestedRepresentativePages) {
+    for (const nestedUrl of nestedCandidateUrls.slice(0, 40)) {
+      if (canStopFetchingAdditionalPages(best, selectedFieldSet)) {
+        break;
+      }
+
+      const nestedPage = await fetchPage(nestedUrl);
+      if (!nestedPage) continue;
+      if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
+
+      fetchedUrlSet.add(nestedPage.finalUrl);
+      collectedPages.push(nestedPage);
+      processPage(nestedPage, best, selectedFieldSet);
+    }
   }
 
   const shouldExtractOffices =

@@ -1,8 +1,12 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Pool } from "pg";
 
 declare global {
   // eslint-disable-next-line no-var
   var pgPool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var masterDataColumnInitPromise: Promise<void> | undefined;
 }
 
 const poolConfig = process.env.DATABASE_URL
@@ -18,6 +22,20 @@ const poolConfig = process.env.DATABASE_URL
     };
 
 export const pool = global.pgPool || new Pool(poolConfig);
+
+export const dbReady =
+  global.masterDataColumnInitPromise ||
+  (async () => {
+    const sqlFilePath = join(process.cwd(), "sql", "add_column.sql");
+    const sql = await readFile(sqlFilePath, "utf8");
+    const normalizedSql = sql.trim();
+
+    if (!normalizedSql) return;
+
+    await pool.query(normalizedSql);
+  })();
+
+global.masterDataColumnInitPromise = dbReady;
 
 if (process.env.NODE_ENV !== "production") {
   global.pgPool = pool;

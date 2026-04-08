@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { pool } from "@/lib/db";
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const runtime = "nodejs";
+import { dbReady, pool } from "@/lib/db";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -9,7 +12,6 @@ const FILTER_COLUMN_MAP = {
   small_industry: `"小業種名"`,
   company_kana: `"企業名（かな）"`,
   summary: `"企業概要"`,
-  business_content: `"事業内容"`,
   website_url: `"企業サイトURL"`,
   form_url: `"問い合わせフォームURL"`,
   phone: `"電話番号"`,
@@ -26,9 +28,10 @@ const FILTER_COLUMN_MAP = {
   closing_month: `"決算月"`,
   office_count: `"事業所数"`,
   new_tag: `"新規登録タグ"`,
-  delete_tag: `"削除タグ"`,
-  delete_flag: `"削除フラグ"`,
-  force_flag: `"強制フラグ"`,
+  business_type: `"業種"`,
+  business_content: `"事業内容"`,
+  industry_category: `"業界"`,
+  memo: `"メモ"`,
 } as const;
 
 type FilterKey = keyof typeof FILTER_COLUMN_MAP;
@@ -94,7 +97,37 @@ type AdvancedFilters = {
   tags?: AdvancedTagFilters;
 };
 
-const CSV_COLUMNS = [
+const CSV_HEADER_COLUMNS = [
+  "企業名",
+  "郵便番号",
+  "住所",
+  "大業種",
+  "小業種",
+  "企業名（かな）",
+  "企業概要",
+  "企業URL",
+  "お問い合わせフォームURL",
+  "電話番号",
+  "FAX番号",
+  "メールアドレス",
+  "設立年月",
+  "代表者名",
+  "代表者役職",
+  "資本金",
+  "従業員数",
+  "従業員数年度",
+  "前年売上高",
+  "直近売上高",
+  "決算月",
+  "事業所数",
+  "タグ",
+  "業種",
+  "事業内容",
+  "業界",
+  "メモ",
+] as const;
+
+const DB_INSERT_COLUMNS = [
   "企業名",
   "郵便番号",
   "住所",
@@ -102,7 +135,6 @@ const CSV_COLUMNS = [
   "小業種名",
   "企業名（かな）",
   "企業概要",
-  "事業内容",
   "企業サイトURL",
   "問い合わせフォームURL",
   "電話番号",
@@ -119,10 +151,51 @@ const CSV_COLUMNS = [
   "決算月",
   "事業所数",
   "新規登録タグ",
-  "削除タグ",
-  "削除フラグ",
-  "強制フラグ",
+  "業種",
+  "事業内容",
+  "業界",
+  "メモ",
 ] as const;
+
+const DB_INSERT_TO_CSV_HEADER: Record<
+  (typeof DB_INSERT_COLUMNS)[number],
+  (typeof CSV_HEADER_COLUMNS)[number]
+> = {
+  "企業名": "企業名",
+  "郵便番号": "郵便番号",
+  "住所": "住所",
+  "大業種名": "大業種",
+  "小業種名": "小業種",
+  "企業名（かな）": "企業名（かな）",
+  "企業概要": "企業概要",
+  "企業サイトURL": "企業URL",
+  "問い合わせフォームURL": "お問い合わせフォームURL",
+  "電話番号": "電話番号",
+  "FAX番号": "FAX番号",
+  "メールアドレス": "メールアドレス",
+  "設立年月": "設立年月",
+  "代表者名": "代表者名",
+  "代表者役職": "代表者役職",
+  "資本金": "資本金",
+  "従業員数": "従業員数",
+  "従業員数年度": "従業員数年度",
+  "前年売上高": "前年売上高",
+  "直近売上高": "直近売上高",
+  "決算月": "決算月",
+  "事業所数": "事業所数",
+  "新規登録タグ": "タグ",
+  "業種": "業種",
+  "事業内容": "事業内容",
+  "業界": "業界",
+  "メモ": "メモ",
+};
+
+function hasExactCsvHeaders(headerRow: string[]) {
+  return (
+    headerRow.length === CSV_HEADER_COLUMNS.length &&
+    CSV_HEADER_COLUMNS.every((column, index) => headerRow[index] === column)
+  );
+}
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
@@ -197,6 +270,28 @@ function parseAdvancedFilters(searchParams: URLSearchParams) {
   } catch {
     return {} as AdvancedFilters;
   }
+}
+
+function isRepresentativeNameEmptyFilter(searchParams: URLSearchParams) {
+  const filterModels = parseFilterModels(searchParams);
+  const model = filterModels.representative_name;
+
+  if (!model) return false;
+
+  if (model.conditionType === "is_empty") {
+    return true;
+  }
+
+  if (
+    model.valueFilterEnabled &&
+    Array.isArray(model.selectedValues) &&
+    model.selectedValues.length === 1 &&
+    model.selectedValues[0] === ""
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 const PREFECTURE_TO_REGION = {
@@ -587,6 +682,14 @@ function addAdvancedFilterClauses(
   }
 }
 
+function buildBlankCheckClause(column: string) {
+  return `NULLIF(regexp_replace(COALESCE(${column}::text, ''), '[\\s　]+', '', 'g'), '') IS NULL`;
+}
+
+function buildNotBlankCheckClause(column: string) {
+  return `NULLIF(regexp_replace(COALESCE(${column}::text, ''), '[\\s　]+', '', 'g'), '') IS NOT NULL`;
+}
+
 function addConditionClause(
   where: string[],
   params: (string | number)[],
@@ -602,12 +705,12 @@ function addConditionClause(
   if (type === "") return;
 
   if (type === "is_empty") {
-    where.push(`NULLIF(BTRIM(${textColumn}), '') IS NULL`);
+    where.push(buildBlankCheckClause(column));
     return;
   }
 
   if (type === "is_not_empty") {
-    where.push(`NULLIF(BTRIM(${textColumn}), '') IS NOT NULL`);
+    where.push(buildNotBlankCheckClause(column));
     return;
   }
 
@@ -681,7 +784,7 @@ function addValueFilterClause(
   }
 
   if (includeEmpty) {
-    pieces.push(`NULLIF(BTRIM(${textColumn}), '') IS NULL`);
+    pieces.push(buildBlankCheckClause(column));
   }
 
   if (pieces.length > 0) {
@@ -735,11 +838,14 @@ function buildOrderBy(searchParams: URLSearchParams) {
 
 export async function GET(req: NextRequest) {
   try {
+    await dbReady;
     const { searchParams } = new URL(req.url);
     const valuesFor = searchParams.get("valuesFor") as FilterKey | null;
     const advancedValuesFor = searchParams.get("advancedValuesFor");
 
     if (advancedValuesFor === "prefecture") {
+      const { whereSql, params } = buildWhereClause(searchParams);
+
       const sql = `
         SELECT
           prefecture,
@@ -750,13 +856,14 @@ export async function GET(req: NextRequest) {
             ${PREFECTURE_EXPR} AS prefecture,
             ${CITY_EXPR} AS city
           FROM public.master_data
+          ${whereSql}
         ) src
         WHERE prefecture IS NOT NULL
         GROUP BY prefecture, city
         ORDER BY prefecture ASC, city ASC
       `;
 
-      const res = await pool.query(sql);
+      const res = await pool.query(sql, params);
       const cityMap = new Map<string, Set<string>>();
       const prefectureCountMap = new Map<string, number>();
       const cityCountMap = new Map<string, Record<string, number>>();
@@ -808,16 +915,19 @@ export async function GET(req: NextRequest) {
     }
 
     if (advancedValuesFor === "industry") {
+      const { whereSql, params } = buildWhereClause(searchParams);
+
       const sql = `
         SELECT
           ${BIG_INDUSTRY_TEXT} AS big_industry,
           ${SMALL_INDUSTRY_TEXT} AS small_industry,
           COUNT(*)::int AS count
         FROM public.master_data
+        ${whereSql}
         GROUP BY 1, 2
       `;
 
-      const res = await pool.query(sql);
+      const res = await pool.query(sql, params);
       const smallMap = new Map<string, Set<string>>();
       const bigCountMap = new Map<string, number>();
       const smallCountMap = new Map<string, Record<string, number>>();
@@ -938,6 +1048,11 @@ export async function GET(req: NextRequest) {
     }
 
     if (advancedValuesFor === "tag") {
+      const { whereSql, params } = buildWhereClause(searchParams);
+      const tagWhereSql = whereSql
+        ? `${whereSql} AND NULLIF(BTRIM(tag_value), '') IS NOT NULL`
+        : `WHERE NULLIF(BTRIM(tag_value), '') IS NOT NULL`;
+
       const sql = `
         SELECT
           BTRIM(tag_value) AS tag,
@@ -945,12 +1060,12 @@ export async function GET(req: NextRequest) {
           COUNT(*)::int AS count
         FROM public.master_data
         CROSS JOIN LATERAL regexp_split_to_table(COALESCE("新規登録タグ"::text, ''), E'\\s*;\\s*') AS tag_value
-        WHERE NULLIF(BTRIM(tag_value), '') IS NOT NULL
+        ${tagWhereSql}
         GROUP BY 1, 2
         ORDER BY parent ASC, tag ASC
       `;
 
-      const res = await pool.query(sql);
+      const res = await pool.query(sql, params);
       const tagsByParent: Record<string, string[]> = {};
       const tagCountsByParent: Record<string, Record<string, number>> = {};
       const parentCountMap = new Map<string, number>();
@@ -1044,13 +1159,14 @@ export async function GET(req: NextRequest) {
 
     const { whereSql, params } = buildWhereClause(searchParams);
 
-    const countSql = `
-      SELECT COUNT(*)::int AS total
+    const totalSql = `
+      SELECT COUNT(*)::int AS total_count
       FROM public.master_data
       ${whereSql}
     `;
-    const countRes = await pool.query(countSql, params);
-    const total = countRes.rows[0]?.total ?? 0;
+
+    const totalRes = await pool.query(totalSql, params);
+    const total = Number(totalRes.rows[0]?.total_count ?? 0);
 
     let rowsSql = `
       SELECT
@@ -1061,7 +1177,6 @@ export async function GET(req: NextRequest) {
         "小業種名" AS small_industry,
         "企業名（かな）" AS company_kana,
         "企業概要" AS summary,
-        "事業内容" AS business_content,
         "企業サイトURL" AS website_url,
         "問い合わせフォームURL" AS form_url,
         "電話番号" AS phone,
@@ -1078,9 +1193,10 @@ export async function GET(req: NextRequest) {
         "決算月" AS closing_month,
         "事業所数" AS office_count,
         "新規登録タグ" AS new_tag,
-        "削除タグ" AS delete_tag,
-        "削除フラグ" AS delete_flag,
-        "強制フラグ" AS force_flag
+        "業種" AS business_type,
+        "事業内容" AS business_content,
+        "業界" AS industry_category,
+        "メモ" AS memo
       FROM public.master_data
       ${whereSql}
       ${buildOrderBy(searchParams)}
@@ -1095,6 +1211,7 @@ export async function GET(req: NextRequest) {
     }
 
     const rowsRes = await pool.query(rowsSql, queryParams);
+    const rows = rowsRes.rows;
 
     return NextResponse.json({
       ok: true,
@@ -1102,7 +1219,7 @@ export async function GET(req: NextRequest) {
       page: isAll ? 1 : page,
       limit: isAll ? "all" : limit,
       totalPages: isAll ? 1 : Math.max(Math.ceil(total / (limit || 200)), 1),
-      rows: rowsRes.rows,
+      rows: rows,
     });
   } catch (error) {
     console.error("API ERROR:", error);
@@ -1120,59 +1237,78 @@ export async function POST(req: NextRequest) {
   const client = await pool.connect();
 
   try {
+    await dbReady;
     const formData = await req.formData();
-    const file = formData.get("file");
+    const files = formData
+      .getAll("files")
+      .filter((item): item is File => item instanceof File);
+
+    const singleFile = formData.get("file");
+    if (files.length === 0 && singleFile instanceof File) {
+      files.push(singleFile);
+    }
 
     const skipDuplicateCheck =
-    formData.get("skipDuplicateCheck") === "1";
+      formData.get("skipDuplicateCheck") === "1";
 
-    if (!(file instanceof File)) {
+    if (files.length === 0) {
       return NextResponse.json(
         { ok: false, error: "CSVファイルが選択されていません" },
         { status: 400 }
       );
     }
 
-    const text = (await file.text()).replace(/^\uFEFF/, "");
-    const rows = parseCsv(text);
+    const records: Record<(typeof CSV_HEADER_COLUMNS)[number], string | null>[] = [];
 
-    if (rows.length < 2) {
-      return NextResponse.json(
-        { ok: false, error: "CSVにデータ行がありません" },
-        { status: 400 }
-      );
+    const invalidHeaderFiles: string[] = [];
+
+    for (const file of files) {
+      const text = (await file.text()).replace(/^\uFEFF/, "");
+      const rows = parseCsv(text);
+
+      if (rows.length < 2) {
+        continue;
+      }
+
+      const headerRow = rows[0].map((value) => normalizeHeader(value));
+
+      if (!hasExactCsvHeaders(headerRow)) {
+        invalidHeaderFiles.push(file.name);
+        continue;
+      }
+
+      const headerIndexMap = Object.fromEntries(
+        CSV_HEADER_COLUMNS.map((column, index) => [column, index])
+      ) as Record<(typeof CSV_HEADER_COLUMNS)[number], number>;
+
+      const fileRecords = rows
+        .slice(1)
+        .filter((row) => row.some((value) => value.trim() !== ""))
+        .map((row) => {
+          const record = Object.fromEntries(
+            CSV_HEADER_COLUMNS.map((column) => [column, null])
+          ) as Record<(typeof CSV_HEADER_COLUMNS)[number], string | null>;
+
+          CSV_HEADER_COLUMNS.forEach((column) => {
+            const value = row[headerIndexMap[column]] ?? "";
+            record[column] = value.trim() === "" ? null : value.trim();
+          });
+
+          return record;
+        });
+
+      records.push(...fileRecords);
     }
 
-    const headerRow = rows[0].map((value) => normalizeHeader(value));
-    const existingColumns = CSV_COLUMNS.filter((column) =>
-      headerRow.includes(column)
-    );
-
-    if (existingColumns.length === 0) {
+    if (invalidHeaderFiles.length > 0) {
       return NextResponse.json(
         {
           ok: false,
-          error: "CSVヘッダーに取込対象の列が見つかりませんでした",
+          error: `CSVヘッダーが一致しないファイルがあります: ${invalidHeaderFiles.join(", ")}`,
         },
         { status: 400 }
       );
     }
-
-    const headerIndexMap = Object.fromEntries(
-      existingColumns.map((column) => [column, headerRow.indexOf(column)])
-    ) as Record<(typeof CSV_COLUMNS)[number], number>;
-
-    const records = rows
-      .slice(1)
-      .filter((row) => row.some((value) => value.trim() !== ""))
-      .map((row) => {
-        const record: Record<string, string | null> = {};
-        existingColumns.forEach((column) => {
-          const value = row[headerIndexMap[column]] ?? "";
-          record[column] = value.trim() === "" ? null : value.trim();
-        });
-        return record;
-      });
 
     if (records.length === 0) {
       return NextResponse.json(
@@ -1257,8 +1393,9 @@ export async function POST(req: NextRequest) {
 
       const placeholders = batch
         .map((record) => {
-          const rowPlaceholders = existingColumns.map((column) => {
-            values.push(record[column] ?? null);
+          const rowPlaceholders = DB_INSERT_COLUMNS.map((dbColumn) => {
+            const csvHeader = DB_INSERT_TO_CSV_HEADER[dbColumn];
+            values.push(record[csvHeader] ?? null);
             return `$${values.length}`;
           });
           return `(${rowPlaceholders.join(", ")})`;
@@ -1267,7 +1404,7 @@ export async function POST(req: NextRequest) {
 
       const sql = `
         INSERT INTO public.master_data (
-          ${existingColumns.map((column) => `"${column}"`).join(", ")}
+          ${DB_INSERT_COLUMNS.map((column) => `"${column}"`).join(", ")}
         )
         VALUES ${placeholders}
       `;
@@ -1300,11 +1437,51 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
   const client = await pool.connect();
 
   try {
+    await dbReady;
+    const { searchParams } = new URL(req.url);
+    const deleteMode = searchParams.get("deleteMode");
+
     await client.query("BEGIN");
+
+    if (deleteMode === "list") {
+      const deleteScope =
+        searchParams.get("deleteScope") === "all" ? "all" : "filtered";
+
+      const { whereSql, params } =
+        deleteScope === "filtered"
+          ? buildWhereClause(searchParams)
+          : { whereSql: "", params: [] as (string | number)[] };
+
+      const result = await client.query(
+        `
+          WITH deleted AS (
+            DELETE FROM public.master_data
+            ${whereSql}
+            RETURNING 1
+          )
+          SELECT COUNT(*)::int AS deleted_count
+          FROM deleted
+        `,
+        params
+      );
+
+      await client.query("COMMIT");
+
+      const deleted = result.rows[0]?.deleted_count ?? 0;
+
+      return NextResponse.json({
+        ok: true,
+        deleted,
+        message:
+          deleteScope === "all"
+            ? `${deleted.toLocaleString()}件の全リストを削除しました`
+            : `${deleted.toLocaleString()}件の現在絞り込んでいるリストを削除しました`,
+      });
+    }
 
     const result = await client.query(`
       WITH duplicate_rows AS (
@@ -1347,7 +1524,7 @@ export async function DELETE() {
         error:
           error instanceof Error
             ? error.message
-            : "重複削除でエラーが発生しました",
+            : "削除処理でエラーが発生しました",
       },
       { status: 500 }
     );
