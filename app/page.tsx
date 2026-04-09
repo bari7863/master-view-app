@@ -53,8 +53,17 @@ type ColumnFilterState = {
   conditionValue: string;
   valueFilterEnabled: boolean;
   selectedValues: string[];
+  allValues: string[];
   availableValues: string[];
   valueCounts: Record<string, number>;
+  availableValueTotal: number;
+  availableValueMatchedCount: number;
+  totalItemCount: number;
+  checkedItemCount: number;
+  valueOffset: number;
+  valueLimit: number;
+  valueLoading: boolean;
+  hasMoreValues: boolean;
   valueSearch: string;
 };
 
@@ -203,7 +212,15 @@ type ApiResponse = {
   totalPages?: number;
   rows?: Row[];
   values?: string[];
+  allValues?: string[];
   valueCounts?: Record<string, number>;
+  valueTotal?: number;
+  valueMatchedCount?: number;
+  valueOffset?: number;
+  valueLimit?: number;
+  hasMoreValues?: boolean;
+  totalItemCount?: number;
+  checkedItemCount?: number;
   regions?: string[];
   prefectures?: string[];
   bigIndustries?: string[];
@@ -393,6 +410,28 @@ const COLUMN_DEFS: { key: FilterKey; label: string }[] = [
   { key: "memo", label: "メモ" },
 ];
 
+function createInitialItemDeleteSelections(): Record<FilterKey, boolean> {
+  return COLUMN_DEFS.reduce((acc, column) => {
+    acc[column.key] = true;
+    return acc;
+  }, {} as Record<FilterKey, boolean>);
+}
+
+function createEmptyItemDeleteSelections(): Record<FilterKey, boolean> {
+  return COLUMN_DEFS.reduce((acc, column) => {
+    acc[column.key] = false;
+    return acc;
+  }, {} as Record<FilterKey, boolean>);
+}
+
+function getSelectedItemDeleteFields(
+  selections: Record<FilterKey, boolean>
+): FilterKey[] {
+  return COLUMN_DEFS.filter((column) => selections[column.key]).map(
+    (column) => column.key
+  );
+}
+
 function createEmptyColumnState(): ColumnFilterState {
   return {
     sortDirection: "",
@@ -400,8 +439,17 @@ function createEmptyColumnState(): ColumnFilterState {
     conditionValue: "",
     valueFilterEnabled: false,
     selectedValues: [],
+    allValues: [],
     availableValues: [],
     valueCounts: {},
+    availableValueTotal: 0,
+    availableValueMatchedCount: 0,
+    totalItemCount: 0,
+    checkedItemCount: 0,
+    valueOffset: 0,
+    valueLimit: 200,
+    valueLoading: false,
+    hasMoreValues: false,
     valueSearch: "",
   };
 }
@@ -420,6 +468,7 @@ function cloneColumnStates(
     acc[column.key] = {
       ...states[column.key],
       selectedValues: [...states[column.key].selectedValues],
+      allValues: [...states[column.key].allValues],
       availableValues: [...states[column.key].availableValues],
       valueCounts: { ...states[column.key].valueCounts },
     };
@@ -446,52 +495,26 @@ function buildRequestFilterModels(
   return COLUMN_DEFS.reduce((acc, column) => {
     const state = states[column.key];
     const model: Record<string, unknown> = {};
-
-    const availableValues = state.availableValues ?? [];
     const selectedValues = state.selectedValues ?? [];
-
-    const hasEmptyValue = availableValues.includes("");
-    const nonEmptyAvailableValues = availableValues.filter((value) => value !== "");
-    const selectedNonEmptyValues = selectedValues.filter((value) => value !== "");
-    const selectedIncludesEmpty = selectedValues.includes("");
-
-    const isAllNonEmptySelected =
-      state.valueFilterEnabled &&
-      nonEmptyAvailableValues.length > 0 &&
-      selectedNonEmptyValues.length === nonEmptyAvailableValues.length &&
-      nonEmptyAvailableValues.every((value) => selectedNonEmptyValues.includes(value)) &&
-      hasEmptyValue &&
-      !selectedIncludesEmpty;
-
-    const isAllValuesSelected =
-      state.valueFilterEnabled &&
-      availableValues.length > 0 &&
-      selectedValues.length === availableValues.length &&
-      availableValues.every((value) => selectedValues.includes(value));
 
     if (state.sortDirection !== "") {
       model.sortDirection = state.sortDirection;
     }
 
-    if (isAllNonEmptySelected) {
-      model.conditionType = "is_not_empty";
-    } else if (!isAllValuesSelected && state.conditionType !== "") {
-      model.conditionType = state.conditionType;
-    } else if (state.conditionType !== "") {
+    if (state.conditionType !== "") {
       model.conditionType = state.conditionType;
     }
 
     if (
-      model.conditionType !== undefined &&
-      model.conditionType !== "" &&
-      model.conditionType !== "is_empty" &&
-      model.conditionType !== "is_not_empty" &&
+      state.conditionType !== "" &&
+      state.conditionType !== "is_empty" &&
+      state.conditionType !== "is_not_empty" &&
       state.conditionValue.trim() !== ""
     ) {
       model.conditionValue = state.conditionValue;
     }
 
-    if (state.valueFilterEnabled && !isAllNonEmptySelected && !isAllValuesSelected) {
+    if (state.valueFilterEnabled) {
       model.valueFilterEnabled = true;
       model.selectedValues = selectedValues;
     }
@@ -1110,6 +1133,8 @@ function HeaderCell({
   onToggleValue,
   onSelectAllVisible,
   onClearVisible,
+  onLoadPreviousValues,
+  onLoadMoreValues,
   onOpenClearConfirm,
   onApply,
   onClear,
@@ -1126,6 +1151,8 @@ function HeaderCell({
   onToggleValue: (key: FilterKey, value: string) => void;
   onSelectAllVisible: (key: FilterKey) => void;
   onClearVisible: (key: FilterKey) => void;
+  onLoadPreviousValues: (key: FilterKey) => void;
+  onLoadMoreValues: (key: FilterKey) => void;
   onOpenClearConfirm: (key: FilterKey) => void;
   onApply: (key: FilterKey) => void;
   onClear: (key: FilterKey) => void;
@@ -1138,6 +1165,18 @@ function HeaderCell({
       .toLowerCase()
       .includes(filterState.valueSearch.trim().toLowerCase());
   });
+
+  const totalItemCount = filterState.totalItemCount;
+  const checkedItemCount = filterState.checkedItemCount;
+  const hasPreviousValues = filterState.valueOffset > 0;
+  const currentPage =
+    Math.floor(filterState.valueOffset / Math.max(filterState.valueLimit, 1)) + 1;
+  const totalPages = Math.max(
+    1,
+    Math.ceil(
+      filterState.availableValueTotal / Math.max(filterState.valueLimit, 1)
+    )
+  );
 
   return (
     <div className="relative border-r border-white/5 last:border-r-0">
@@ -1172,7 +1211,7 @@ function HeaderCell({
           >
             <div className="flex min-h-full items-center justify-center">
               <div
-                className="flex w-full max-w-[420px] max-h-[calc(100dvh-32px)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                className="flex h-[calc(100dvh-32px)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -1289,53 +1328,96 @@ function HeaderCell({
                       className="mb-2 h-10 w-full rounded-xl border border-white/10 bg-[#0f172a] px-3 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500"
                     />
 
-                    <div className="mb-2 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onSelectAllVisible(filterKey)}
-                        className="h-8 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 text-xs text-slate-200 transition hover:bg-white/10"
-                      >
-                        すべて選択
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onClearVisible(filterKey)}
-                        className="h-8 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 text-xs text-slate-200 transition hover:bg-white/10"
-                      >
-                        すべて解除
-                      </button>
+                    <div className="sticky top-[-16px] z-20 mb-2 space-y-2 bg-[#0b1220]/95 pb-2 backdrop-blur-sm">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onSelectAllVisible(filterKey)}
+                          className="h-8 rounded-lg border border-white/10 bg-white/5 px-2 text-xs text-slate-200 transition hover:bg-white/10"
+                        >
+                          すべて選択
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onClearVisible(filterKey)}
+                          className="h-8 rounded-lg border border-white/10 bg-white/5 px-2 text-xs text-slate-200 transition hover:bg-white/10"
+                        >
+                          すべて解除
+                        </button>
+                      </div>
+
+                      <div className="rounded-lg border border-white/10 bg-[#0b1220]/95 p-2">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <div className="text-xs font-semibold text-slate-300">
+                            項目数
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => onLoadPreviousValues(filterKey)}
+                              disabled={filterState.valueLoading || !hasPreviousValues}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/5 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                            >
+                              ◀
+                            </button>
+
+                            <div className="min-w-[56px] text-center text-xs font-semibold text-slate-200">
+                              {currentPage}/{totalPages}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => onLoadMoreValues(filterKey)}
+                              disabled={filterState.valueLoading || !filterState.hasMoreValues}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/5 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                            >
+                              ▶
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-left text-slate-300">全体</span>
+                              <span className="text-right text-sm font-bold text-slate-100">
+                                {totalItemCount.toLocaleString()}件
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <span className="text-left text-slate-300">チェック</span>
+                              <span className="text-right text-sm font-bold text-slate-100">
+                                {checkedItemCount.toLocaleString()}件
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="max-h-[min(40dvh,360px)] overflow-y-auto rounded-xl border border-white/10 bg-[#0f172a] p-2">
+                    <div className="rounded-xl border border-white/10 bg-[#0f172a] p-2">
                       {visibleValues.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-slate-500">
-                          候補がありません
+                          {filterState.valueLoading ? "読み込み中です..." : "候補がありません"}
                         </div>
                       ) : (
-                        visibleValues.map((value) => {
-                          const checked =
-                            !filterState.valueFilterEnabled ||
-                            filterState.selectedValues.includes(value);
-                          return (
-                            <label
-                              key={`${filterKey}-${value || "__empty__"}`}
-                              className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-100 hover:bg-white/5"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => onToggleValue(filterKey, value)}
-                                className="h-4 w-4 accent-sky-500"
-                              />
-                              <span className="min-w-0 flex-1 truncate">
-                                {value === "" ? "(空白)" : value}
-                              </span>
-                              <span className="shrink-0 text-sm font-bold text-slate-200">
-                                {(filterState.valueCounts[value] ?? 0).toLocaleString()}
-                              </span>
-                            </label>
-                          );
-                        })
+                        <List
+                          defaultHeight={440}
+                          rowComponent={FilterValueRow}
+                          rowCount={visibleValues.length}
+                          rowHeight={44}
+                          rowProps={{
+                            visibleValues,
+                            filterKey,
+                            filterState,
+                            onToggleValue,
+                          }}
+                          style={{ width: "100%" }}
+                        />
                       )}
                     </div>
                   </div>
@@ -1363,6 +1445,46 @@ function HeaderCell({
           </div>,
           document.body
         )}
+    </div>
+  );
+}
+
+function FilterValueRow({
+  index,
+  style,
+  visibleValues,
+  filterKey,
+  filterState,
+  onToggleValue,
+}: RowComponentProps<{
+  visibleValues: string[];
+  filterKey: FilterKey;
+  filterState: ColumnFilterState;
+  onToggleValue: (key: FilterKey, value: string) => void;
+}>) {
+  const value = visibleValues[index];
+  const checked =
+    !filterState.valueFilterEnabled ||
+    filterState.selectedValues.includes(value);
+
+  return (
+    <div style={style} className="px-2">
+      <label
+        className="flex h-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-100 hover:bg-white/5"
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={() => onToggleValue(filterKey, value)}
+          className="h-4 w-4 accent-sky-500"
+        />
+        <span className="min-w-0 flex-1 truncate">
+          {value === "" ? "(空白)" : value}
+        </span>
+        <span className="shrink-0 text-sm font-bold text-slate-200">
+          {(filterState.valueCounts[value] ?? 0).toLocaleString()}
+        </span>
+      </label>
     </div>
   );
 }
@@ -1523,6 +1645,19 @@ export default function Home() {
   const [listDeleteMessage, setListDeleteMessage] = useState("");
   const [listDeleteError, setListDeleteError] = useState("");
 
+  const [itemDeleteScopeOpen, setItemDeleteScopeOpen] = useState(false);
+  const [itemDeleteFieldOpen, setItemDeleteFieldOpen] = useState(false);
+  const [itemDeleteConfirmOpen, setItemDeleteConfirmOpen] = useState(false);
+  const [itemDeleteTarget, setItemDeleteTarget] = useState<
+    "filtered" | "all" | null
+  >(null);
+  const [itemDeleteSelections, setItemDeleteSelections] = useState<
+    Record<FilterKey, boolean>
+  >(() => createInitialItemDeleteSelections());
+  const [itemDeleting, setItemDeleting] = useState(false);
+  const [itemDeleteMessage, setItemDeleteMessage] = useState("");
+  const [itemDeleteError, setItemDeleteError] = useState("");
+
   const [deduplicating, setDeduplicating] = useState(false);
   const [dedupeMessage, setDedupeMessage] = useState("");
   const [dedupeError, setDedupeError] = useState("");
@@ -1545,6 +1680,29 @@ export default function Home() {
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
   const fetchDataRequestIdRef = useRef(0);
 
+  const buildReadRequestBody = (extra: Record<string, unknown> = {}) => {
+    const body: Record<string, unknown> = {
+      action: "read",
+      filterModels: buildRequestFilterModels(appliedColumnStates),
+      advancedFilters: buildRequestAdvancedFilters(
+        appliedAdvancedFilters,
+        advancedValueOptions
+      ),
+      ...extra,
+    };
+
+    const sortColumn = COLUMN_DEFS.find(
+      (column) => appliedColumnStates[column.key].sortDirection !== ""
+    );
+
+    if (sortColumn) {
+      body.sortKey = sortColumn.key;
+      body.sortDirection = appliedColumnStates[sortColumn.key].sortDirection;
+    }
+
+    return body;
+  };
+
     const fetchData = async () => {
       const requestId = ++fetchDataRequestIdRef.current;
 
@@ -1552,36 +1710,17 @@ export default function Home() {
       setError("");
 
       try {
-        const params = new URLSearchParams();
-        params.set("page", String(page));
-        params.set("limit", limit);
-        params.set(
-          "filterModels",
-          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-        );
-        params.set(
-          "advancedFilters",
-          JSON.stringify(
-            buildRequestAdvancedFilters(
-              appliedAdvancedFilters,
-              advancedValueOptions
-            )
-          )
-        );
-
-        const sortColumn = COLUMN_DEFS.find(
-          (column) => appliedColumnStates[column.key].sortDirection !== ""
-        );
-
-        if (sortColumn) {
-          params.set("sortKey", sortColumn.key);
-          params.set(
-            "sortDirection",
-            appliedColumnStates[sortColumn.key].sortDirection
-          );
-        }
-
-        const res = await fetch(`/api/master_data?${params.toString()}`, {
+        const res = await fetch("/api/master_data", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            buildReadRequestBody({
+              page,
+              limit,
+            })
+          ),
           cache: "no-store",
         });
 
@@ -1619,25 +1758,58 @@ export default function Home() {
       }
     };
 
-    const fetchFilterValues = async (key: FilterKey) => {
-      try {
-        const params = new URLSearchParams();
-        params.set("valuesFor", key);
-        params.set(
-          "filterModels",
-          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-        );
-        params.set(
-          "advancedFilters",
-          JSON.stringify(
-            buildRequestAdvancedFilters(
-              appliedAdvancedFilters,
-              advancedValueOptions
-            )
-          )
-        );
+    const fetchFilterValues = async (
+      key: FilterKey,
+      options?: {
+        reset?: boolean;
+        searchText?: string;
+        stateOverride?: ColumnFilterState;
+        offset?: number;
+      }
+    ) => {
+      const reset = options?.reset ?? true;
+      const currentState = options?.stateOverride ?? draftColumnStates[key];
+      const nextSearchText = options?.searchText ?? currentState.valueSearch;
+      const currentOffset =
+        typeof options?.offset === "number"
+          ? Math.max(0, options.offset)
+          : reset
+          ? 0
+          : currentState.valueOffset;
+      const currentLimit = currentState.valueLimit || 200;
 
-        const res = await fetch(`/api/master_data?${params.toString()}`, {
+      setDraftColumnStates((prev) => {
+        const next = cloneColumnStates(prev);
+        next[key].valueLoading = true;
+
+        if (reset) {
+          next[key].availableValues = [];
+          next[key].valueCounts = {};
+          next[key].availableValueTotal = 0;
+          next[key].availableValueMatchedCount = 0;
+          next[key].hasMoreValues = false;
+          next[key].valueOffset = 0;
+        }
+
+        return next;
+      });
+
+      try {
+        const res = await fetch("/api/master_data", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            buildReadRequestBody({
+              valuesFor: key,
+              valueSearch: nextSearchText,
+              valueOffset: currentOffset,
+              valueLimit: currentLimit,
+              currentValueFilterEnabled: currentState.valueFilterEnabled ? "1" : "0",
+              currentSelectedValues: currentState.selectedValues,
+            })
+          ),
           cache: "no-store",
         });
 
@@ -1648,27 +1820,68 @@ export default function Home() {
 
         setDraftColumnStates((prev) => {
           const next = cloneColumnStates(prev);
-          next[key].availableValues = data.values || [];
+          const incomingValues = data.values || [];
+          const incomingAllValues = Array.isArray(data.allValues)
+            ? data.allValues
+            : next[key].allValues;
+          const initialSelectedValues =
+            incomingAllValues.length > 0 ? incomingAllValues : incomingValues;
+
+          next[key].availableValues = incomingValues;
+          next[key].allValues = incomingAllValues;
           next[key].valueCounts = data.valueCounts || {};
+          next[key].availableValueTotal = data.valueTotal || 0;
+          next[key].availableValueMatchedCount = data.valueMatchedCount || 0;
+          next[key].totalItemCount = data.totalItemCount || 0;
+          next[key].checkedItemCount = data.checkedItemCount || 0;
+          next[key].valueOffset = data.valueOffset ?? currentOffset;
+          next[key].valueLimit = data.valueLimit || currentLimit;
+          next[key].hasMoreValues = data.hasMoreValues ?? false;
+          next[key].valueLoading = false;
 
-          if (!next[key].valueFilterEnabled) {
-            next[key].selectedValues = [];
-          } else {
-            next[key].selectedValues = next[key].selectedValues.filter((value) =>
-              (data.values || []).includes(value)
-            );
-
-            if (next[key].selectedValues.length === 0) {
-              next[key].valueFilterEnabled = false;
-            }
+          if (!currentState.valueFilterEnabled) {
+            next[key].selectedValues = initialSelectedValues;
           }
 
           return next;
         });
       } catch (e) {
+        setDraftColumnStates((prev) => {
+          const next = cloneColumnStates(prev);
+          next[key].valueLoading = false;
+          return next;
+        });
         console.error(e);
       }
     };
+
+  const loadPreviousFilterValues = async (key: FilterKey) => {
+    const state = draftColumnStates[key];
+
+    if (state.valueLoading || state.valueOffset <= 0) {
+      return;
+    }
+
+    await fetchFilterValues(key, {
+      reset: false,
+      searchText: state.valueSearch,
+      offset: Math.max(0, state.valueOffset - state.valueLimit),
+    });
+  };
+
+  const loadMoreFilterValues = async (key: FilterKey) => {
+    const state = draftColumnStates[key];
+
+    if (state.valueLoading || !state.hasMoreValues) {
+      return;
+    }
+
+    await fetchFilterValues(key, {
+      reset: false,
+      searchText: state.valueSearch,
+      offset: state.valueOffset + state.valueLimit,
+    });
+  };
 
   const fetchAdvancedFilterValues = async (key: AdvancedFilterModalKey) => {
     if (
@@ -1682,18 +1895,16 @@ export default function Home() {
     setAdvancedLoading(true);
 
     try {
-      const params = new URLSearchParams();
-      params.set("advancedValuesFor", key);
-      params.set(
-        "filterModels",
-        JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-      );
-      params.set(
-        "advancedFilters",
-        JSON.stringify(buildRequestAdvancedFilters(appliedAdvancedFilters, advancedValueOptions))
-      );
-
-      const res = await fetch(`/api/master_data?${params.toString()}`, {
+      const res = await fetch("/api/master_data", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(
+          buildReadRequestBody({
+            advancedValuesFor: key,
+          })
+        ),
         cache: "no-store",
       });
 
@@ -1756,30 +1967,44 @@ export default function Home() {
     };
   }, [themeMode]);
 
-    const handleOpenFilter = async (key: FilterKey) => {
-      if (openFilterKey === key) {
-        setOpenFilterKey(null);
-        return;
-      }
+  const handleOpenFilter = async (key: FilterKey) => {
+    if (openFilterKey === key) {
+      setOpenFilterKey(null);
+      return;
+    }
 
-      setOpenAdvancedFilterKey(null);
+    setOpenAdvancedFilterKey(null);
 
-      setDraftColumnStates((prev) => {
-        const next = cloneColumnStates(prev);
-        next[key] = {
-          ...appliedColumnStates[key],
-          availableValues:
-            prev[key].availableValues.length > 0
-              ? [...prev[key].availableValues]
-              : [...appliedColumnStates[key].availableValues],
-          valueSearch: "",
-        };
-        return next;
-      });
-
-      setOpenFilterKey(key);
-      await fetchFilterValues(key);
+    const nextOpenState: ColumnFilterState = {
+      ...appliedColumnStates[key],
+      selectedValues: appliedColumnStates[key].valueFilterEnabled
+        ? [...appliedColumnStates[key].selectedValues]
+        : [],
+      availableValues:
+        draftColumnStates[key].availableValues.length > 0
+          ? [...draftColumnStates[key].availableValues]
+          : [...appliedColumnStates[key].availableValues],
+      valueCounts:
+        Object.keys(draftColumnStates[key].valueCounts).length > 0
+          ? { ...draftColumnStates[key].valueCounts }
+          : { ...appliedColumnStates[key].valueCounts },
+      valueOffset: 0,
+      valueSearch: "",
     };
+
+    setDraftColumnStates((prev) => {
+      const next = cloneColumnStates(prev);
+      next[key] = nextOpenState;
+      return next;
+    });
+
+    setOpenFilterKey(key);
+    await fetchFilterValues(key, {
+      reset: true,
+      searchText: "",
+      stateOverride: nextOpenState,
+    });
+  };
 
   const updateSort = (key: FilterKey, direction: SortDirection) => {
     setDraftColumnStates((prev) => {
@@ -1816,6 +2041,11 @@ export default function Home() {
       next[key].valueSearch = value;
       return next;
     });
+
+    void fetchFilterValues(key, {
+      reset: true,
+      searchText: value,
+    });
   };
 
   const toggleSelectedValue = (key: FilterKey, value: string) => {
@@ -1823,15 +2053,29 @@ export default function Home() {
       const next = cloneColumnStates(prev);
 
       const baseSelectedValues = next[key].valueFilterEnabled
-        ? next[key].selectedValues
+        ? [...next[key].selectedValues]
+        : next[key].allValues.length > 0
+        ? [...next[key].allValues]
         : [...next[key].availableValues];
 
-      const exists = baseSelectedValues.includes(value);
+      const currentChecked = baseSelectedValues.includes(value);
 
       next[key].valueFilterEnabled = true;
-      next[key].selectedValues = exists
+      next[key].selectedValues = currentChecked
         ? baseSelectedValues.filter((item) => item !== value)
         : [...baseSelectedValues, value];
+
+      if (value !== "") {
+        const targetCount = next[key].valueCounts[value] ?? 0;
+        next[key].checkedItemCount = Math.max(
+          0,
+          Math.min(
+            next[key].totalItemCount,
+            next[key].checkedItemCount +
+              (currentChecked ? -targetCount : targetCount)
+          )
+        );
+      }
 
       return next;
     });
@@ -1840,17 +2084,18 @@ export default function Home() {
   const selectAllVisibleValues = (key: FilterKey) => {
     setDraftColumnStates((prev) => {
       const next = cloneColumnStates(prev);
-      const visibleValues = next[key].availableValues.filter((value) => {
-        if (!next[key].valueSearch.trim()) return true;
-        const labelValue = value === "" ? "(空白)" : value;
-        return labelValue
-          .toLowerCase()
-          .includes(next[key].valueSearch.trim().toLowerCase());
-      });
 
-      const merged = new Set([...next[key].selectedValues, ...visibleValues]);
+      const allValues =
+        next[key].allValues.length > 0
+          ? next[key].allValues
+          : next[key].selectedValues.length > 0
+          ? next[key].selectedValues
+          : [...next[key].availableValues];
+
       next[key].valueFilterEnabled = true;
-      next[key].selectedValues = Array.from(merged);
+      next[key].selectedValues = [...allValues];
+      next[key].checkedItemCount = next[key].totalItemCount;
+
       return next;
     });
   };
@@ -1858,18 +2103,11 @@ export default function Home() {
   const clearVisibleValues = (key: FilterKey) => {
     setDraftColumnStates((prev) => {
       const next = cloneColumnStates(prev);
-      const visibleValues = next[key].availableValues.filter((value) => {
-        if (!next[key].valueSearch.trim()) return true;
-        const labelValue = value === "" ? "(空白)" : value;
-        return labelValue
-          .toLowerCase()
-          .includes(next[key].valueSearch.trim().toLowerCase());
-      });
 
       next[key].valueFilterEnabled = true;
-      next[key].selectedValues = next[key].selectedValues.filter(
-        (value) => !visibleValues.includes(value)
-      );
+      next[key].selectedValues = [];
+      next[key].checkedItemCount = 0;
+
       return next;
     });
   };
@@ -1963,8 +2201,20 @@ export default function Home() {
         setListDeleteScopeOpen(false);
         setListDeleteError("");
         setListDeleteMessage("");
+
+        setItemDeleteScopeOpen(false);
+        setItemDeleteFieldOpen(false);
+        setItemDeleteConfirmOpen(false);
+        setItemDeleteTarget(null);
+        setItemDeleteError("");
+        setItemDeleteMessage("");
       } else {
         setListDeleteScopeOpen(false);
+
+        setItemDeleteScopeOpen(false);
+        setItemDeleteFieldOpen(false);
+        setItemDeleteConfirmOpen(false);
+        setItemDeleteTarget(null);
       }
     };
 
@@ -2872,14 +3122,40 @@ export default function Home() {
     if (openSidebarPanel === "list") {
       return (
         <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setListDeleteScopeOpen(true)}
-            disabled={listDeleting}
-            className="h-11 w-full rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
-          >
-            リスト削除
-          </button>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => setListDeleteScopeOpen(true)}
+              disabled={listDeleting}
+              className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
+            >
+              リスト削除
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setItemDeleteSelections(createInitialItemDeleteSelections());
+                setItemDeleteTarget(null);
+                setItemDeleteError("");
+                setItemDeleteMessage("");
+                setItemDeleteScopeOpen(true);
+              }}
+              disabled={itemDeleting}
+              className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
+            >
+              項目削除
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDedupeConfirmOpen(true)}
+              disabled={deduplicating}
+              className="h-11 rounded-xl bg-violet-600 px-5 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
+            >
+              {deduplicating ? "重複削除中..." : "重複削除"}
+            </button>
+          </div>
 
           {listDeleteMessage && (
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
@@ -2890,6 +3166,30 @@ export default function Home() {
           {listDeleteError && (
             <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {listDeleteError}
+            </div>
+          )}
+
+          {itemDeleteMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {itemDeleteMessage}
+            </div>
+          )}
+
+          {itemDeleteError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {itemDeleteError}
+            </div>
+          )}
+
+          {dedupeMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {dedupeMessage}
+            </div>
+          )}
+
+          {dedupeError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {dedupeError}
             </div>
           )}
         </div>
@@ -2997,7 +3297,7 @@ export default function Home() {
     if (openSidebarPanel === "inspection") {
       return (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3">
             <button
               type="button"
               onClick={() => {
@@ -3008,15 +3308,6 @@ export default function Home() {
               className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
             >
               {crawling ? "クローリング中..." : "クローリング"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setDedupeConfirmOpen(true)}
-              disabled={deduplicating}
-              className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
-            >
-              {deduplicating ? "重複削除中..." : "重複削除"}
             </button>
           </div>
 
@@ -3029,18 +3320,6 @@ export default function Home() {
           {crawlError && (
             <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {crawlError}
-            </div>
-          )}
-
-          {dedupeMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {dedupeMessage}
-            </div>
-          )}
-
-          {dedupeError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {dedupeError}
             </div>
           )}
         </div>
@@ -4067,6 +4346,64 @@ const handleDownloadTemplate = async () => {
     }
   };
 
+  const handleItemDelete = async () => {
+    if (!itemDeleteTarget) return;
+
+    const deleteTarget = itemDeleteTarget;
+    const selectedFields = getSelectedItemDeleteFields(itemDeleteSelections);
+
+    setItemDeleting(true);
+    setItemDeleteConfirmOpen(false);
+    setItemDeleteError("");
+    setItemDeleteMessage("");
+
+    try {
+      const params = new URLSearchParams();
+      params.set("deleteMode", "item");
+      params.set("deleteScope", deleteTarget);
+      params.set("selectedFields", JSON.stringify(selectedFields));
+
+      if (deleteTarget === "filtered") {
+        params.set(
+          "filterModels",
+          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
+        );
+        params.set(
+          "advancedFilters",
+          JSON.stringify(
+            buildRequestAdvancedFilters(
+              appliedAdvancedFilters,
+              advancedValueOptions
+            )
+          )
+        );
+      }
+
+      const res = await fetch(`/api/master_data?${params.toString()}`, {
+        method: "DELETE",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "項目削除に失敗しました");
+      }
+
+      setItemDeleteScopeOpen(false);
+      setItemDeleteFieldOpen(false);
+      setItemDeleteTarget(null);
+      setItemDeleteMessage(data.message || "項目を削除しました");
+      setPage(1);
+      await fetchData();
+    } catch (e) {
+      setItemDeleteError(
+        e instanceof Error ? e.message : "項目削除でエラーが発生しました"
+      );
+    } finally {
+      setItemDeleting(false);
+    }
+  };
+
   const handleDeduplicate = async () => {
     setDeduplicating(true);
     setDedupeMessage("");
@@ -4144,6 +4481,10 @@ const handleDownloadTemplate = async () => {
     activeAdvancedFilterKey === "prefecture" ||
     activeAdvancedFilterKey === "industry" ||
     activeAdvancedFilterKey === "tag";
+
+  const selectedItemDeleteLabels = COLUMN_DEFS.filter(
+    (column) => itemDeleteSelections[column.key]
+  ).map((column) => column.label);
 
   const renderedTableBody = useMemo(() => {
     if (rows.length === 0 && !loading) {
@@ -4499,6 +4840,254 @@ const handleDownloadTemplate = async () => {
             読み込み中です...
           </div>
         )}
+
+        {itemDeleteScopeOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                setItemDeleteScopeOpen(false);
+                setItemDeleteTarget(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      項目 削除対象選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemDeleteScopeOpen(false);
+                        setItemDeleteTarget(null);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setItemDeleteScopeOpen(false);
+                          setItemDeleteTarget("all");
+                          setItemDeleteFieldOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-amber-600 px-4 text-sm font-medium text-white transition hover:bg-amber-500"
+                      >
+                        全てのリスト
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setItemDeleteScopeOpen(false);
+                          setItemDeleteTarget("filtered");
+                          setItemDeleteFieldOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-amber-500 px-4 text-sm font-medium text-white transition hover:bg-amber-400"
+                      >
+                        絞り込みリストのみ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {itemDeleteFieldOpen &&
+          itemDeleteTarget &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                if (itemDeleting) return;
+                setItemDeleteFieldOpen(false);
+                setItemDeleteTarget(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      項目確認
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemDeleteSelections(createInitialItemDeleteSelections())
+                        }
+                        disabled={itemDeleting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        全選択
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemDeleteSelections(createEmptyItemDeleteSelections())
+                        }
+                        disabled={itemDeleting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        選択解除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="px-4 py-6">
+                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                      チェックした項目のみ削除します。
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      {COLUMN_DEFS.map((field) => (
+                        <label
+                          key={field.key}
+                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={itemDeleteSelections[field.key]}
+                            onChange={() =>
+                              setItemDeleteSelections((prev) => ({
+                                ...prev,
+                                [field.key]: !prev[field.key],
+                              }))
+                            }
+                            className="h-4 w-4 accent-amber-500"
+                          />
+                          <span>{field.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemDeleteFieldOpen(false);
+                        setItemDeleteTarget(null);
+                      }}
+                      disabled={itemDeleting}
+                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemDeleteFieldOpen(false);
+                        setItemDeleteConfirmOpen(true);
+                      }}
+                      disabled={itemDeleting}
+                      className="h-10 w-[120px] flex-none rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      はい
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {itemDeleteConfirmOpen &&
+          itemDeleteTarget &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                if (itemDeleting) return;
+                setItemDeleteConfirmOpen(false);
+                setItemDeleteTarget(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    項目削除確認
+                  </div>
+
+                  <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                    本当に項目を削除しますか？
+                    <br />
+                    <span className="text-xs text-slate-400">
+                      対象:
+                      {itemDeleteTarget === "all"
+                        ? "全てのリスト"
+                        : "現在フィルタで絞り込んでいるリストのみ"}
+                    </span>
+
+                    <div className="mt-4">
+                      <div className="mb-2 text-xs font-semibold text-slate-400">
+                        選択項目
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {selectedItemDeleteLabels.map((label) => (
+                          <span
+                            key={label}
+                            className="inline-flex items-center rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-200"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemDeleteConfirmOpen(false);
+                        setItemDeleteTarget(null);
+                      }}
+                      disabled={itemDeleting}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleItemDelete}
+                      disabled={itemDeleting}
+                      className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                    >
+                      {itemDeleting ? "削除中..." : "はい"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
         {listDeleteScopeOpen &&
           typeof document !== "undefined" &&
@@ -5640,6 +6229,8 @@ const handleDownloadTemplate = async () => {
                     onToggleValue={toggleSelectedValue}
                     onSelectAllVisible={selectAllVisibleValues}
                     onClearVisible={clearVisibleValues}
+                    onLoadPreviousValues={loadPreviousFilterValues}
+                    onLoadMoreValues={loadMoreFilterValues}
                     onOpenClearConfirm={(key) =>
                       setSingleFilterClearConfirm({ type: "column", key })
                     }

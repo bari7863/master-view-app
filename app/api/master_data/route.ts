@@ -471,13 +471,31 @@ function createCapitalNumericExpression(textColumn: string) {
 
 function createEmployeeNumericExpression(textColumn: string) {
   const noComma = `regexp_replace(${textColumn}, '[,，]', '', 'g')`;
-  const firstNumber = `NULLIF(substring(${noComma} from '([0-9]+)'), '')`;
+
+  const consolidatedBefore = `NULLIF((regexp_match(${noComma}, '(?:連結|consolidated|CONSOLIDATED)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)'))[1], '')`;
+  const consolidatedAfter = `NULLIF((regexp_match(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)[^0-9]{0,12}(?:連結|consolidated|CONSOLIDATED)'))[1], '')`;
+
+  const standaloneBefore = `NULLIF((regexp_match(${noComma}, '(?:単体|単独|個別|individual|INDIVIDUAL|non-consolidated|NON-CONSOLIDATED|nonconsolidated|NONCONSOLIDATED)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)'))[1], '')`;
+  const standaloneAfter = `NULLIF((regexp_match(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)[^0-9]{0,12}(?:単体|単独|個別|individual|INDIVIDUAL|non-consolidated|NON-CONSOLIDATED|nonconsolidated|NONCONSOLIDATED)'))[1], '')`;
+
+  const employmentRegex = `(?:正社員|正職員|社員|職員|パート|アルバイト|契約社員|契約職員|派遣社員|派遣スタッフ|嘱託|嘱託社員|臨時社員|臨時職員|常勤|非常勤|フルタイム|短時間|再雇用|有期雇用|無期雇用|役員)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)`;
+
+  const employmentCount = `(SELECT COUNT(*) FROM regexp_matches(${noComma}, '${employmentRegex}', 'g') AS m)`;
+  const employmentSum = `(SELECT SUM((m)[1]::numeric) FROM regexp_matches(${noComma}, '${employmentRegex}', 'g') AS m)`;
+
+  const personMax = `(SELECT MAX((m)[1]::numeric) FROM regexp_matches(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)', 'g') AS m)`;
+
+  const pureDigits = `CASE WHEN ${noComma} ~ '^[0-9]+$' THEN ${noComma}::numeric ELSE NULL END`;
 
   return `CASE
     WHEN NULLIF(BTRIM(${textColumn}), '') IS NULL THEN NULL
-    WHEN ${firstNumber} IS NOT NULL
-      THEN ${firstNumber}::numeric
-    ELSE NULL
+    WHEN ${consolidatedBefore} IS NOT NULL THEN ${consolidatedBefore}::numeric
+    WHEN ${consolidatedAfter} IS NOT NULL THEN ${consolidatedAfter}::numeric
+    WHEN ${employmentCount} >= 2 THEN ${employmentSum}
+    WHEN ${standaloneBefore} IS NOT NULL THEN ${standaloneBefore}::numeric
+    WHEN ${standaloneAfter} IS NOT NULL THEN ${standaloneAfter}::numeric
+    WHEN ${personMax} IS NOT NULL THEN ${personMax}
+    ELSE ${pureDigits}
   END`;
 }
 
@@ -856,10 +874,60 @@ function buildOrderBy(searchParams: URLSearchParams) {
   return `ORDER BY COALESCE("企業名"::text, ''), COALESCE("住所"::text, '')`;
 }
 
-export async function GET(req: NextRequest) {
+function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
+  const searchParams = new URLSearchParams();
+
+  const simpleKeys = [
+    "page",
+    "limit",
+    "sortKey",
+    "sortDirection",
+    "valuesFor",
+    "advancedValuesFor",
+    "valueSearch",
+    "valueOffset",
+    "valueLimit",
+    "currentValueFilterEnabled",
+  ] as const;
+
+  simpleKeys.forEach((key) => {
+    const value = payload[key];
+    if (value !== undefined && value !== null && value !== "") {
+      searchParams.set(key, String(value));
+    }
+  });
+
+  if ("filterModels" in payload) {
+    searchParams.set(
+      "filterModels",
+      JSON.stringify(payload.filterModels ?? {})
+    );
+  }
+
+  if ("advancedFilters" in payload) {
+    searchParams.set(
+      "advancedFilters",
+      JSON.stringify(payload.advancedFilters ?? {})
+    );
+  }
+
+  if ("currentSelectedValues" in payload) {
+    searchParams.set(
+      "currentSelectedValues",
+      JSON.stringify(
+        Array.isArray(payload.currentSelectedValues)
+          ? payload.currentSelectedValues
+          : []
+      )
+    );
+  }
+
+  return searchParams;
+}
+
+async function handleReadRequest(searchParams: URLSearchParams) {
   try {
     await dbReady;
-    const { searchParams } = new URL(req.url);
     const valuesFor = searchParams.get("valuesFor") as FilterKey | null;
     const advancedValuesFor = searchParams.get("advancedValuesFor");
 
@@ -1142,9 +1210,36 @@ export async function GET(req: NextRequest) {
     if (valuesFor && FILTER_COLUMN_MAP[valuesFor]) {
       const { whereSql, params } = buildWhereClause(searchParams, valuesFor);
 
+      const valueSearch = (searchParams.get("valueSearch") || "").trim();
+      const valueOffset = Math.max(
+        Number(searchParams.get("valueOffset") || "0"),
+        0
+      );
+      const valueLimit = Math.min(
+        Math.max(Number(searchParams.get("valueLimit") || "200"), 1),
+        1000
+      );
+      const currentValueFilterEnabled =
+        searchParams.get("currentValueFilterEnabled") === "1";
+
+      let currentSelectedValues: string[] = [];
+      try {
+        const parsed = JSON.parse(
+          searchParams.get("currentSelectedValues") || "[]"
+        );
+
+        if (Array.isArray(parsed)) {
+          currentSelectedValues = parsed
+            .map((value) => String(value ?? ""))
+            .filter((value, index, self) => self.indexOf(value) === index);
+        }
+      } catch {
+        currentSelectedValues = [];
+      }
+
       const valueColumnText = `COALESCE(${FILTER_COLUMN_MAP[valuesFor]}::text, '')`;
 
-      const valuesSql = `
+      const allGroupedValuesSql = `
         SELECT
           value,
           COUNT(*)::int AS count
@@ -1154,21 +1249,132 @@ export async function GET(req: NextRequest) {
           ${whereSql}
         ) src
         GROUP BY value
-        ORDER BY value ASC
-        LIMIT 300
       `;
 
-      const valuesRes = await pool.query(valuesSql, params);
+      const totalItemCountSql = `
+        SELECT
+          COALESCE(SUM(count), 0)::int AS total_item_count
+        FROM (${allGroupedValuesSql}) grouped_values
+        WHERE NULLIF(BTRIM(value), '') IS NOT NULL
+      `;
+
+      const totalItemCountRes = await pool.query(totalItemCountSql, params);
+      const totalItemCount = Number(
+        totalItemCountRes.rows[0]?.total_item_count ?? 0
+      );
+
+      let checkedItemCount = totalItemCount;
+
+      if (currentValueFilterEnabled) {
+        const selectedNonEmptyValues = currentSelectedValues.filter(
+          (value) => value.trim() !== ""
+        );
+
+        if (selectedNonEmptyValues.length === 0) {
+          checkedItemCount = 0;
+        } else {
+          const checkedItemParams = [...params, selectedNonEmptyValues];
+
+          const checkedItemCountSql = `
+            SELECT
+              COALESCE(SUM(count), 0)::int AS checked_item_count
+            FROM (${allGroupedValuesSql}) grouped_values
+            WHERE value = ANY($${checkedItemParams.length}::text[])
+              AND NULLIF(BTRIM(value), '') IS NOT NULL
+          `;
+
+          const checkedItemCountRes = await pool.query(
+            checkedItemCountSql,
+            checkedItemParams
+          );
+
+          checkedItemCount = Number(
+            checkedItemCountRes.rows[0]?.checked_item_count ?? 0
+          );
+        }
+      }
+
+      const groupedParams = [...params];
+      const groupedWhereParts: string[] = [];
+
+      if (valueSearch !== "") {
+        groupedParams.push(`%${valueSearch}%`);
+        groupedWhereParts.push(`value ILIKE $${groupedParams.length}`);
+      }
+
+      const groupedWhereSql = groupedWhereParts.length
+        ? `WHERE ${groupedWhereParts.join(" AND ")}`
+        : "";
+
+      const groupedValuesSql = `
+        SELECT
+          value,
+          COUNT(*)::int AS count
+        FROM (
+          SELECT ${valueColumnText} AS value
+          FROM public.master_data
+          ${whereSql}
+        ) src
+        ${groupedWhereSql}
+        GROUP BY value
+      `;
+
+      const summarySql = `
+        SELECT
+          COUNT(*)::int AS total_count,
+          COALESCE(SUM(count), 0)::int AS matched_count
+        FROM (${groupedValuesSql}) grouped_values
+      `;
+
+      const summaryRes = await pool.query(summarySql, groupedParams);
+      const valueTotal = Number(summaryRes.rows[0]?.total_count ?? 0);
+      const valueMatchedCount = Number(summaryRes.rows[0]?.matched_count ?? 0);
+
+      const valuesQueryParams = [...groupedParams, valueLimit, valueOffset];
+
+      const valuesSql = `
+        SELECT
+          value,
+          count
+        FROM (${groupedValuesSql}) grouped_values
+        ORDER BY value ASC
+        LIMIT $${valuesQueryParams.length - 1}
+        OFFSET $${valuesQueryParams.length}
+      `;
+
+      const valuesRes = await pool.query(valuesSql, valuesQueryParams);
 
       const values = valuesRes.rows.map((row) => row.value ?? "");
       const valueCounts = Object.fromEntries(
         valuesRes.rows.map((row) => [row.value ?? "", Number(row.count ?? 0)])
       );
 
+      let allValues: string[] | undefined = undefined;
+
+      if (!currentValueFilterEnabled) {
+        const allValuesSql = `
+          SELECT
+            value
+          FROM (${allGroupedValuesSql}) grouped_values
+          ORDER BY value ASC
+        `;
+
+        const allValuesRes = await pool.query(allValuesSql, params);
+        allValues = allValuesRes.rows.map((row) => row.value ?? "");
+      }
+
       return NextResponse.json({
         ok: true,
         values,
+        allValues,
         valueCounts,
+        valueTotal,
+        valueMatchedCount,
+        totalItemCount,
+        checkedItemCount,
+        valueOffset,
+        valueLimit,
+        hasMoreValues: valueOffset + values.length < valueTotal,
       });
     }
 
@@ -1253,7 +1459,40 @@ export async function GET(req: NextRequest) {
   }
 }
 
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  return handleReadRequest(searchParams);
+}
+
 export async function POST(req: NextRequest) {
+  const contentType = req.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      await dbReady;
+      const payload = (await req.json()) as Record<string, unknown>;
+
+      if (payload.action !== "read") {
+        return NextResponse.json(
+          { ok: false, error: "不正な読込リクエストです" },
+          { status: 400 }
+        );
+      }
+
+      const searchParams = buildSearchParamsFromReadPayload(payload);
+      return handleReadRequest(searchParams);
+    } catch (error) {
+      console.error("READ API ERROR:", error);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : "不明なエラー",
+        },
+        { status: 500 }
+      );
+    }
+  }
+
   const client = await pool.connect();
 
   try {
@@ -1466,6 +1705,73 @@ export async function DELETE(req: NextRequest) {
     const deleteMode = searchParams.get("deleteMode");
 
     await client.query("BEGIN");
+
+    if (deleteMode === "item") {
+      const deleteScope =
+        searchParams.get("deleteScope") === "all" ? "all" : "filtered";
+
+      const rawSelectedFields = searchParams.get("selectedFields");
+      let selectedFields: FilterKey[] = [];
+
+      if (rawSelectedFields) {
+        try {
+          const parsed = JSON.parse(rawSelectedFields);
+
+          if (Array.isArray(parsed)) {
+            selectedFields = parsed.filter(
+              (field): field is FilterKey =>
+                typeof field === "string" && field in FILTER_COLUMN_MAP
+            );
+          }
+        } catch {
+          selectedFields = [];
+        }
+      }
+
+      if (selectedFields.length === 0) {
+        await client.query("ROLLBACK");
+        return NextResponse.json(
+          { ok: false, error: "削除する項目が選択されていません" },
+          { status: 400 }
+        );
+      }
+
+      const { whereSql, params } =
+        deleteScope === "filtered"
+          ? buildWhereClause(searchParams)
+          : { whereSql: "", params: [] as (string | number)[] };
+
+      const setSql = selectedFields
+        .map((field) => `${FILTER_COLUMN_MAP[field]} = NULL`)
+        .join(", ");
+
+      const result = await client.query(
+        `
+          WITH updated AS (
+            UPDATE public.master_data
+            SET ${setSql}
+            ${whereSql}
+            RETURNING 1
+          )
+          SELECT COUNT(*)::int AS updated_count
+          FROM updated
+        `,
+        params
+      );
+
+      await client.query("COMMIT");
+
+      const updated = result.rows[0]?.updated_count ?? 0;
+
+      return NextResponse.json({
+        ok: true,
+        updated,
+        message:
+          deleteScope === "all"
+            ? `${updated.toLocaleString()}件の全てのリストから選択項目を削除しました`
+            : `${updated.toLocaleString()}件の現在絞り込んでいるリストから選択項目を削除しました`,
+      });
+    }
 
     if (deleteMode === "list") {
       const deleteScope =

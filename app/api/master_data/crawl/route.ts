@@ -298,13 +298,31 @@ function createCapitalNumericExpression(textColumn: string) {
 
 function createEmployeeNumericExpression(textColumn: string) {
   const noComma = `regexp_replace(${textColumn}, '[,，]', '', 'g')`;
-  const firstNumber = `NULLIF(substring(${noComma} from '([0-9]+)'), '')`;
+
+  const consolidatedBefore = `NULLIF((regexp_match(${noComma}, '(?:連結|consolidated|CONSOLIDATED)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)'))[1], '')`;
+  const consolidatedAfter = `NULLIF((regexp_match(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)[^0-9]{0,12}(?:連結|consolidated|CONSOLIDATED)'))[1], '')`;
+
+  const standaloneBefore = `NULLIF((regexp_match(${noComma}, '(?:単体|単独|個別|individual|INDIVIDUAL|non-consolidated|NON-CONSOLIDATED|nonconsolidated|NONCONSOLIDATED)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)'))[1], '')`;
+  const standaloneAfter = `NULLIF((regexp_match(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)[^0-9]{0,12}(?:単体|単独|個別|individual|INDIVIDUAL|non-consolidated|NON-CONSOLIDATED|nonconsolidated|NONCONSOLIDATED)'))[1], '')`;
+
+  const employmentRegex = `(?:正社員|正職員|社員|職員|パート|アルバイト|契約社員|契約職員|派遣社員|派遣スタッフ|嘱託|嘱託社員|臨時社員|臨時職員|常勤|非常勤|フルタイム|短時間|再雇用|有期雇用|無期雇用|役員)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)`;
+
+  const employmentCount = `(SELECT COUNT(*) FROM regexp_matches(${noComma}, '${employmentRegex}', 'g') AS m)`;
+  const employmentSum = `(SELECT SUM((m)[1]::numeric) FROM regexp_matches(${noComma}, '${employmentRegex}', 'g') AS m)`;
+
+  const personMax = `(SELECT MAX((m)[1]::numeric) FROM regexp_matches(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)', 'g') AS m)`;
+
+  const pureDigits = `CASE WHEN ${noComma} ~ '^[0-9]+$' THEN ${noComma}::numeric ELSE NULL END`;
 
   return `CASE
     WHEN NULLIF(BTRIM(${textColumn}), '') IS NULL THEN NULL
-    WHEN ${firstNumber} IS NOT NULL
-      THEN ${firstNumber}::numeric
-    ELSE NULL
+    WHEN ${consolidatedBefore} IS NOT NULL THEN ${consolidatedBefore}::numeric
+    WHEN ${consolidatedAfter} IS NOT NULL THEN ${consolidatedAfter}::numeric
+    WHEN ${employmentCount} >= 2 THEN ${employmentSum}
+    WHEN ${standaloneBefore} IS NOT NULL THEN ${standaloneBefore}::numeric
+    WHEN ${standaloneAfter} IS NOT NULL THEN ${standaloneAfter}::numeric
+    WHEN ${personMax} IS NOT NULL THEN ${personMax}
+    ELSE ${pureDigits}
   END`;
 }
 

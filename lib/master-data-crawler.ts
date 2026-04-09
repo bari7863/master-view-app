@@ -303,17 +303,35 @@ const CAPITAL_LABELS = [
 const EMPLOYEE_COUNT_LABELS = [
   /^従業員数$/,
   /^従業員$/,
+  /^総従業員数$/,
+  /^全従業員数$/,
+  /^連結従業員数$/,
+  /^単体従業員数$/,
+  /^単独従業員数$/,
+  /^グループ従業員数$/,
   /^社員数$/,
+  /^職員数$/,
   /^スタッフ数$/,
+  /^人数$/,
+  /^総人数$/,
+  /^在籍人数$/,
   /^人員構成$/,
   /^人員$/,
-  /^職員数$/,
   /^メンバー数$/,
-  /^在籍人数$/,
   /従業員数/,
   /従業員/,
+  /総従業員数/,
+  /全従業員数/,
+  /連結従業員数/,
+  /単体従業員数/,
+  /単独従業員数/,
+  /グループ従業員数/,
   /社員数/,
+  /職員数/,
   /スタッフ数/,
+  /人数/,
+  /総人数/,
+  /在籍人数/,
   /人員/,
 ];
 
@@ -1382,25 +1400,136 @@ function normalizeEmployeeCount(value: string) {
   const normalized = normalizeDigits(normalizeSpace(value));
   if (!normalized) return null;
 
-  const matches = [...normalized.matchAll(/([0-9,]+)\s*(名|人|店|社|拠点|ヶ所|か所|箇所|営業所)/g)];
+  const text = normalized.replace(/[，]/g, ",");
+  const PERSON_UNIT_PATTERN = "(?:名|人)";
 
-  if (matches.length >= 2) {
-    const total = matches.reduce((sum, matched) => {
-      const num = Number((matched[1] || "0").replace(/,/g, ""));
-      return sum + (Number.isFinite(num) ? num : 0);
-    }, 0);
+  const GROUP_PRIORITY_LABELS = [
+    "連結",
+    "consolidated",
+    "CONSOLIDATED",
+  ];
 
-    return total > 0 ? `${total}名` : null;
+  const GROUP_FALLBACK_LABELS = [
+    "単体",
+    "単独",
+    "個別",
+    "individual",
+    "INDIVIDUAL",
+    "non-consolidated",
+    "NON-CONSOLIDATED",
+    "nonconsolidated",
+    "NONCONSOLIDATED",
+  ];
+
+  const EMPLOYMENT_LABELS = [
+    "正社員",
+    "正職員",
+    "社員",
+    "職員",
+    "パート",
+    "アルバイト",
+    "契約社員",
+    "契約職員",
+    "派遣社員",
+    "派遣スタッフ",
+    "嘱託",
+    "嘱託社員",
+    "臨時社員",
+    "臨時職員",
+    "常勤",
+    "非常勤",
+    "フルタイム",
+    "短時間",
+    "再雇用",
+    "有期雇用",
+    "無期雇用",
+    "役員",
+  ];
+
+  const escapeRegex = (textValue: string) =>
+    textValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const toCount = (numText: string | undefined) => {
+    const num = Number((numText || "").replace(/,/g, ""));
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const formatCount = (num: number | null) =>
+    num != null && num > 0 ? `${num.toLocaleString()}名` : null;
+
+  const findPriorityCount = (labels: string[]) => {
+    for (const label of labels) {
+      const escaped = escapeRegex(label);
+
+      const beforeMatch = text.match(
+        new RegExp(
+          `${escaped}[^0-9]{0,12}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+          "i"
+        )
+      );
+      const beforeCount = toCount(beforeMatch?.[1]);
+      if (beforeCount != null) return beforeCount;
+
+      const afterMatch = text.match(
+        new RegExp(
+          `([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}[^0-9]{0,12}${escaped}`,
+          "i"
+        )
+      );
+      const afterCount = toCount(afterMatch?.[1]);
+      if (afterCount != null) return afterCount;
+    }
+
+    return null;
+  };
+
+  const consolidatedCount = findPriorityCount(GROUP_PRIORITY_LABELS);
+  if (consolidatedCount != null) {
+    return formatCount(consolidatedCount);
   }
 
-  const matched = normalized.match(/([0-9,]+)\s*(名|人|店|社|拠点|ヶ所|か所|箇所|営業所)/);
-  if (!matched) return null;
+  const employmentPattern = new RegExp(
+    `(?:${EMPLOYMENT_LABELS.map(escapeRegex).join("|")})[^0-9]{0,12}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+    "gi"
+  );
 
-  const num = Number((matched[1] || "0").replace(/,/g, ""));
-  if (!Number.isFinite(num)) return null;
+  const employmentMatches = [...text.matchAll(employmentPattern)];
 
-  const unit = matched[2];
-  return `${num.toLocaleString()}${unit === "名" || unit === "人" ? "名" : unit}`;
+  if (employmentMatches.length >= 2) {
+    const total = employmentMatches.reduce((sum, matched) => {
+      const count = toCount(matched[1]);
+      return sum + (count ?? 0);
+    }, 0);
+
+    if (total > 0) {
+      return `${total.toLocaleString()}名`;
+    }
+  }
+
+  const standaloneCount = findPriorityCount(GROUP_FALLBACK_LABELS);
+  if (standaloneCount != null) {
+    return formatCount(standaloneCount);
+  }
+
+  const personMatches = [
+    ...text.matchAll(
+      new RegExp(`([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`, "g")
+    ),
+  ]
+    .map((matched) => toCount(matched[1]))
+    .filter((num): num is number => num != null);
+
+  if (personMatches.length > 0) {
+    return `${Math.max(...personMatches).toLocaleString()}名`;
+  }
+
+  const pureNumber = text.match(/^[0-9][0-9,]*$/);
+  if (pureNumber?.[0]) {
+    const count = toCount(pureNumber[0]);
+    return formatCount(count);
+  }
+
+  return null;
 }
 
 function buildLooseLabelPattern(labelRegexList: RegExp[]) {
