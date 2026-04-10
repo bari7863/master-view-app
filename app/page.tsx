@@ -204,6 +204,36 @@ type CrawlSelectedChanges = Record<
   Partial<Record<CrawlFieldKey, CrawlSelectedChangeValue>>
 >;
 
+type ItemInspectionMethodKey = "representative_name_remove_non_name";
+
+type ItemInspectionPreviewChange = {
+  rowId: string;
+  company: string | null;
+  fieldLabel: string;
+  beforeValue: string | null;
+  afterValue: string | null;
+  action: "update" | "delete";
+  reason: string;
+};
+
+function createInitialItemInspectionMethodSelections(): Record<
+  ItemInspectionMethodKey,
+  boolean
+> {
+  return {
+    representative_name_remove_non_name: false,
+  };
+}
+
+function createEmptyItemInspectionMethodSelections(): Record<
+  ItemInspectionMethodKey,
+  boolean
+> {
+  return {
+    representative_name_remove_non_name: false,
+  };
+}
+
 type ApiResponse = {
   ok: boolean;
   total?: number;
@@ -241,6 +271,7 @@ type ApiResponse = {
   deleted?: number;
   preview?: boolean;
   previewRows?: CrawlPreviewRow[];
+  inspectionPreviewChanges?: ItemInspectionPreviewChange[];
 
   previewTotal?: number;
   previewPage?: number;
@@ -249,6 +280,8 @@ type ApiResponse = {
   jobId?: string | null;
   jobStatus?: "running" | "paused" | "completed" | "error";
   totalTargets?: number;
+  currentInspectionValue?: string | null;
+  currentInspectionFieldLabel?: string | null;
   currentCompany?: string | null;
   currentWebsiteUrl?: string | null;
   currentFields?: string[];
@@ -277,11 +310,19 @@ async function readApiResponse(
 
 type CrawlJobStatus = "idle" | "running" | "paused" | "completed" | "error";
 
+type ItemInspectionJobStatus =
+  | "idle"
+  | "running"
+  | "paused"
+  | "completed"
+  | "error";
+
 function buildImportFileKey(file: File) {
   return `${file.name}__${file.size}__${file.lastModified}`;
 }
 
 const CRAWL_PREVIEW_PAGE_SIZE = 20;
+const ITEM_INSPECTION_PREVIEW_PAGE_SIZE = 20;
 
 const ACTIVE_CRAWL_JOB_STORAGE_KEY = "master-data-active-crawl-job-id";
 
@@ -1599,6 +1640,11 @@ export default function Home() {
   const [crawlMessage, setCrawlMessage] = useState("");
   const [crawlError, setCrawlError] = useState("");
 
+  const [crawlScopeOpen, setCrawlScopeOpen] = useState(false);
+  const [crawlTargetScope, setCrawlTargetScope] = useState<
+    "filtered" | "all" | null
+  >(null);
+
   const [crawlJobId, setCrawlJobId] = useState<string | null>(null);
   const [crawlJobStatus, setCrawlJobStatus] =
     useState<CrawlJobStatus>("idle");
@@ -1638,9 +1684,11 @@ export default function Home() {
   );
 
   const [listDeleteScopeOpen, setListDeleteScopeOpen] = useState(false);
+
   const [listDeleteConfirmTarget, setListDeleteConfirmTarget] = useState<
     "filtered" | "all" | null
   >(null);
+
   const [listDeleting, setListDeleting] = useState(false);
   const [listDeleteMessage, setListDeleteMessage] = useState("");
   const [listDeleteError, setListDeleteError] = useState("");
@@ -1648,20 +1696,116 @@ export default function Home() {
   const [itemDeleteScopeOpen, setItemDeleteScopeOpen] = useState(false);
   const [itemDeleteFieldOpen, setItemDeleteFieldOpen] = useState(false);
   const [itemDeleteConfirmOpen, setItemDeleteConfirmOpen] = useState(false);
+
   const [itemDeleteTarget, setItemDeleteTarget] = useState<
     "filtered" | "all" | null
   >(null);
+
   const [itemDeleteSelections, setItemDeleteSelections] = useState<
     Record<FilterKey, boolean>
   >(() => createInitialItemDeleteSelections());
+
   const [itemDeleting, setItemDeleting] = useState(false);
   const [itemDeleteMessage, setItemDeleteMessage] = useState("");
   const [itemDeleteError, setItemDeleteError] = useState("");
+
+  const [itemInspectionFieldOpen, setItemInspectionFieldOpen] = useState(false);
+  const [itemInspectionMethodOpen, setItemInspectionMethodOpen] = useState(false);
+
+  const [itemInspectionPreviewConfirmOpen, setItemInspectionPreviewConfirmOpen] =
+    useState(false);
+
+  const [itemInspectionPreviewChanges, setItemInspectionPreviewChanges] =
+    useState<ItemInspectionPreviewChange[]>([]);
+    
+  const [itemInspectionCheckedPreviewRowIds, setItemInspectionCheckedPreviewRowIds] =
+    useState<Record<string, boolean>>({});
+
+  const [itemInspectionPreviewPage, setItemInspectionPreviewPage] = useState(1);
+
+  const itemInspectionPreviewTotalPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(
+          itemInspectionPreviewChanges.length /
+            ITEM_INSPECTION_PREVIEW_PAGE_SIZE
+        )
+      ),
+    [itemInspectionPreviewChanges.length]
+  );
+
+  const pagedItemInspectionPreviewChanges = useMemo(() => {
+    const start =
+      (itemInspectionPreviewPage - 1) * ITEM_INSPECTION_PREVIEW_PAGE_SIZE;
+
+    return itemInspectionPreviewChanges.slice(
+      start,
+      start + ITEM_INSPECTION_PREVIEW_PAGE_SIZE
+    );
+  }, [itemInspectionPreviewChanges, itemInspectionPreviewPage]);
+
+  const [itemInspectionSelections, setItemInspectionSelections] = useState<
+    Record<FilterKey, boolean>
+  >(() => createInitialItemDeleteSelections());
+
+  const [itemInspectionMethodSelections, setItemInspectionMethodSelections] =
+    useState<Record<ItemInspectionMethodKey, boolean>>(
+      () => createInitialItemInspectionMethodSelections()
+    );
+
+  const [itemInspecting, setItemInspecting] = useState(false);
+  const [itemInspectionMessage, setItemInspectionMessage] = useState("");
+  const [itemInspectionError, setItemInspectionError] = useState("");
+
+  const [itemInspectionScopeOpen, setItemInspectionScopeOpen] =
+    useState(false);
+  const [itemInspectionTargetScope, setItemInspectionTargetScope] = useState<
+    "filtered" | "all" | null
+  >(null);
+
+  const [itemInspectionJobId, setItemInspectionJobId] =
+    useState<string | null>(null);
+  const [itemInspectionJobStatus, setItemInspectionJobStatus] =
+    useState<ItemInspectionJobStatus>("idle");
+  const [itemInspectionProgressOpen, setItemInspectionProgressOpen] =
+    useState(false);
+  const [itemInspectionTotalTargets, setItemInspectionTotalTargets] =
+    useState(0);
+  const [itemInspectionProcessedCount, setItemInspectionProcessedCount] =
+    useState(0);
+  const [itemInspectionUpdatedCount, setItemInspectionUpdatedCount] =
+    useState(0);
+  const [itemInspectionSkippedCount, setItemInspectionSkippedCount] =
+    useState(0);
+  const [itemInspectionFailedCount, setItemInspectionFailedCount] =
+    useState(0);
+  const [itemInspectionCurrentCompany, setItemInspectionCurrentCompany] =
+    useState<string | null>(null);
+  const [itemInspectionCurrentValue, setItemInspectionCurrentValue] =
+    useState<string | null>(null);
+  const [itemInspectionCurrentFieldLabel, setItemInspectionCurrentFieldLabel] =
+    useState<string | null>(null);
+  const [itemInspectionRemainingCount, setItemInspectionRemainingCount] =
+    useState(0);
+
+  const itemInspectionStatusTimerRef = useRef<number | null>(null);
+
+  const [itemInspectionElapsedMs, setItemInspectionElapsedMs] = useState(0);
+  const itemInspectionStartedAtRef = useRef<number | null>(null);
+  const itemInspectionElapsedBaseMsRef = useRef(0);
+  const itemInspectionElapsedTimerRef = useRef<number | null>(null);
 
   const [deduplicating, setDeduplicating] = useState(false);
   const [dedupeMessage, setDedupeMessage] = useState("");
   const [dedupeError, setDedupeError] = useState("");
   const [dedupeConfirmOpen, setDedupeConfirmOpen] = useState(false);
+
+  const [dedupeScopeOpen, setDedupeScopeOpen] = useState(false);
+  const [dedupeTargetScope, setDedupeTargetScope] = useState<
+    "filtered" | "all" | null
+  >(null);
+
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [importDuplicateConfirmOpen, setImportDuplicateConfirmOpen] = useState(false);
   const [exportScopeOpen, setExportScopeOpen] = useState(false);
@@ -3135,21 +3279,24 @@ export default function Home() {
             <button
               type="button"
               onClick={() => {
-                setItemDeleteSelections(createInitialItemDeleteSelections());
+                setItemDeleteSelections(createEmptyItemDeleteSelections());
                 setItemDeleteTarget(null);
                 setItemDeleteError("");
                 setItemDeleteMessage("");
                 setItemDeleteScopeOpen(true);
               }}
               disabled={itemDeleting}
-              className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
+              className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
             >
               項目削除
             </button>
 
             <button
               type="button"
-              onClick={() => setDedupeConfirmOpen(true)}
+              onClick={() => {
+                setDedupeTargetScope(null);
+                setDedupeScopeOpen(true);
+              }}
               disabled={deduplicating}
               className="h-11 rounded-xl bg-violet-600 px-5 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
             >
@@ -3297,17 +3444,40 @@ export default function Home() {
     if (openSidebarPanel === "inspection") {
       return (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <button
               type="button"
               onClick={() => {
-                setCrawlFieldSelections(createInitialCrawlFieldSelections());
-                setCrawlConfirmOpen(true);
+                setCrawlFieldSelections(createEmptyCrawlFieldSelections());
+                setCrawlTargetScope(null);
+                setCrawlScopeOpen(true);
               }}
               disabled={crawling}
               className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
             >
               {crawling ? "クローリング中..." : "クローリング"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setItemInspectionSelections(createEmptyItemDeleteSelections());
+                setItemInspectionMethodSelections(
+                  createEmptyItemInspectionMethodSelections()
+                );
+                setItemInspectionPreviewChanges([]);
+                setItemInspectionCheckedPreviewRowIds({});
+                setItemInspectionMessage("");
+                setItemInspectionError("");
+                setItemInspectionMethodOpen(false);
+                setItemInspectionPreviewConfirmOpen(false);
+                setItemInspectionTargetScope(null);
+                setItemInspectionScopeOpen(true);
+              }}
+              disabled={itemInspecting}
+              className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+            >
+              {itemInspecting ? "項目精査中..." : "項目精査"}
             </button>
           </div>
 
@@ -3320,6 +3490,18 @@ export default function Home() {
           {crawlError && (
             <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {crawlError}
+            </div>
+          )}
+
+          {itemInspectionMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {itemInspectionMessage}
+            </div>
+          )}
+
+          {itemInspectionError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {itemInspectionError}
             </div>
           )}
         </div>
@@ -4017,6 +4199,8 @@ const handleDownloadTemplate = async () => {
     return () => {
       clearCrawlStatusPolling();
       clearCrawlElapsedTimer();
+      clearItemInspectionStatusPolling();
+      clearItemInspectionElapsedTimer();
     };
   }, []);
 
@@ -4141,6 +4325,8 @@ const handleDownloadTemplate = async () => {
   };
 
   const handleCrawl = async () => {
+    if (!crawlTargetScope) return;
+
     setCrawling(true);
     setCrawlConfirmOpen(false);
     setCrawlPreviewOpen(false);
@@ -4170,13 +4356,17 @@ const handleDownloadTemplate = async () => {
     try {
       const body: Record<string, unknown> = {
         action: "start_preview_job",
-        filterModels: buildRequestFilterModels(appliedColumnStates),
-        advancedFilters: buildRequestAdvancedFilters(
-          appliedAdvancedFilters,
-          advancedValueOptions
-        ),
+        targetScope: crawlTargetScope,
         selectedFields: getSelectedCrawlFields(crawlFieldSelections),
       };
+
+      if (crawlTargetScope === "filtered") {
+        body.filterModels = buildRequestFilterModels(appliedColumnStates);
+        body.advancedFilters = buildRequestAdvancedFilters(
+          appliedAdvancedFilters,
+          advancedValueOptions
+        );
+      }
 
       const sortColumn = COLUMN_DEFS.find(
         (column) => appliedColumnStates[column.key].sortDirection !== ""
@@ -4404,13 +4594,408 @@ const handleDownloadTemplate = async () => {
     }
   };
 
+  const clearItemInspectionStatusPolling = () => {
+    if (itemInspectionStatusTimerRef.current !== null) {
+      window.clearInterval(itemInspectionStatusTimerRef.current);
+      itemInspectionStatusTimerRef.current = null;
+    }
+  };
+
+  const clearItemInspectionElapsedTimer = () => {
+    if (itemInspectionElapsedTimerRef.current !== null) {
+      window.clearInterval(itemInspectionElapsedTimerRef.current);
+      itemInspectionElapsedTimerRef.current = null;
+    }
+  };
+
+  const updateItemInspectionElapsedMs = () => {
+    const runningMs =
+      itemInspectionStartedAtRef.current !== null
+        ? Date.now() - itemInspectionStartedAtRef.current
+        : 0;
+
+    setItemInspectionElapsedMs(
+      itemInspectionElapsedBaseMsRef.current + runningMs
+    );
+  };
+
+  const startItemInspectionElapsedTracking = (reset = false) => {
+    if (reset) {
+      itemInspectionElapsedBaseMsRef.current = 0;
+      setItemInspectionElapsedMs(0);
+    }
+
+    itemInspectionStartedAtRef.current = Date.now();
+    updateItemInspectionElapsedMs();
+    clearItemInspectionElapsedTimer();
+
+    itemInspectionElapsedTimerRef.current = window.setInterval(
+      updateItemInspectionElapsedMs,
+      1000
+    );
+  };
+
+  const stopItemInspectionElapsedTracking = () => {
+    if (itemInspectionStartedAtRef.current !== null) {
+      itemInspectionElapsedBaseMsRef.current +=
+        Date.now() - itemInspectionStartedAtRef.current;
+      itemInspectionStartedAtRef.current = null;
+    }
+
+    updateItemInspectionElapsedMs();
+    clearItemInspectionElapsedTimer();
+  };
+
+  const applyItemInspectionStatus = (data: ApiResponse) => {
+    setItemInspectionJobStatus(
+      (data.jobStatus as ItemInspectionJobStatus) ?? "idle"
+    );
+    setItemInspectionTotalTargets(data.totalTargets ?? 0);
+    setItemInspectionProcessedCount(data.processed ?? 0);
+    setItemInspectionUpdatedCount(data.updated ?? 0);
+    setItemInspectionSkippedCount(data.skipped ?? 0);
+    setItemInspectionFailedCount(data.failed ?? 0);
+    setItemInspectionCurrentCompany(data.currentCompany ?? null);
+    setItemInspectionCurrentValue(data.currentInspectionValue ?? null);
+    setItemInspectionCurrentFieldLabel(
+      data.currentInspectionFieldLabel ?? null
+    );
+    setItemInspectionRemainingCount(data.remainingCount ?? 0);
+  };
+
+  const openItemInspectionPreviewConfirmFromStatus = (
+    data: ApiResponse
+  ) => {
+    const previewChanges = data.inspectionPreviewChanges || [];
+
+    setItemInspectionPreviewChanges(previewChanges);
+    setItemInspectionCheckedPreviewRowIds(
+      Object.fromEntries(previewChanges.map((row) => [row.rowId, true]))
+    );
+
+    setItemInspectionPreviewPage(1);
+
+    if (previewChanges.length > 0) {
+      setItemInspectionPreviewConfirmOpen(true);
+    } else {
+      setItemInspectionPreviewConfirmOpen(false);
+    }
+  };
+
+  const startItemInspectionStatusPolling = (jobId: string) => {
+    clearItemInspectionStatusPolling();
+
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/master_data/item_inspection", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "get_job_status",
+            jobId,
+          }),
+        });
+
+        const data = await readApiResponse(res);
+
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "項目精査進捗の取得に失敗しました");
+        }
+
+        applyItemInspectionStatus(data);
+
+        if (data.jobStatus === "paused") {
+          clearItemInspectionStatusPolling();
+          stopItemInspectionElapsedTracking();
+          setItemInspecting(false);
+          setItemInspectionProgressOpen(false);
+          openItemInspectionPreviewConfirmFromStatus(data);
+          setItemInspectionMessage("項目精査を中断しました");
+          await fetchData();
+          return;
+        }
+
+        if (data.jobStatus === "completed") {
+          clearItemInspectionStatusPolling();
+          stopItemInspectionElapsedTracking();
+          setItemInspecting(false);
+          setItemInspectionProgressOpen(false);
+          openItemInspectionPreviewConfirmFromStatus(data);
+          setItemInspectionMessage(data.message || "項目精査が完了しました");
+          await fetchData();
+          return;
+        }
+
+        if (data.jobStatus === "error") {
+          clearItemInspectionStatusPolling();
+          stopItemInspectionElapsedTracking();
+          setItemInspecting(false);
+          setItemInspectionProgressOpen(false);
+          throw new Error(data.error || "項目精査中にエラーが発生しました");
+        }
+      } catch (e) {
+        clearItemInspectionStatusPolling();
+        stopItemInspectionElapsedTracking();
+        setItemInspecting(false);
+        setItemInspectionProgressOpen(false);
+        setItemInspectionError(
+          e instanceof Error
+            ? e.message
+            : "項目精査進捗取得でエラーが発生しました"
+        );
+      }
+    };
+
+    void poll();
+
+    itemInspectionStatusTimerRef.current = window.setInterval(() => {
+      void poll();
+    }, 1200);
+  };
+
+  const handleCancelItemInspection = async () => {
+    if (!itemInspectionJobId) return;
+
+    try {
+      const res = await fetch("/api/master_data/item_inspection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "cancel_job",
+          jobId: itemInspectionJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "中止に失敗しました");
+      }
+
+      clearItemInspectionStatusPolling();
+      stopItemInspectionElapsedTracking();
+      setItemInspecting(false);
+      setItemInspectionProgressOpen(false);
+      setItemInspectionJobId(null);
+      setItemInspectionJobStatus("idle");
+      setItemInspectionTotalTargets(0);
+      setItemInspectionProcessedCount(0);
+      setItemInspectionUpdatedCount(0);
+      setItemInspectionSkippedCount(0);
+      setItemInspectionFailedCount(0);
+      setItemInspectionCurrentCompany(null);
+      setItemInspectionCurrentValue(null);
+      setItemInspectionCurrentFieldLabel(null);
+      setItemInspectionRemainingCount(0);
+      setItemInspectionMessage("項目精査を中止しました");
+      setItemInspectionError("");
+    } catch (e) {
+      setItemInspectionError(
+        e instanceof Error ? e.message : "中止処理でエラーが発生しました"
+      );
+    }
+  };
+
+  const handlePauseItemInspection = async () => {
+    if (!itemInspectionJobId) return;
+
+    try {
+      const res = await fetch("/api/master_data/item_inspection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "pause_job",
+          jobId: itemInspectionJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "中断に失敗しました");
+      }
+
+      setItemInspectionMessage("中断指示を受け付けました");
+    } catch (e) {
+      setItemInspectionError(
+        e instanceof Error ? e.message : "中断処理でエラーが発生しました"
+      );
+    }
+  };
+
+  const handleRunItemInspection = async () => {
+    if (!itemInspectionTargetScope) return;
+
+    if (
+      !(
+        selectedItemInspectionFields.length === 1 &&
+        selectedItemInspectionFields[0] === "representative_name"
+      )
+    ) {
+      return;
+    }
+
+    if (!itemInspectionMethodSelections.representative_name_remove_non_name) {
+      return;
+    }
+
+    setItemInspecting(true);
+    setItemInspectionMethodOpen(false);
+    setItemInspectionPreviewConfirmOpen(false);
+    setItemInspectionError("");
+    setItemInspectionMessage("");
+    setItemInspectionPreviewChanges([]);
+    setItemInspectionCheckedPreviewRowIds({});
+    setItemInspectionJobId(null);
+    setItemInspectionJobStatus("running");
+    setItemInspectionTotalTargets(0);
+    setItemInspectionProcessedCount(0);
+    setItemInspectionUpdatedCount(0);
+    setItemInspectionSkippedCount(0);
+    setItemInspectionFailedCount(0);
+    setItemInspectionCurrentCompany(null);
+    setItemInspectionCurrentValue(null);
+    setItemInspectionCurrentFieldLabel("代表者名");
+    setItemInspectionRemainingCount(0);
+    setItemInspectionProgressOpen(true);
+    startItemInspectionElapsedTracking(true);
+
+    try {
+      const body: Record<string, unknown> = {
+        action: "start_job",
+        inspectionScope: itemInspectionTargetScope,
+        selectedFields: selectedItemInspectionFields,
+        methodSelections: itemInspectionMethodSelections,
+      };
+
+      if (itemInspectionTargetScope === "filtered") {
+        body.filterModels = buildRequestFilterModels(appliedColumnStates);
+        body.advancedFilters = buildRequestAdvancedFilters(
+          appliedAdvancedFilters,
+          advancedValueOptions
+        );
+      }
+
+      const res = await fetch("/api/master_data/item_inspection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "項目精査開始に失敗しました");
+      }
+
+      if (!data.jobId) {
+        clearItemInspectionStatusPolling();
+        stopItemInspectionElapsedTracking();
+        setItemInspecting(false);
+        setItemInspectionProgressOpen(false);
+        setItemInspectionMessage(data.message || "対象がありませんでした");
+        return;
+      }
+
+      setItemInspectionJobId(data.jobId);
+      applyItemInspectionStatus(data);
+      startItemInspectionStatusPolling(data.jobId);
+    } catch (e) {
+      clearItemInspectionStatusPolling();
+      stopItemInspectionElapsedTracking();
+      setItemInspecting(false);
+      setItemInspectionProgressOpen(false);
+      setItemInspectionError(
+        e instanceof Error ? e.message : "項目精査開始でエラーが発生しました"
+      );
+    }
+  };
+
+  const handleApplyItemInspectionChanges = async () => {
+    const targetChanges = itemInspectionPreviewChanges.filter(
+      (row) => itemInspectionCheckedPreviewRowIds[row.rowId] !== false
+    );
+
+    if (targetChanges.length === 0) {
+      return;
+    }
+
+    setItemInspecting(true);
+    setItemInspectionError("");
+    setItemInspectionMessage("");
+
+    try {
+      const res = await fetch("/api/master_data/item_inspection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "apply_preview_changes",
+          changes: targetChanges,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "精査結果の反映に失敗しました");
+      }
+
+      setItemInspectionPreviewConfirmOpen(false);
+      setItemInspectionPreviewChanges([]);
+      setItemInspectionCheckedPreviewRowIds({});
+      setItemInspectionMessage(data.message || "精査結果を反映しました");
+
+      await fetchData();
+    } catch (e) {
+      setItemInspectionError(
+        e instanceof Error
+          ? e.message
+          : "精査結果の反映でエラーが発生しました"
+      );
+    } finally {
+      setItemInspecting(false);
+    }
+  };
+
   const handleDeduplicate = async () => {
+    if (!dedupeTargetScope) return;
+
     setDeduplicating(true);
     setDedupeMessage("");
     setDedupeError("");
 
     try {
-      const res = await fetch("/api/master_data", {
+      const params = new URLSearchParams();
+      params.set("deleteMode", "dedupe");
+      params.set("deleteScope", dedupeTargetScope);
+
+      if (dedupeTargetScope === "filtered") {
+        params.set(
+          "filterModels",
+          JSON.stringify(buildRequestFilterModels(appliedColumnStates))
+        );
+        params.set(
+          "advancedFilters",
+          JSON.stringify(
+            buildRequestAdvancedFilters(
+              appliedAdvancedFilters,
+              advancedValueOptions
+            )
+          )
+        );
+      }
+
+      const res = await fetch(`/api/master_data?${params.toString()}`, {
         method: "DELETE",
       });
 
@@ -4482,9 +5067,57 @@ const handleDownloadTemplate = async () => {
     activeAdvancedFilterKey === "industry" ||
     activeAdvancedFilterKey === "tag";
 
+  const selectedCrawlFields = getSelectedCrawlFields(crawlFieldSelections);
+  const hasSelectedCrawlFields = selectedCrawlFields.length > 0;
+
+  const selectedItemDeleteFields = getSelectedItemDeleteFields(
+    itemDeleteSelections
+  );
+  const hasSelectedItemDeleteFields = selectedItemDeleteFields.length > 0;
+
   const selectedItemDeleteLabels = COLUMN_DEFS.filter(
     (column) => itemDeleteSelections[column.key]
   ).map((column) => column.label);
+
+  const selectedItemInspectionFields = getSelectedItemDeleteFields(
+    itemInspectionSelections
+  );
+
+  const selectedItemInspectionLabels = COLUMN_DEFS.filter(
+    (column) => itemInspectionSelections[column.key]
+  ).map((column) => column.label);
+
+  const hasSelectedItemInspectionFields =
+    selectedItemInspectionFields.length > 0;
+
+  const hasSelectedItemInspectionMethods =
+    itemInspectionMethodSelections.representative_name_remove_non_name;
+
+  const itemInspectionProcessingCount =
+    itemInspectionJobStatus === "running" && itemInspectionCurrentCompany
+      ? 1
+      : 0;
+
+  const itemInspectionAverageDivisor = Math.max(
+    itemInspectionProcessedCount,
+    itemInspectionProcessingCount
+  );
+
+  const averageItemInspectionMs =
+    itemInspectionAverageDivisor > 0
+      ? Math.round(itemInspectionElapsedMs / itemInspectionAverageDivisor)
+      : 0;
+
+  const itemInspectionProgressPercent =
+    itemInspectionTotalTargets === 0
+      ? 0
+      : Math.round(
+          (itemInspectionProcessedCount / itemInspectionTotalTargets) * 100
+        );
+
+  const isRepresentativeNameOnlyInspection =
+    selectedItemInspectionFields.length === 1 &&
+    selectedItemInspectionFields[0] === "representative_name";
 
   const renderedTableBody = useMemo(() => {
     if (rows.length === 0 && !loading) {
@@ -4841,6 +5474,752 @@ const handleDownloadTemplate = async () => {
           </div>
         )}
 
+        {itemInspectionFieldOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                if (itemInspecting) return;
+                setItemInspectionFieldOpen(false);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      項目精査確認
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemInspectionSelections(
+                            createInitialItemDeleteSelections()
+                          )
+                        }
+                        disabled={itemInspecting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        全選択
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemInspectionSelections(
+                            createEmptyItemDeleteSelections()
+                          )
+                        }
+                        disabled={itemInspecting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        選択解除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="px-4 py-6">
+                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                      チェックした項目のみ精査します。
+                      <br />
+                      <span className="text-xs text-slate-400">
+                        対象:
+                        {itemInspectionTargetScope === "all"
+                          ? "全てのリスト"
+                          : "絞り込みリストのみ"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                      {COLUMN_DEFS.map((field) => (
+                        <label
+                          key={field.key}
+                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={itemInspectionSelections[field.key]}
+                            onChange={() =>
+                              setItemInspectionSelections((prev) => ({
+                                ...prev,
+                                [field.key]: !prev[field.key],
+                              }))
+                            }
+                            className="h-4 w-4 accent-cyan-500"
+                          />
+                          <span>{field.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setItemInspectionFieldOpen(false)}
+                      disabled={itemInspecting}
+                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isRepresentativeNameOnlyInspection) {
+                          return;
+                        }
+
+                        setItemInspectionFieldOpen(false);
+                        setItemInspectionMethodOpen(true);
+                      }}
+                      disabled={itemInspecting || !hasSelectedItemInspectionFields}
+                      className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
+                        !hasSelectedItemInspectionFields
+                          ? "bg-cyan-500/30 text-white/60"
+                          : "bg-cyan-500 hover:bg-cyan-400"
+                      }`}
+                    >
+                      はい
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {itemInspectionMethodOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                if (itemInspecting) return;
+                setItemInspectionMethodOpen(false);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      項目精査 方法確認
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemInspectionMethodSelections(
+                            createInitialItemInspectionMethodSelections()
+                          )
+                        }
+                        disabled={itemInspecting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        全選択
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemInspectionMethodSelections(
+                            createEmptyItemInspectionMethodSelections()
+                          )
+                        }
+                        disabled={itemInspecting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        選択解除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="px-4 py-6">
+                    <div className="grid grid-cols-1 gap-2">
+                      <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={
+                            itemInspectionMethodSelections.representative_name_remove_non_name
+                          }
+                          onChange={() =>
+                            setItemInspectionMethodSelections((prev) => ({
+                              ...prev,
+                              representative_name_remove_non_name:
+                                !prev.representative_name_remove_non_name,
+                            }))
+                          }
+                          className="h-4 w-4 accent-cyan-500"
+                        />
+                        <span>氏名以外を削除</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setItemInspectionMethodOpen(false)}
+                      disabled={itemInspecting}
+                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleRunItemInspection}
+                      disabled={
+                        itemInspecting || !hasSelectedItemInspectionMethods
+                      }
+                      className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
+                        !hasSelectedItemInspectionMethods
+                          ? "bg-cyan-500/30 text-white/60"
+                          : "bg-cyan-500 hover:bg-cyan-400"
+                      }`}
+                    >
+                      {itemInspecting ? "精査中..." : "はい"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {itemInspectionProgressOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+              <div className="flex min-h-full items-center justify-center">
+                <div className="flex w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+                  <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                    項目精査 進行状況
+                  </div>
+
+                  <div className="space-y-4 px-4 py-5">
+                    <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                      <div className="mb-2 text-xs text-slate-400">
+                        現在処理中の企業
+                      </div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        {itemInspectionCurrentCompany || "待機中"}
+                      </div>
+
+                      <div className="mt-3 text-xs text-slate-400">
+                        現在処理中の
+                        {itemInspectionCurrentFieldLabel || "項目"}
+                      </div>
+                      <div className="mt-1 break-all text-sm text-sky-300">
+                        {itemInspectionCurrentValue || "-"}
+                      </div>
+
+                      <div className="mt-3 text-xs text-slate-400">
+                        精査対象項目
+                      </div>
+                      <div className="mt-1 text-sm text-slate-200">
+                        {selectedItemInspectionLabels.length > 0
+                          ? selectedItemInspectionLabels.join(" / ")
+                          : "-"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-slate-300">進捗</span>
+
+                        <div className="flex items-center gap-4">
+                          <div className="text-right text-xs leading-5 text-slate-400">
+                            <div>
+                              平均{" "}
+                              {itemInspectionProcessedCount > 0
+                                ? formatCrawlDuration(averageItemInspectionMs)
+                                : "-"}{" "}
+                              / 件
+                            </div>
+                            <div>
+                              経過 {formatCrawlDuration(itemInspectionElapsedMs)}
+                            </div>
+                          </div>
+
+                          <span className="font-semibold text-slate-100">
+                            {itemInspectionProgressPercent}%
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-cyan-500 transition-all"
+                          style={{
+                            width: `${itemInspectionProgressPercent}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                        <div className="text-xs text-slate-400">完了</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-100">
+                          {itemInspectionProcessedCount.toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                        <div className="text-xs text-slate-400">処理中</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-100">
+                          {itemInspectionProcessingCount.toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                        <div className="text-xs text-slate-400">対象総数</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-100">
+                          {itemInspectionTotalTargets.toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
+                        <div className="text-xs text-slate-400">精査件数</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-100">
+                          {itemInspectionUpdatedCount.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={handleCancelItemInspection}
+                      disabled={!itemInspecting}
+                      className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
+                    >
+                      中止
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handlePauseItemInspection}
+                      disabled={!itemInspecting}
+                      className="h-10 w-[120px] flex-none rounded-xl bg-cyan-500 px-3 text-sm font-medium text-white transition hover:bg-cyan-400 disabled:opacity-50"
+                    >
+                      中断
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {itemInspectionPreviewConfirmOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                if (itemInspecting) return;
+                setItemInspectionPreviewConfirmOpen(false);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      項目精査確認
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setItemInspectionCheckedPreviewRowIds(
+                            Object.fromEntries(
+                              itemInspectionPreviewChanges.map((row) => [
+                                row.rowId,
+                                true,
+                              ])
+                            )
+                          )
+                        }
+                        disabled={itemInspecting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        全選択
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setItemInspectionCheckedPreviewRowIds({})}
+                        disabled={itemInspecting}
+                        className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      >
+                        選択解除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="px-4 py-6">
+                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                      チェックした項目のみ反映します。
+                    </div>
+
+                    {itemInspectionPreviewChanges.length === 0 ? (
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                        反映対象はありません
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-4 border-b border-white/10 pb-4">
+                          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div className="text-xs text-slate-400">
+                              削除候補 {itemInspectionPreviewChanges.length.toLocaleString()}件中{" "}
+                              {(itemInspectionPreviewPage - 1) *
+                                ITEM_INSPECTION_PREVIEW_PAGE_SIZE +
+                                1}
+                              〜
+                              {Math.min(
+                                itemInspectionPreviewPage *
+                                  ITEM_INSPECTION_PREVIEW_PAGE_SIZE,
+                                itemInspectionPreviewChanges.length
+                              )}
+                              件を表示
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setItemInspectionPreviewPage((prev) =>
+                                    Math.max(prev - 1, 1)
+                                  )
+                                }
+                                disabled={
+                                  itemInspectionPreviewPage === 1 || itemInspecting
+                                }
+                                className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                              >
+                                前へ
+                              </button>
+
+                              <div className="text-xs text-slate-300">
+                                {itemInspectionPreviewPage} /{" "}
+                                {itemInspectionPreviewTotalPages}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setItemInspectionPreviewPage((prev) =>
+                                    Math.min(
+                                      prev + 1,
+                                      itemInspectionPreviewTotalPages
+                                    )
+                                  )
+                                }
+                                disabled={
+                                  itemInspectionPreviewPage >=
+                                    itemInspectionPreviewTotalPages ||
+                                  itemInspecting
+                                }
+                                className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                              >
+                                次へ
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid max-h-[60vh] grid-cols-1 gap-2 overflow-y-auto">
+                          {pagedItemInspectionPreviewChanges.map((row) => (
+                            <label
+                              key={row.rowId}
+                              className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={
+                                  itemInspectionCheckedPreviewRowIds[row.rowId] !==
+                                  false
+                                }
+                                onChange={() =>
+                                  setItemInspectionCheckedPreviewRowIds((prev) => ({
+                                    ...prev,
+                                    [row.rowId]: prev[row.rowId] === false,
+                                  }))
+                                }
+                                className="mt-1 h-4 w-4 accent-cyan-500"
+                              />
+
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate font-medium text-slate-100">
+                                  {row.company || "(企業名なし)"}
+                                </div>
+
+                                <div className="mt-1 text-xs text-slate-400">
+                                  項目：{row.fieldLabel}
+                                </div>
+
+                                <div className="mt-1 break-words text-xs text-slate-400">
+                                  現在値：{row.beforeValue || "-"}
+                                </div>
+
+                                <div className="mt-1 break-words text-xs text-emerald-200">
+                                  反映後：
+                                  {row.action === "delete"
+                                    ? "(削除)"
+                                    : row.afterValue || "-"}
+                                </div>
+
+                                <div className="mt-1 text-xs text-cyan-200">
+                                  {row.reason}
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 rounded-lg border border-white/10 bg-[#0f172a] px-2 py-1 text-xs text-slate-200">
+                                {row.action === "delete" ? "削除" : "更新"}
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setItemInspectionPreviewConfirmOpen(false)}
+                      disabled={itemInspecting}
+                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleApplyItemInspectionChanges}
+                      disabled={itemInspecting}
+                      className="h-10 w-[120px] flex-none rounded-xl bg-cyan-500 px-3 text-sm font-medium text-white transition hover:bg-cyan-400 disabled:opacity-50"
+                    >
+                      {itemInspecting ? "反映中..." : "はい"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {crawlScopeOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                setCrawlScopeOpen(false);
+                setCrawlTargetScope(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      クローリング 対象選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCrawlScopeOpen(false);
+                        setCrawlTargetScope(null);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCrawlScopeOpen(false);
+                          setCrawlTargetScope("all");
+                          setCrawlConfirmOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-amber-600 px-4 text-sm font-medium text-white transition hover:bg-amber-500"
+                      >
+                        全てのリスト
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCrawlScopeOpen(false);
+                          setCrawlTargetScope("filtered");
+                          setCrawlConfirmOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-amber-500 px-4 text-sm font-medium text-white transition hover:bg-amber-400"
+                      >
+                        絞り込みリストのみ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {itemInspectionScopeOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                setItemInspectionScopeOpen(false);
+                setItemInspectionTargetScope(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      項目精査 対象選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemInspectionScopeOpen(false);
+                        setItemInspectionTargetScope(null);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setItemInspectionScopeOpen(false);
+                          setItemInspectionTargetScope("all");
+                          setItemInspectionFieldOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-cyan-600 px-4 text-sm font-medium text-white transition hover:bg-cyan-500"
+                      >
+                        全てのリスト
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setItemInspectionScopeOpen(false);
+                          setItemInspectionTargetScope("filtered");
+                          setItemInspectionFieldOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-cyan-500 px-4 text-sm font-medium text-white transition hover:bg-cyan-400"
+                      >
+                        絞り込みリストのみ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {dedupeScopeOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => {
+                setDedupeScopeOpen(false);
+                setDedupeTargetScope(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      重複削除 対象選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDedupeScopeOpen(false);
+                        setDedupeTargetScope(null);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDedupeScopeOpen(false);
+                          setDedupeTargetScope("all");
+                          setDedupeConfirmOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-violet-600 px-4 text-sm font-medium text-white transition hover:bg-violet-500"
+                      >
+                        全てのリスト
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDedupeScopeOpen(false);
+                          setDedupeTargetScope("filtered");
+                          setDedupeConfirmOpen(true);
+                        }}
+                        className="h-11 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition hover:bg-violet-400"
+                      >
+                        絞り込みリストのみ
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
         {itemDeleteScopeOpen &&
           typeof document !== "undefined" &&
           createPortal(
@@ -4858,7 +6237,7 @@ const handleDownloadTemplate = async () => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      項目 削除対象選択
+                      項目削除 対象選択
                     </div>
 
                     <button
@@ -4882,7 +6261,7 @@ const handleDownloadTemplate = async () => {
                           setItemDeleteTarget("all");
                           setItemDeleteFieldOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-amber-600 px-4 text-sm font-medium text-white transition hover:bg-amber-500"
+                        className="h-11 rounded-xl bg-cyan-600 px-4 text-sm font-medium text-white transition hover:bg-cyan-500"
                       >
                         全てのリスト
                       </button>
@@ -4894,7 +6273,7 @@ const handleDownloadTemplate = async () => {
                           setItemDeleteTarget("filtered");
                           setItemDeleteFieldOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-amber-500 px-4 text-sm font-medium text-white transition hover:bg-amber-400"
+                        className="h-11 rounded-xl bg-cyan-500 px-4 text-sm font-medium text-white transition hover:bg-cyan-400"
                       >
                         絞り込みリストのみ
                       </button>
@@ -4925,7 +6304,7 @@ const handleDownloadTemplate = async () => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      項目確認
+                      項目削除確認
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -4956,6 +6335,13 @@ const handleDownloadTemplate = async () => {
                   <div className="px-4 py-6">
                     <div className="mb-4 text-sm leading-7 text-slate-300">
                       チェックした項目のみ削除します。
+                      <br />
+                      <span className="text-xs text-slate-400">
+                        対象:
+                        {itemDeleteTarget === "all"
+                          ? "全てのリスト"
+                          : "絞り込みリストのみ"}
+                      </span>
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -4973,7 +6359,7 @@ const handleDownloadTemplate = async () => {
                                 [field.key]: !prev[field.key],
                               }))
                             }
-                            className="h-4 w-4 accent-amber-500"
+                            className="h-4 w-4 accent-cyan-500"
                           />
                           <span>{field.label}</span>
                         </label>
@@ -5000,8 +6386,12 @@ const handleDownloadTemplate = async () => {
                         setItemDeleteFieldOpen(false);
                         setItemDeleteConfirmOpen(true);
                       }}
-                      disabled={itemDeleting}
-                      className="h-10 w-[120px] flex-none rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                      disabled={itemDeleting || !hasSelectedItemDeleteFields}
+                      className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
+                        !hasSelectedItemDeleteFields
+                          ? "bg-cyan-500/30 text-white/60"
+                          : "bg-cyan-500 hover:bg-cyan-400"
+                      }`}
                     >
                       はい
                     </button>
@@ -5040,7 +6430,7 @@ const handleDownloadTemplate = async () => {
                       対象:
                       {itemDeleteTarget === "all"
                         ? "全てのリスト"
-                        : "現在フィルタで絞り込んでいるリストのみ"}
+                        : "絞り込みリストのみ"}
                     </span>
 
                     <div className="mt-4">
@@ -5078,7 +6468,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handleItemDelete}
                       disabled={itemDeleting}
-                      className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-cyan-500 px-3 text-sm font-medium text-white transition hover:bg-cyan-400 disabled:opacity-50"
                     >
                       {itemDeleting ? "削除中..." : "はい"}
                     </button>
@@ -5103,7 +6493,7 @@ const handleDownloadTemplate = async () => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      リスト削除対象選択
+                      リスト削除 対象選択
                     </div>
 
                     <button
@@ -5169,7 +6559,7 @@ const handleDownloadTemplate = async () => {
                       対象:
                       {listDeleteConfirmTarget === "all"
                         ? "全てのリスト"
-                        : "現在フィルタで絞り込んでいるリストのみ"}
+                        : "絞り込みリストのみ"}
                     </span>
                   </div>
 
@@ -5406,9 +6796,14 @@ const handleDownloadTemplate = async () => {
                     <div className="mb-4 text-sm leading-7 text-slate-300">
                       チェックした項目のみクローリングします。
                       <br />
-                      現在の絞り込み結果に対してクローリングを実行し、保存前に変更候補を一覧で表示します。
+                      保存前にクローリング結果を一覧で表示し、内容を確認してから保存できます。
                       <br />
-                      内容を確認してから保存できます。
+                      <span className="text-xs text-slate-400">
+                      対象:
+                      {crawlTargetScope === "all"
+                        ? "全てのリスト"
+                        : "絞り込みリストのみ"}
+                    </span>
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -5447,8 +6842,12 @@ const handleDownloadTemplate = async () => {
                     <button
                       type="button"
                       onClick={handleCrawl}
-                      disabled={crawling}
-                      className="h-10 w-[120px] flex-none rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                      disabled={crawling || !hasSelectedCrawlFields}
+                      className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
+                        !hasSelectedCrawlFields
+                          ? "bg-amber-500/30 text-white/60"
+                          : "bg-amber-500 hover:bg-amber-400"
+                      }`}
                     >
                       {crawling ? "実行中..." : "はい"}
                     </button>
@@ -5795,7 +7194,7 @@ const handleDownloadTemplate = async () => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
@@ -5806,6 +7205,13 @@ const handleDownloadTemplate = async () => {
                     企業名の完全一致で重複データを削除します。
                     <br />
                     本当に重複削除しますか？
+                    <br />
+                    <span className="text-xs text-slate-400">
+                      対象:
+                      {dedupeTargetScope === "all"
+                        ? "全てのリスト"
+                        : "絞り込みリストのみ"}
+                    </span>
                   </div>
 
                   <div className="flex gap-2 border-t border-white/10 px-4 py-4">
@@ -5822,7 +7228,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handleDeduplicate}
                       disabled={deduplicating}
-                      className="h-10 flex-1 rounded-xl bg-rose-500 px-3 text-sm font-medium text-white transition hover:bg-rose-400 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-violet-500 px-3 text-sm font-medium text-white transition hover:bg-violet-400 disabled:opacity-50"
                     >
                       {deduplicating ? "実行中..." : "はい"}
                     </button>
@@ -6075,7 +7481,7 @@ const handleDownloadTemplate = async () => {
                       <span className="text-xs text-slate-400">
                         対象: {exportMode === "all"
                           ? "全てのリスト"
-                          : "現在フィルタで絞り込んでいるリストのみ"}
+                          : "絞り込みリストのみ"}
                       </span>
                     </div>
 
@@ -6127,7 +7533,7 @@ const handleDownloadTemplate = async () => {
                       <span className="text-xs text-slate-400">
                         対象: {exportMode === "all"
                           ? "全てのリスト"
-                          : "現在フィルタで絞り込んでいるリストのみ"}
+                          : "絞り込みリストのみ"}
                       </span>
                     </div>
 

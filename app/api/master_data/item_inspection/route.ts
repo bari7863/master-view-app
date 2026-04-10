@@ -1,8 +1,10 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { dbReady, pool } from "@/lib/db";
+
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
-import { dbReady, pool } from "@/lib/db";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -97,98 +99,47 @@ type AdvancedFilters = {
   tags?: AdvancedTagFilters;
 };
 
-const CSV_HEADER_COLUMNS = [
-  "企業名",
-  "郵便番号",
-  "住所",
-  "大業種",
-  "小業種",
-  "企業名（かな）",
-  "企業概要",
-  "企業URL",
-  "お問い合わせフォームURL",
-  "電話番号",
-  "FAX番号",
-  "メールアドレス",
-  "設立年月",
-  "代表者名",
-  "代表者役職",
-  "資本金",
-  "従業員数",
-  "従業員数年度",
-  "前年売上高",
-  "直近売上高",
-  "決算月",
-  "事業所数",
-  "タグ",
-  "業種",
-  "事業内容",
-  "業界",
-  "メモ",
-] as const;
-
-const DB_INSERT_COLUMNS = [
-  "企業名",
-  "郵便番号",
-  "住所",
-  "大業種名",
-  "小業種名",
-  "企業名（かな）",
-  "企業概要",
-  "企業サイトURL",
-  "問い合わせフォームURL",
-  "電話番号",
-  "FAX番号",
-  "メールアドレス",
-  "設立年月",
-  "代表者名",
-  "代表者役職",
-  "資本金",
-  "従業員数",
-  "従業員数年度",
-  "前年売上高",
-  "直近売上高",
-  "決算月",
-  "事業所数",
-  "新規登録タグ",
-  "業種",
-  "事業内容",
-  "業界",
-  "メモ",
-] as const;
-
-const DB_INSERT_TO_CSV_HEADER: Record<
-  (typeof DB_INSERT_COLUMNS)[number],
-  (typeof CSV_HEADER_COLUMNS)[number]
-> = {
-  "企業名": "企業名",
-  "郵便番号": "郵便番号",
-  "住所": "住所",
-  "大業種名": "大業種",
-  "小業種名": "小業種",
-  "企業名（かな）": "企業名（かな）",
-  "企業概要": "企業概要",
-  "企業サイトURL": "企業URL",
-  "問い合わせフォームURL": "お問い合わせフォームURL",
-  "電話番号": "電話番号",
-  "FAX番号": "FAX番号",
-  "メールアドレス": "メールアドレス",
-  "設立年月": "設立年月",
-  "代表者名": "代表者名",
-  "代表者役職": "代表者役職",
-  "資本金": "資本金",
-  "従業員数": "従業員数",
-  "従業員数年度": "従業員数年度",
-  "前年売上高": "前年売上高",
-  "直近売上高": "直近売上高",
-  "決算月": "決算月",
-  "事業所数": "事業所数",
-  "新規登録タグ": "タグ",
-  "業種": "業種",
-  "事業内容": "事業内容",
-  "業界": "業界",
-  "メモ": "メモ",
+type RepresentativeNameInspectionPreviewChange = {
+  rowId: string;
+  company: string | null;
+  fieldLabel: string;
+  beforeValue: string | null;
+  afterValue: string | null;
+  action: "update" | "delete";
+  reason: string;
 };
+
+type InspectionTargetRow = {
+  rowId: string;
+  company: string | null;
+  representativeName: string | null;
+};
+
+type ItemInspectionJobStatus = "running" | "paused" | "completed" | "error";
+
+type ItemInspectionJob = {
+  id: string;
+  status: ItemInspectionJobStatus;
+  createdAt: number;
+  updatedAt: number;
+  targetRows: InspectionTargetRow[];
+  currentIndex: number;
+  totalTargets: number;
+  processed: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  currentCompany: string | null;
+  currentInspectionValue: string | null;
+  currentInspectionFieldLabel: string | null;
+  inspectionPreviewChanges: RepresentativeNameInspectionPreviewChange[];
+  error: string | null;
+  pauseRequested: boolean;
+  cancelRequested: boolean;
+};
+
+const itemInspectionJobs = new Map<string, ItemInspectionJob>();
+const JOB_TTL_MS = 1000 * 60 * 30;
 
 async function ensureMasterDataIdColumn(
   client: { query: (sql: string) => Promise<unknown> }
@@ -210,64 +161,10 @@ async function ensureMasterDataIdColumn(
   `);
 }
 
-function hasExactCsvHeaders(headerRow: string[]) {
-  return (
-    headerRow.length === CSV_HEADER_COLUMNS.length &&
-    CSV_HEADER_COLUMNS.every((column, index) => headerRow[index] === column)
-  );
-}
-
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-
-    if (char === `"`) {
-      if (inQuotes && text[i + 1] === `"`) {
-        cell += `"`;
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (!inQuotes && char === ",") {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
-
-    if (!inQuotes && (char === "\n" || char === "\r")) {
-      if (char === "\r" && text[i + 1] === "\n") {
-        i++;
-      }
-      row.push(cell);
-      if (row.some((value) => value !== "")) {
-        rows.push(row);
-      }
-      row = [];
-      cell = "";
-      continue;
-    }
-
-    cell += char;
-  }
-
-  row.push(cell);
-  if (row.some((value) => value !== "")) {
-    rows.push(row);
-  }
-
-  return rows;
-}
-
-function normalizeHeader(value: string) {
-  return value.replace(/^\uFEFF/, "").trim();
+function scheduleJobCleanup(jobId: string, delayMs = JOB_TTL_MS) {
+  setTimeout(() => {
+    itemInspectionJobs.delete(jobId);
+  }, delayMs);
 }
 
 function parseFilterModels(searchParams: URLSearchParams) {
@@ -290,28 +187,6 @@ function parseAdvancedFilters(searchParams: URLSearchParams) {
   } catch {
     return {} as AdvancedFilters;
   }
-}
-
-function isRepresentativeNameEmptyFilter(searchParams: URLSearchParams) {
-  const filterModels = parseFilterModels(searchParams);
-  const model = filterModels.representative_name;
-
-  if (!model) return false;
-
-  if (model.conditionType === "is_empty") {
-    return true;
-  }
-
-  if (
-    model.valueFilterEnabled &&
-    Array.isArray(model.selectedValues) &&
-    model.selectedValues.length === 1 &&
-    model.selectedValues[0] === ""
-  ) {
-    return true;
-  }
-
-  return false;
 }
 
 const PREFECTURE_TO_REGION = {
@@ -403,7 +278,7 @@ function resolveIndustryParent(bigIndustry: string) {
   if (/電気|ガス|熱供給|水道/.test(value))
     return "電気・ガス・熱供給・水道業";
   if (/情報|通信|IT|ソフトウェア/.test(value)) return "情報通信業";
-  if (/運輸|郵便|物流|倉庫|運送/.test(value)) return "運輸業、郵便業";
+  if (/運輸|郵便|物流|運送/.test(value)) return "運輸業、郵便業";
   if (/卸売|小売|販売/.test(value)) return "卸売業、小売業";
   if (/金融|保険/.test(value)) return "金融業、保険業";
   if (/不動産|賃貸/.test(value)) return "不動産業、物品賃貸業";
@@ -605,7 +480,7 @@ function addAdvancedFilterClauses(
   filters: AdvancedFilters
 ) {
   const companyKeyword = String(filters.companyName?.keyword ?? "").trim();
-  if(companyKeyword !== "") {
+  if (companyKeyword !== "") {
     params.push(`%${companyKeyword}%`);
     where.push(`COALESCE("企業名"::text, '') ILIKE $${params.length}`);
   }
@@ -854,25 +729,6 @@ function buildWhereClause(
   return { whereSql, params };
 }
 
-function buildOrderBy(searchParams: URLSearchParams) {
-  const sortKey = searchParams.get("sortKey") as FilterKey | null;
-  const sortDirection = searchParams.get("sortDirection") as
-    | SortDirection
-    | null;
-
-  if (
-    sortKey &&
-    sortDirection &&
-    FILTER_COLUMN_MAP[sortKey] &&
-    (sortDirection === "asc" || sortDirection === "desc")
-  ) {
-    const sortColumnText = `COALESCE(${FILTER_COLUMN_MAP[sortKey]}::text, '')`;
-    return `ORDER BY ${sortColumnText} ${sortDirection.toUpperCase()}, COALESCE("企業名"::text, ''), COALESCE("住所"::text, '')`;
-  }
-
-  return `ORDER BY COALESCE("企業名"::text, ''), COALESCE("住所"::text, '')`;
-}
-
 function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
   const searchParams = new URLSearchParams();
 
@@ -923,13 +779,6 @@ function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
 
   return searchParams;
 }
-
-type RepresentativeNameDeleteCandidate = {
-  rowId: string;
-  company: string | null;
-  representativeName: string | null;
-  reason: string;
-};
 
 const REPRESENTATIVE_TITLE_REGEX =
   /代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー|CEO|COO|CFO|CTO|CMO/gu;
@@ -1325,7 +1174,7 @@ const REPRESENTATIVE_SUFFIX_TITLE_TRIM_REGEX =
 
 const REPRESENTATIVE_NOISE_TOKEN_REGEX =
   /^(?:男性|女性|男|女|担当|担当者|責任者|窓口|受付|御中|様|さん|氏|代表|社長|会長)$/u;
-
+  
 function trimRepresentativeAffixes(value: string) {
   let text = value.normalize("NFKC").trim();
   let previous = "";
@@ -1585,13 +1434,52 @@ function inspectRepresentativeNameValue(value: string | null) {
   };
 }
 
-async function handleRepresentativeNameInspectionPreview(
+function getJobSnapshot(job: ItemInspectionJob) {
+  const processingCount =
+    job.status === "running" && job.currentCompany ? 1 : 0;
+
+  const deleteCount = job.inspectionPreviewChanges.filter(
+    (row) => row.action === "delete"
+  ).length;
+
+  return {
+    ok: true,
+    jobId: job.id,
+    jobStatus: job.status,
+    totalTargets: job.totalTargets,
+    processed: job.processed,
+    updated: job.updated,
+    skipped: job.skipped,
+    failed: job.failed,
+    currentCompany: job.currentCompany,
+    currentInspectionValue: job.currentInspectionValue,
+    currentInspectionFieldLabel: job.currentInspectionFieldLabel,
+    remainingCount: Math.max(
+      job.totalTargets - job.processed - processingCount,
+      0
+    ),
+    inspectionPreviewChanges: job.inspectionPreviewChanges,
+    error: job.error ?? undefined,
+    paused: job.status === "paused",
+    completed: job.status === "completed",
+    message:
+      job.status === "completed"
+        ? deleteCount > 0
+          ? `${deleteCount.toLocaleString()}件の削除候補を抽出しました`
+          : "削除候補はありませんでした"
+        : job.status === "paused"
+        ? "項目精査を中断しました"
+        : undefined,
+  };
+}
+
+async function fetchInspectionTargets(
   payload: Record<string, unknown>
-) {
+): Promise<InspectionTargetRow[]> {
+  await dbReady;
   const client = await pool.connect();
 
   try {
-    await dbReady;
     await ensureMasterDataIdColumn(client);
 
     const inspectionScope =
@@ -1608,7 +1496,7 @@ async function handleRepresentativeNameInspectionPreview(
         ? `${whereSql} AND ${buildNotBlankCheckClause(`"代表者名"`)}`
         : `WHERE ${buildNotBlankCheckClause(`"代表者名"`)} `;
 
-    const targetRes = await client.query(
+    const res = await client.query(
       `
         SELECT
           id,
@@ -1621,104 +1509,342 @@ async function handleRepresentativeNameInspectionPreview(
       params
     );
 
-    const deleteCandidates: RepresentativeNameDeleteCandidate[] = [];
-
-      targetRes.rows.forEach((row) => {
-        const rowId = String(row.id ?? "");
-        const company =
-          typeof row.company === "string" ? row.company : null;
-        const representativeName =
-          typeof row.representative_name === "string"
-            ? row.representative_name
-            : null;
-
-        const result = inspectRepresentativeNameValue(representativeName);
-
-        if (result.shouldDelete) {
-          deleteCandidates.push({
-            rowId,
-            company,
-            representativeName,
-            reason: result.reason,
-          });
-        }
-      });
-
-      return NextResponse.json({
-        ok: true,
-        updated: 0,
-        inspectionDeleteCandidates: deleteCandidates,
-        message:
-          deleteCandidates.length > 0
-            ? `${deleteCandidates.length.toLocaleString()}件を削除候補として抽出しました`
-            : "削除候補はありませんでした",
-      });
-    } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {}
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "代表者名精査でエラーが発生しました",
-      },
-      { status: 500 }
-    );
+    return res.rows.map((row) => ({
+      rowId: String(row.id ?? ""),
+      company: typeof row.company === "string" ? row.company : null,
+      representativeName:
+        typeof row.representative_name === "string"
+          ? row.representative_name
+          : null,
+    }));
   } finally {
     client.release();
   }
 }
 
-async function handleRepresentativeNameInspectionDelete(
-  payload: Record<string, unknown>
-) {
+async function processItemInspectionJob(jobId: string) {
+  while (true) {
+    const job = itemInspectionJobs.get(jobId);
+    if (!job) return;
+
+    if (job.cancelRequested) {
+      itemInspectionJobs.delete(jobId);
+      return;
+    }
+
+    if (job.pauseRequested) {
+      job.status = "paused";
+      job.currentCompany = null;
+      job.currentInspectionValue = null;
+      job.currentInspectionFieldLabel = "代表者名";
+      job.updatedAt = Date.now();
+      scheduleJobCleanup(job.id);
+      return;
+    }
+
+    if (job.currentIndex >= job.targetRows.length) {
+      job.status = "completed";
+      job.currentCompany = null;
+      job.currentInspectionValue = null;
+      job.currentInspectionFieldLabel = "代表者名";
+      job.updatedAt = Date.now();
+      scheduleJobCleanup(job.id);
+      return;
+    }
+
+    const row = job.targetRows[job.currentIndex];
+
+    job.currentCompany = row.company;
+    job.currentInspectionValue = row.representativeName;
+    job.currentInspectionFieldLabel = "代表者名";
+    job.updatedAt = Date.now();
+
+    try {
+      const result = inspectRepresentativeNameValue(row.representativeName);
+
+    if (result.shouldDelete) {
+        job.inspectionPreviewChanges.push({
+          rowId: row.rowId,
+          company: row.company,
+          fieldLabel: "代表者名",
+          beforeValue: row.representativeName,
+          afterValue: null,
+          action: "delete",
+          reason: result.reason,
+        });
+      } else {
+        job.skipped += 1;
+      }
+    } catch (error) {
+      job.failed += 1;
+      job.error =
+        error instanceof Error
+          ? error.message
+          : "項目精査中にエラーが発生しました";
+    } finally {
+      job.processed += 1;
+      job.currentIndex += 1;
+      job.updatedAt = Date.now();
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+async function handleStartJob(payload: Record<string, unknown>) {
+  const selectedFields = Array.isArray(payload.selectedFields)
+    ? payload.selectedFields.map((value) => String(value ?? ""))
+    : [];
+
+  const methodSelections =
+    payload.methodSelections && typeof payload.methodSelections === "object"
+      ? (payload.methodSelections as Record<string, unknown>)
+      : {};
+
+  if (
+    !(
+      selectedFields.length === 1 &&
+      selectedFields[0] === "representative_name"
+    )
+  ) {
+    return NextResponse.json(
+      { ok: false, error: "現在は代表者名のみ項目精査に対応しています" },
+      { status: 400 }
+    );
+  }
+
+  if (methodSelections.representative_name_remove_non_name !== true) {
+    return NextResponse.json(
+      { ok: false, error: "精査方法が選択されていません" },
+      { status: 400 }
+    );
+  }
+
+  const targetRows = await fetchInspectionTargets(payload);
+
+  if (targetRows.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      message: "対象がありませんでした",
+      totalTargets: 0,
+      processed: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      currentCompany: null,
+      currentInspectionValue: null,
+      currentInspectionFieldLabel: "代表者名",
+      remainingCount: 0,
+      inspectionPreviewChanges: [],
+    });
+  }
+
+  const jobId = randomUUID();
+  const now = Date.now();
+
+  const job: ItemInspectionJob = {
+    id: jobId,
+    status: "running",
+    createdAt: now,
+    updatedAt: now,
+    targetRows,
+    currentIndex: 0,
+    totalTargets: targetRows.length,
+    processed: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    currentCompany: null,
+    currentInspectionValue: null,
+    currentInspectionFieldLabel: "代表者名",
+    inspectionPreviewChanges: [],
+    error: null,
+    pauseRequested: false,
+    cancelRequested: false,
+  };
+
+  itemInspectionJobs.set(jobId, job);
+
+  queueMicrotask(() => {
+    void processItemInspectionJob(jobId);
+  });
+
+  return NextResponse.json(getJobSnapshot(job));
+}
+
+async function handleGetJobStatus(payload: Record<string, unknown>) {
+  const jobId = String(payload.jobId ?? "").trim();
+
+  if (!jobId) {
+    return NextResponse.json(
+      { ok: false, error: "jobIdが指定されていません" },
+      { status: 400 }
+    );
+  }
+
+  const job = itemInspectionJobs.get(jobId);
+
+  if (!job) {
+    return NextResponse.json(
+      { ok: false, error: "項目精査ジョブが見つかりません" },
+      { status: 404 }
+    );
+  }
+
+  return NextResponse.json(getJobSnapshot(job));
+}
+
+async function handlePauseJob(payload: Record<string, unknown>) {
+  const jobId = String(payload.jobId ?? "").trim();
+
+  if (!jobId) {
+    return NextResponse.json(
+      { ok: false, error: "jobIdが指定されていません" },
+      { status: 400 }
+    );
+  }
+
+  const job = itemInspectionJobs.get(jobId);
+
+  if (!job) {
+    return NextResponse.json(
+      { ok: false, error: "項目精査ジョブが見つかりません" },
+      { status: 404 }
+    );
+  }
+
+  if (job.status === "completed") {
+    return NextResponse.json(getJobSnapshot(job));
+  }
+
+  if (job.status === "paused") {
+    return NextResponse.json(getJobSnapshot(job));
+  }
+
+  job.pauseRequested = true;
+  job.updatedAt = Date.now();
+
+  return NextResponse.json({
+    ...getJobSnapshot(job),
+    message: "中断指示を受け付けました",
+  });
+}
+
+async function handleCancelJob(payload: Record<string, unknown>) {
+  const jobId = String(payload.jobId ?? "").trim();
+
+  if (!jobId) {
+    return NextResponse.json(
+      { ok: false, error: "jobIdが指定されていません" },
+      { status: 400 }
+    );
+  }
+
+  const job = itemInspectionJobs.get(jobId);
+
+  if (!job) {
+    return NextResponse.json({
+      ok: true,
+      message: "すでに中止されています",
+    });
+  }
+
+  job.cancelRequested = true;
+  job.updatedAt = Date.now();
+
+  return NextResponse.json({
+    ok: true,
+    message: "項目精査を中止しました",
+  });
+}
+
+async function handleApplyPreviewChanges(payload: Record<string, unknown>) {
+  const changes = Array.isArray(payload.changes)
+    ? payload.changes
+        .filter(
+          (
+            value
+          ): value is {
+            rowId: string;
+            action: "update" | "delete";
+            afterValue: string | null;
+          } =>
+            typeof value === "object" &&
+            value !== null &&
+            typeof (value as { rowId?: unknown }).rowId === "string" &&
+            ((value as { action?: unknown }).action === "update" ||
+              (value as { action?: unknown }).action === "delete")
+        )
+        .map((value) => ({
+          rowId: String(value.rowId).trim(),
+          action: value.action,
+          afterValue:
+            value.afterValue == null ? null : String(value.afterValue),
+        }))
+        .filter((value) => value.rowId !== "")
+    : [];
+
+  if (changes.length === 0) {
+    return NextResponse.json(
+      { ok: false, error: "反映する項目が選択されていません" },
+      { status: 400 }
+    );
+  }
+
   const client = await pool.connect();
 
   try {
     await dbReady;
     await ensureMasterDataIdColumn(client);
-
-    const rowIds = Array.isArray(payload.rowIds)
-      ? payload.rowIds
-          .map((rowId) => String(rowId ?? "").trim())
-          .filter((rowId) => rowId !== "")
-      : [];
-
-    if (rowIds.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "削除候補が選択されていません" },
-        { status: 400 }
-      );
-    }
-
     await client.query("BEGIN");
 
-    const result = await client.query(
-      `
-        WITH updated AS (
+    let applied = 0;
+    let updatedCount = 0;
+    let deletedCount = 0;
+
+    for (const change of changes) {
+      if (change.action === "update") {
+        const nextValue = (change.afterValue ?? "").trim();
+
+        if (nextValue === "") {
+          continue;
+        }
+
+        await client.query(
+          `
+            UPDATE public.master_data
+            SET "代表者名" = $1
+            WHERE id = $2::bigint
+          `,
+          [nextValue, change.rowId]
+        );
+
+        applied += 1;
+        updatedCount += 1;
+        continue;
+      }
+
+      await client.query(
+        `
           UPDATE public.master_data
           SET "代表者名" = NULL
-          WHERE id = ANY($1::bigint[])
-          RETURNING 1
-        )
-        SELECT COUNT(*)::int AS deleted_count
-        FROM updated
-      `,
-      [rowIds]
-    );
+          WHERE id = $1::bigint
+        `,
+        [change.rowId]
+      );
+
+      applied += 1;
+      deletedCount += 1;
+    }
 
     await client.query("COMMIT");
 
-    const deleted = result.rows[0]?.deleted_count ?? 0;
-
     return NextResponse.json({
       ok: true,
-      deleted,
-      message: `${deleted.toLocaleString()}件の代表者名を削除しました`,
+      applied,
+      updated: updatedCount,
+      deleted: deletedCount,
+      message: `${applied.toLocaleString()}件を反映しました（更新 ${updatedCount.toLocaleString()}件 / 削除 ${deletedCount.toLocaleString()}件）`,
     });
   } catch (error) {
     try {
@@ -1731,956 +1857,55 @@ async function handleRepresentativeNameInspectionDelete(
         error:
           error instanceof Error
             ? error.message
-            : "削除候補反映でエラーが発生しました",
+            : "精査結果の反映でエラーが発生しました",
       },
       { status: 500 }
     );
   } finally {
     client.release();
   }
-}
-
-async function handleReadRequest(searchParams: URLSearchParams) {
-  try {
-    await dbReady;
-    const valuesFor = searchParams.get("valuesFor") as FilterKey | null;
-    const advancedValuesFor = searchParams.get("advancedValuesFor");
-
-    if (advancedValuesFor === "prefecture") {
-      const { whereSql, params } = buildWhereClause(searchParams);
-
-      const sql = `
-        SELECT
-          prefecture,
-          city,
-          COUNT(*)::int AS count
-        FROM (
-          SELECT
-            ${PREFECTURE_EXPR} AS prefecture,
-            ${CITY_EXPR} AS city
-          FROM public.master_data
-          ${whereSql}
-        ) src
-        WHERE prefecture IS NOT NULL
-        GROUP BY prefecture, city
-        ORDER BY prefecture ASC, city ASC
-      `;
-
-      const res = await pool.query(sql, params);
-      const cityMap = new Map<string, Set<string>>();
-      const prefectureCountMap = new Map<string, number>();
-      const cityCountMap = new Map<string, Record<string, number>>();
-
-      res.rows.forEach((row) => {
-        const prefecture =
-          typeof row.prefecture === "string" ? row.prefecture.trim() : "";
-        const city = typeof row.city === "string" ? row.city.trim() : "";
-        const count = Number(row.count ?? 0);
-
-        if (!prefecture) return;
-
-        prefectureCountMap.set(
-          prefecture,
-          (prefectureCountMap.get(prefecture) ?? 0) + count
-        );
-
-        if (!cityMap.has(prefecture)) {
-          cityMap.set(prefecture, new Set<string>());
-        }
-
-        if (!cityCountMap.has(prefecture)) {
-          cityCountMap.set(prefecture, {});
-        }
-
-        if (city) {
-          cityMap.get(prefecture)?.add(city);
-          cityCountMap.get(prefecture)![city] =
-            (cityCountMap.get(prefecture)?.[city] ?? 0) + count;
-        }
-      });
-
-      const items = PREFECTURE_NAMES.filter((prefecture) =>
-        prefectureCountMap.has(prefecture)
-      ).map((prefecture) => ({
-        region: PREFECTURE_TO_REGION[prefecture],
-        prefecture,
-        prefectureCount: prefectureCountMap.get(prefecture) ?? 0,
-        cities: Array.from(cityMap.get(prefecture) ?? []).sort(),
-        cityCounts: cityCountMap.get(prefecture) ?? {},
-      }));
-
-      return NextResponse.json({
-        ok: true,
-        regions: Array.from(new Set(items.map((item) => item.region))),
-        prefectures: items.map((item) => item.prefecture),
-        items,
-      });
-    }
-
-    if (advancedValuesFor === "industry") {
-      const { whereSql, params } = buildWhereClause(searchParams);
-
-      const sql = `
-        SELECT
-          ${BIG_INDUSTRY_TEXT} AS big_industry,
-          ${SMALL_INDUSTRY_TEXT} AS small_industry,
-          COUNT(*)::int AS count
-        FROM public.master_data
-        ${whereSql}
-        GROUP BY 1, 2
-      `;
-
-      const res = await pool.query(sql, params);
-      const smallMap = new Map<string, Set<string>>();
-      const bigCountMap = new Map<string, number>();
-      const smallCountMap = new Map<string, Record<string, number>>();
-
-      res.rows.forEach((row) => {
-        const bigIndustry =
-          typeof row.big_industry === "string" ? row.big_industry.trim() : "";
-        const smallIndustry =
-          typeof row.small_industry === "string"
-            ? row.small_industry.trim()
-            : "";
-        const count = Number(row.count ?? 0);
-
-        if (!bigIndustry) return;
-
-        bigCountMap.set(
-          bigIndustry,
-          (bigCountMap.get(bigIndustry) ?? 0) + count
-        );
-
-        if (!smallMap.has(bigIndustry)) {
-          smallMap.set(bigIndustry, new Set<string>());
-        }
-
-        if (!smallCountMap.has(bigIndustry)) {
-          smallCountMap.set(bigIndustry, {});
-        }
-
-        if (smallIndustry) {
-          smallMap.get(bigIndustry)?.add(smallIndustry);
-          smallCountMap.get(bigIndustry)![smallIndustry] =
-            (smallCountMap.get(bigIndustry)?.[smallIndustry] ?? 0) + count;
-        }
-      });
-
-      const items = Array.from(smallMap.keys())
-        .map((bigIndustry) => ({
-          industryParent: resolveIndustryParent(bigIndustry),
-          bigIndustry,
-          bigIndustryCount: bigCountMap.get(bigIndustry) ?? 0,
-          smallIndustries: Array.from(smallMap.get(bigIndustry) ?? []).sort((a, b) =>
-            a.localeCompare(b, "ja")
-          ),
-          smallIndustryCounts: smallCountMap.get(bigIndustry) ?? {},
-        }))
-        .sort((a, b) => {
-          const parentIndexA = INDUSTRY_PARENT_SORT_ORDER.indexOf(
-            a.industryParent as never
-          );
-          const parentIndexB = INDUSTRY_PARENT_SORT_ORDER.indexOf(
-            b.industryParent as never
-          );
-
-          if (parentIndexA !== parentIndexB) {
-            return parentIndexA - parentIndexB;
-          }
-
-          return a.bigIndustry.localeCompare(b.bigIndustry, "ja");
-        });
-
-      return NextResponse.json({
-        ok: true,
-        bigIndustries: items.map((item) => item.bigIndustry),
-        smallIndustries: Array.from(
-          new Set(items.flatMap((item) => item.smallIndustries))
-        ).sort(),
-        items,
-      });
-    }
-
-    if (advancedValuesFor === "established") {
-      const { whereSql, params } = buildWhereClause(searchParams);
-
-      const sql = `
-        SELECT DISTINCT year_month
-        FROM (
-          SELECT ${ESTABLISHED_YM_EXPR} AS year_month
-          FROM public.master_data
-          ${whereSql}
-        ) src
-        WHERE year_month IS NOT NULL
-        ORDER BY year_month ASC
-      `;
-
-      const res = await pool.query(sql, params);
-
-      const yearMonths = res.rows
-        .map((row) =>
-          typeof row.year_month === "string" ? row.year_month.trim() : ""
-        )
-        .filter((value) => value !== "");
-
-      const monthsByYear: Record<string, string[]> = {};
-
-      yearMonths.forEach((ym) => {
-        const year = ym.slice(0, 4);
-        const month = ym.slice(4, 6);
-
-        if (!monthsByYear[year]) {
-          monthsByYear[year] = [];
-        }
-
-        if (!monthsByYear[year].includes(month)) {
-          monthsByYear[year].push(month);
-        }
-      });
-
-      Object.keys(monthsByYear).forEach((year) => {
-        monthsByYear[year].sort();
-      });
-
-      return NextResponse.json({
-        ok: true,
-        years: Object.keys(monthsByYear).sort(),
-        monthsByYear,
-        yearMonths,
-      });
-    }
-
-    if (advancedValuesFor === "tag") {
-      const { whereSql, params } = buildWhereClause(searchParams);
-      const tagWhereSql = whereSql
-        ? `${whereSql} AND NULLIF(BTRIM(tag_value), '') IS NOT NULL`
-        : `WHERE NULLIF(BTRIM(tag_value), '') IS NOT NULL`;
-
-      const sql = `
-        SELECT
-          BTRIM(tag_value) AS tag,
-          ${TAG_PARENT_CASE_FROM_SPLIT} AS parent,
-          COUNT(*)::int AS count
-        FROM public.master_data
-        CROSS JOIN LATERAL regexp_split_to_table(COALESCE("新規登録タグ"::text, ''), E'\\s*;\\s*') AS tag_value
-        ${tagWhereSql}
-        GROUP BY 1, 2
-        ORDER BY parent ASC, tag ASC
-      `;
-
-      const res = await pool.query(sql, params);
-      const tagsByParent: Record<string, string[]> = {};
-      const tagCountsByParent: Record<string, Record<string, number>> = {};
-      const parentCountMap = new Map<string, number>();
-
-      res.rows.forEach((row) => {
-        const parent = typeof row.parent === "string" ? row.parent.trim() : "";
-        const tag = typeof row.tag === "string" ? row.tag.trim() : "";
-        const count = Number(row.count ?? 0);
-
-        if (!parent || !tag) return;
-
-        if (!tagsByParent[parent]) {
-          tagsByParent[parent] = [];
-        }
-
-        if (!tagCountsByParent[parent]) {
-          tagCountsByParent[parent] = {};
-        }
-
-        if (!tagsByParent[parent].includes(tag)) {
-          tagsByParent[parent].push(tag);
-        }
-
-        tagCountsByParent[parent][tag] =
-          (tagCountsByParent[parent][tag] ?? 0) + count;
-
-        parentCountMap.set(
-          parent,
-          (parentCountMap.get(parent) ?? 0) + count
-        );
-      });
-
-      Object.keys(tagsByParent).forEach((parent) => {
-        tagsByParent[parent].sort();
-      });
-
-      const parents = Object.keys(tagsByParent).sort();
-
-      return NextResponse.json({
-        ok: true,
-        parents,
-        tags: Array.from(
-          new Set(res.rows.map((row) => row.tag).filter(Boolean))
-        ).sort(),
-        items: parents.map((parent) => ({
-          parent,
-          parentCount: parentCountMap.get(parent) ?? 0,
-          tags: tagsByParent[parent],
-          tagCounts: tagCountsByParent[parent] ?? {},
-        })),
-      });
-    }
-
-    if (valuesFor && FILTER_COLUMN_MAP[valuesFor]) {
-      const { whereSql, params } = buildWhereClause(searchParams, valuesFor);
-
-      const valueSearch = (searchParams.get("valueSearch") || "").trim();
-      const valueOffset = Math.max(
-        Number(searchParams.get("valueOffset") || "0"),
-        0
-      );
-      const valueLimit = Math.min(
-        Math.max(Number(searchParams.get("valueLimit") || "200"), 1),
-        1000
-      );
-      const currentValueFilterEnabled =
-        searchParams.get("currentValueFilterEnabled") === "1";
-
-      let currentSelectedValues: string[] = [];
-      try {
-        const parsed = JSON.parse(
-          searchParams.get("currentSelectedValues") || "[]"
-        );
-
-        if (Array.isArray(parsed)) {
-          currentSelectedValues = parsed
-            .map((value) => String(value ?? ""))
-            .filter((value, index, self) => self.indexOf(value) === index);
-        }
-      } catch {
-        currentSelectedValues = [];
-      }
-
-      const valueColumnText = `COALESCE(${FILTER_COLUMN_MAP[valuesFor]}::text, '')`;
-
-      const allGroupedValuesSql = `
-        SELECT
-          value,
-          COUNT(*)::int AS count
-        FROM (
-          SELECT ${valueColumnText} AS value
-          FROM public.master_data
-          ${whereSql}
-        ) src
-        GROUP BY value
-      `;
-
-      const totalItemCountSql = `
-        SELECT
-          COALESCE(SUM(count), 0)::int AS total_item_count
-        FROM (${allGroupedValuesSql}) grouped_values
-        WHERE NULLIF(BTRIM(value), '') IS NOT NULL
-      `;
-
-      const totalItemCountRes = await pool.query(totalItemCountSql, params);
-      const totalItemCount = Number(
-        totalItemCountRes.rows[0]?.total_item_count ?? 0
-      );
-
-      let checkedItemCount = totalItemCount;
-
-      if (currentValueFilterEnabled) {
-        const selectedNonEmptyValues = currentSelectedValues.filter(
-          (value) => value.trim() !== ""
-        );
-
-        if (selectedNonEmptyValues.length === 0) {
-          checkedItemCount = 0;
-        } else {
-          const checkedItemParams = [...params, selectedNonEmptyValues];
-
-          const checkedItemCountSql = `
-            SELECT
-              COALESCE(SUM(count), 0)::int AS checked_item_count
-            FROM (${allGroupedValuesSql}) grouped_values
-            WHERE value = ANY($${checkedItemParams.length}::text[])
-              AND NULLIF(BTRIM(value), '') IS NOT NULL
-          `;
-
-          const checkedItemCountRes = await pool.query(
-            checkedItemCountSql,
-            checkedItemParams
-          );
-
-          checkedItemCount = Number(
-            checkedItemCountRes.rows[0]?.checked_item_count ?? 0
-          );
-        }
-      }
-
-      const groupedParams = [...params];
-      const groupedWhereParts: string[] = [];
-
-      if (valueSearch !== "") {
-        groupedParams.push(`%${valueSearch}%`);
-        groupedWhereParts.push(`value ILIKE $${groupedParams.length}`);
-      }
-
-      const groupedWhereSql = groupedWhereParts.length
-        ? `WHERE ${groupedWhereParts.join(" AND ")}`
-        : "";
-
-      const groupedValuesSql = `
-        SELECT
-          value,
-          COUNT(*)::int AS count
-        FROM (
-          SELECT ${valueColumnText} AS value
-          FROM public.master_data
-          ${whereSql}
-        ) src
-        ${groupedWhereSql}
-        GROUP BY value
-      `;
-
-      const summarySql = `
-        SELECT
-          COUNT(*)::int AS total_count,
-          COALESCE(SUM(count), 0)::int AS matched_count
-        FROM (${groupedValuesSql}) grouped_values
-      `;
-
-      const summaryRes = await pool.query(summarySql, groupedParams);
-      const valueTotal = Number(summaryRes.rows[0]?.total_count ?? 0);
-      const valueMatchedCount = Number(summaryRes.rows[0]?.matched_count ?? 0);
-
-      const valuesQueryParams = [...groupedParams, valueLimit, valueOffset];
-
-      const valuesSql = `
-        SELECT
-          value,
-          count
-        FROM (${groupedValuesSql}) grouped_values
-        ORDER BY value ASC
-        LIMIT $${valuesQueryParams.length - 1}
-        OFFSET $${valuesQueryParams.length}
-      `;
-
-      const valuesRes = await pool.query(valuesSql, valuesQueryParams);
-
-      const values = valuesRes.rows.map((row) => row.value ?? "");
-      const valueCounts = Object.fromEntries(
-        valuesRes.rows.map((row) => [row.value ?? "", Number(row.count ?? 0)])
-      );
-
-      let allValues: string[] | undefined = undefined;
-
-      if (!currentValueFilterEnabled) {
-        const allValuesSql = `
-          SELECT
-            value
-          FROM (${allGroupedValuesSql}) grouped_values
-          ORDER BY value ASC
-        `;
-
-        const allValuesRes = await pool.query(allValuesSql, params);
-        allValues = allValuesRes.rows.map((row) => row.value ?? "");
-      }
-
-      return NextResponse.json({
-        ok: true,
-        values,
-        allValues,
-        valueCounts,
-        valueTotal,
-        valueMatchedCount,
-        totalItemCount,
-        checkedItemCount,
-        valueOffset,
-        valueLimit,
-        hasMoreValues: valueOffset + values.length < valueTotal,
-      });
-    }
-
-    const page = Math.max(Number(searchParams.get("page") || "1"), 1);
-    const limitParam = searchParams.get("limit") || "200";
-    const isAll = limitParam === "all";
-    const limit = isAll ? null : Math.max(Number(limitParam), 1);
-
-    const { whereSql, params } = buildWhereClause(searchParams);
-
-    const totalSql = `
-      SELECT COUNT(*)::int AS total_count
-      FROM public.master_data
-      ${whereSql}
-    `;
-
-    const totalRes = await pool.query(totalSql, params);
-    const total = Number(totalRes.rows[0]?.total_count ?? 0);
-
-    let rowsSql = `
-      SELECT
-        "企業名" AS company,
-        "郵便番号" AS zipcode,
-        "住所" AS address,
-        "大業種名" AS big_industry,
-        "小業種名" AS small_industry,
-        "企業名（かな）" AS company_kana,
-        "企業概要" AS summary,
-        "企業サイトURL" AS website_url,
-        "問い合わせフォームURL" AS form_url,
-        "電話番号" AS phone,
-        "FAX番号" AS fax,
-        "メールアドレス" AS email,
-        "設立年月" AS established_date,
-        "代表者名" AS representative_name,
-        "代表者役職" AS representative_title,
-        "資本金" AS capital,
-        "従業員数" AS employee_count,
-        "従業員数年度" AS employee_count_year,
-        "前年売上高" AS previous_sales,
-        "直近売上高" AS latest_sales,
-        "決算月" AS closing_month,
-        "事業所数" AS office_count,
-        "新規登録タグ" AS tag,
-        "業種" AS business_type,
-        "事業内容" AS business_content,
-        "業界" AS industry_category,
-        "メモ" AS memo
-      FROM public.master_data
-      ${whereSql}
-      ${buildOrderBy(searchParams)}
-    `;
-
-    const queryParams = [...params];
-
-    if (!isAll) {
-      const offset = (page - 1) * (limit || 200);
-      queryParams.push(limit || 200, offset);
-      rowsSql += ` LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`;
-    }
-
-    const rowsRes = await pool.query(rowsSql, queryParams);
-    const rows = rowsRes.rows;
-
-    return NextResponse.json({
-      ok: true,
-      total,
-      page: isAll ? 1 : page,
-      limit: isAll ? "all" : limit,
-      totalPages: isAll ? 1 : Math.max(Math.ceil(total / (limit || 200)), 1),
-      rows: rows,
-    });
-  } catch (error) {
-    console.error("API ERROR:", error);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "不明なエラー",
-      },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  return handleReadRequest(searchParams);
 }
 
 export async function POST(req: NextRequest) {
-  const contentType = req.headers.get("content-type") || "";
-
-  if (contentType.includes("application/json")) {
-    try {
-      await dbReady;
-      const payload = (await req.json()) as Record<string, unknown>;
-      const action = String(payload.action ?? "");
-
-      if (action === "read") {
-        const searchParams = buildSearchParamsFromReadPayload(payload);
-        return handleReadRequest(searchParams);
-      }
-
-      if (action === "preview_representative_name_item_inspection") {
-        return handleRepresentativeNameInspectionPreview(payload);
-      }
-
-      if (action === "apply_representative_name_item_inspection_delete") {
-        return handleRepresentativeNameInspectionDelete(payload);
-      }
-
-      return NextResponse.json(
-        { ok: false, error: "不正なJSONリクエストです" },
-        { status: 400 }
-      );
-    } catch (error) {
-      console.error("JSON API ERROR:", error);
-      return NextResponse.json(
-        {
-          ok: false,
-          error: error instanceof Error ? error.message : "不明なエラー",
-        },
-        { status: 500 }
-      );
-    }
-  }
-
-  const client = await pool.connect();
-
   try {
     await dbReady;
-    const formData = await req.formData();
-    const files = formData
-      .getAll("files")
-      .filter((item): item is File => item instanceof File);
+    const payload = (await req.json()) as Record<string, unknown>;
+    const action = String(payload.action ?? "");
 
-    const singleFile = formData.get("file");
-    if (files.length === 0 && singleFile instanceof File) {
-      files.push(singleFile);
+    if (action === "start_job") {
+      return handleStartJob(payload);
     }
 
-    const skipDuplicateCheck =
-      formData.get("skipDuplicateCheck") === "1";
-
-    if (files.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "CSVファイルが選択されていません" },
-        { status: 400 }
-      );
+    if (action === "get_job_status") {
+      return handleGetJobStatus(payload);
     }
 
-    const records: Record<(typeof CSV_HEADER_COLUMNS)[number], string | null>[] = [];
-
-    const invalidHeaderFiles: string[] = [];
-
-    for (const file of files) {
-      const text = (await file.text()).replace(/^\uFEFF/, "");
-      const rows = parseCsv(text);
-
-      if (rows.length < 2) {
-        continue;
-      }
-
-      const headerRow = rows[0].map((value) => normalizeHeader(value));
-
-      if (!hasExactCsvHeaders(headerRow)) {
-        invalidHeaderFiles.push(file.name);
-        continue;
-      }
-
-      const headerIndexMap = Object.fromEntries(
-        CSV_HEADER_COLUMNS.map((column, index) => [column, index])
-      ) as Record<(typeof CSV_HEADER_COLUMNS)[number], number>;
-
-      const fileRecords = rows
-        .slice(1)
-        .filter((row) => row.some((value) => value.trim() !== ""))
-        .map((row) => {
-          const record = Object.fromEntries(
-            CSV_HEADER_COLUMNS.map((column) => [column, null])
-          ) as Record<(typeof CSV_HEADER_COLUMNS)[number], string | null>;
-
-          CSV_HEADER_COLUMNS.forEach((column) => {
-            const value = row[headerIndexMap[column]] ?? "";
-            record[column] = value.trim() === "" ? null : value.trim();
-          });
-
-          return record;
-        });
-
-      records.push(...fileRecords);
+    if (action === "pause_job") {
+      return handlePauseJob(payload);
     }
 
-    if (invalidHeaderFiles.length > 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: `CSVヘッダーが一致しないファイルがあります: ${invalidHeaderFiles.join(", ")}`,
-        },
-        { status: 400 }
-      );
+    if (action === "cancel_job") {
+      return handleCancelJob(payload);
     }
 
-    if (records.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "CSVに取込対象データがありません" },
-        { status: 400 }
-      );
+    if (action === "apply_preview_changes") {
+      return handleApplyPreviewChanges(payload);
     }
-
-    let recordsToInsert = records;
-    let skipped = 0;
-
-    if (!skipDuplicateCheck) {
-      const csvCompanies = Array.from(
-        new Set(
-          records
-            .map((record) => record["企業名"]?.trim() ?? "")
-            .filter((company) => company !== "")
-        )
-      );
-
-      const existingCompanySet = new Set<string>();
-
-      if (csvCompanies.length > 0) {
-        const existingRes = await client.query(
-          `
-            SELECT "企業名"
-            FROM public.master_data
-            WHERE "企業名" = ANY($1::text[])
-          `,
-          [csvCompanies]
-        );
-
-        existingRes.rows.forEach((row) => {
-          const company =
-            typeof row["企業名"] === "string" ? row["企業名"].trim() : "";
-
-          if (company !== "") {
-            existingCompanySet.add(company);
-          }
-        });
-      }
-
-      const seenCsvCompanySet = new Set<string>();
-
-      recordsToInsert = records.filter((record) => {
-        const company = record["企業名"]?.trim() ?? "";
-
-        if (company === "") {
-          return true;
-        }
-
-        if (existingCompanySet.has(company)) {
-          return false;
-        }
-
-        if (seenCsvCompanySet.has(company)) {
-          return false;
-        }
-
-        seenCsvCompanySet.add(company);
-        return true;
-      });
-
-      skipped = records.length - recordsToInsert.length;
-    }
-
-    if (recordsToInsert.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        inserted: 0,
-        message: `0件を取り込みました（重複 ${skipped.toLocaleString()} 件をスキップ）`,
-      });
-    }
-
-    await client.query("BEGIN");
-
-    const batchSize = 300;
-
-    for (let i = 0; i < recordsToInsert.length; i += batchSize) {
-      const batch = recordsToInsert.slice(i, i + batchSize);
-      const values: (string | null)[] = [];
-
-      const placeholders = batch
-        .map((record) => {
-          const rowPlaceholders = DB_INSERT_COLUMNS.map((dbColumn) => {
-            const csvHeader = DB_INSERT_TO_CSV_HEADER[dbColumn];
-            values.push(record[csvHeader] ?? null);
-            return `$${values.length}`;
-          });
-          return `(${rowPlaceholders.join(", ")})`;
-        })
-        .join(", ");
-
-      const sql = `
-        INSERT INTO public.master_data (
-          ${DB_INSERT_COLUMNS.map((column) => `"${column}"`).join(", ")}
-        )
-        VALUES ${placeholders}
-      `;
-
-      await client.query(sql, values);
-    }
-
-    await client.query("COMMIT");
-
-    return NextResponse.json({
-      ok: true,
-      inserted: recordsToInsert.length,
-      message: skipDuplicateCheck
-        ? `${recordsToInsert.length.toLocaleString()}件を取り込みました`
-        : `${recordsToInsert.length.toLocaleString()}件を取り込みました（重複 ${skipped.toLocaleString()} 件をスキップ）`,
-    });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    console.error("CSV IMPORT ERROR:", error);
 
     return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : "CSV取込でエラーが発生しました",
-      },
-      { status: 500 }
+      { ok: false, error: "不正なactionです" },
+      { status: 400 }
     );
-  } finally {
-    client.release();
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  const client = await pool.connect();
-
-  try {
-    await dbReady;
-    const { searchParams } = new URL(req.url);
-    const deleteMode = searchParams.get("deleteMode");
-
-    await client.query("BEGIN");
-
-    if (deleteMode === "item") {
-      const deleteScope =
-        searchParams.get("deleteScope") === "all" ? "all" : "filtered";
-
-      const rawSelectedFields = searchParams.get("selectedFields");
-      let selectedFields: FilterKey[] = [];
-
-      if (rawSelectedFields) {
-        try {
-          const parsed = JSON.parse(rawSelectedFields);
-
-          if (Array.isArray(parsed)) {
-            selectedFields = parsed.filter(
-              (field): field is FilterKey =>
-                typeof field === "string" && field in FILTER_COLUMN_MAP
-            );
-          }
-        } catch {
-          selectedFields = [];
-        }
-      }
-
-      if (selectedFields.length === 0) {
-        await client.query("ROLLBACK");
-        return NextResponse.json(
-          { ok: false, error: "削除する項目が選択されていません" },
-          { status: 400 }
-        );
-      }
-
-      const { whereSql, params } =
-        deleteScope === "filtered"
-          ? buildWhereClause(searchParams)
-          : { whereSql: "", params: [] as (string | number)[] };
-
-      const setSql = selectedFields
-        .map((field) => `${FILTER_COLUMN_MAP[field]} = NULL`)
-        .join(", ");
-
-      const result = await client.query(
-        `
-          WITH updated AS (
-            UPDATE public.master_data
-            SET ${setSql}
-            ${whereSql}
-            RETURNING 1
-          )
-          SELECT COUNT(*)::int AS updated_count
-          FROM updated
-        `,
-        params
-      );
-
-      await client.query("COMMIT");
-
-      const updated = result.rows[0]?.updated_count ?? 0;
-
-      return NextResponse.json({
-        ok: true,
-        updated,
-        message:
-          deleteScope === "all"
-            ? `${updated.toLocaleString()}件の全てのリストから選択項目を削除しました`
-            : `${updated.toLocaleString()}件の現在絞り込んでいるリストから選択項目を削除しました`,
-      });
-    }
-
-    if (deleteMode === "list") {
-      const deleteScope =
-        searchParams.get("deleteScope") === "all" ? "all" : "filtered";
-
-      const { whereSql, params } =
-        deleteScope === "filtered"
-          ? buildWhereClause(searchParams)
-          : { whereSql: "", params: [] as (string | number)[] };
-
-      await ensureMasterDataIdColumn(client);
-
-      const result = await client.query(
-        `
-          WITH deleted AS (
-            DELETE FROM public.master_data
-            ${whereSql}
-            RETURNING 1
-          )
-          SELECT COUNT(*)::int AS deleted_count
-          FROM deleted
-        `,
-        params
-      );
-
-      await client.query("COMMIT");
-
-      const deleted = result.rows[0]?.deleted_count ?? 0;
-
-      return NextResponse.json({
-        ok: true,
-        deleted,
-        message:
-          deleteScope === "all"
-            ? `${deleted.toLocaleString()}件の全リストを削除しました`
-            : `${deleted.toLocaleString()}件の現在絞り込んでいるリストを削除しました`,
-      });
-    }
-
-    const result = await client.query(`
-      WITH duplicate_rows AS (
-        SELECT
-          id,
-          ROW_NUMBER() OVER (
-            PARTITION BY BTRIM("企業名"::text)
-            ORDER BY id
-          ) AS rn
-        FROM public.master_data
-        WHERE "企業名" IS NOT NULL
-          AND BTRIM("企業名"::text) <> ''
-      ),
-      deleted AS (
-        DELETE FROM public.master_data target
-        USING duplicate_rows dup
-        WHERE target.id = dup.id
-          AND dup.rn > 1
-        RETURNING 1
-      )
-      SELECT COUNT(*)::int AS deleted_count
-      FROM deleted
-    `);
-
-    await client.query("COMMIT");
-
-    const deleted = result.rows[0]?.deleted_count ?? 0;
-
-    return NextResponse.json({
-      ok: true,
-      deleted,
-      message: `${deleted.toLocaleString()}件の重複データを削除しました`,
-    });
   } catch (error) {
-    await client.query("ROLLBACK");
-
     return NextResponse.json(
       {
         ok: false,
         error:
           error instanceof Error
             ? error.message
-            : "削除処理でエラーが発生しました",
+            : "項目精査APIでエラーが発生しました",
       },
       { status: 500 }
     );
-  } finally {
-    client.release();
   }
 }
