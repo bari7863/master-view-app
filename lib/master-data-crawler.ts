@@ -118,6 +118,13 @@ const COMMON_CANDIDATE_PATHS = [
   "/company/overview.html",
   "/company/about/",
   "/company/data/",
+  "/company/numbers/",
+  "/company/numbers.html",
+  "/numbers/",
+  "/numbers/index.html",
+  "/recruit/",
+  "/recruit/data/",
+  "/recruit/company/",
   "/companyinfo.html",
   "/profile.html",
   "/about.html",
@@ -895,6 +902,393 @@ function uniqueNonEmpty(values: Array<string | null | undefined>) {
   return result;
 }
 
+type EmployeeCountContextHints = {
+  sourceCompany: string | null;
+  sourceAddress: string | null;
+  officeNames: string[];
+  prefecture: string | null;
+  city: string | null;
+};
+
+type EmployeeCountCandidate = {
+  value: string;
+  count: number;
+  year: number | null;
+  month: number | null;
+  yearMonth: number | null;
+  officeName: string | null;
+  prefecture: string | null;
+  city: string | null;
+  officeMatched: boolean;
+  prefectureMatched: boolean;
+  cityMatched: boolean;
+  consolidated: boolean;
+  standalone: boolean;
+  sourceScore: number;
+};
+
+const OFFICE_NAME_IN_TEXT_REGEX =
+  /[^\s　]{1,40}?(?:本社|本店|支社|支店|営業所|工場|事業所|センター)/g;
+
+function parseEmployeeCountNumber(value: string | null) {
+  if (!value) return null;
+  const matched = normalizeDigits(value).match(/([0-9][0-9,]*)\s*(?:名|人)/);
+  if (!matched?.[1]) return null;
+
+  const num = Number(matched[1].replace(/,/g, ""));
+  return Number.isFinite(num) ? num : null;
+}
+
+function extractPrefectureName(value: string | null) {
+  const normalized = normalizeDigits(normalizeSpace(value ?? ""));
+  if (!normalized) return null;
+
+  const matched = normalized.match(new RegExp(PREFECTURE_REGEX_SOURCE));
+  return matched?.[0] ? normalizeSpace(matched[0]) : null;
+}
+
+function extractCityName(value: string | null) {
+  const normalized = normalizeDigits(normalizeSpace(value ?? ""));
+  if (!normalized) return null;
+
+  const matched = normalized.match(new RegExp(MUNICIPALITY_REGEX_SOURCE));
+  return matched?.[0] ? normalizeSpace(matched[0]) : null;
+}
+
+function normalizeOfficeName(value: string) {
+  return normalizeDigits(normalizeSpace(value));
+}
+
+function extractOfficeNamesFromValue(value: string | null) {
+  const normalized = normalizeDigits(normalizeSpace(value ?? ""));
+  if (!normalized) return [];
+
+  const matches = normalized.match(OFFICE_NAME_IN_TEXT_REGEX) ?? [];
+  return uniqueNonEmpty(matches.map((item) => normalizeOfficeName(item)));
+}
+
+function buildEmployeeCountContextHints(
+  sourceCompany?: string | null,
+  sourceAddress?: string | null
+): EmployeeCountContextHints {
+  return {
+    sourceCompany: normalizeSpace(sourceCompany ?? "") || null,
+    sourceAddress: normalizeSpace(sourceAddress ?? "") || null,
+    officeNames: extractOfficeNamesFromValue(sourceCompany ?? null),
+    prefecture: extractPrefectureName(sourceAddress ?? null),
+    city: extractCityName(sourceAddress ?? null),
+  };
+}
+
+function dedupeEmployeeCountCandidates(candidates: EmployeeCountCandidate[]) {
+  const map = new Map<string, EmployeeCountCandidate>();
+
+  for (const candidate of candidates) {
+    const key = [
+      candidate.value,
+      candidate.yearMonth ?? "",
+      candidate.officeName ?? "",
+      candidate.prefecture ?? "",
+      candidate.city ?? "",
+      candidate.officeMatched ? "1" : "0",
+      candidate.prefectureMatched ? "1" : "0",
+      candidate.cityMatched ? "1" : "0",
+    ].join("|");
+
+    const current = map.get(key);
+    if (!current || candidate.sourceScore > current.sourceScore) {
+      map.set(key, candidate);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+function buildEmployeeCountCandidate(
+  count: number,
+  year: number | null,
+  month: number | null,
+  officeName: string | null,
+  prefecture: string | null,
+  city: string | null,
+  officeMatched: boolean,
+  prefectureMatched: boolean,
+  cityMatched: boolean,
+  consolidated: boolean,
+  standalone: boolean,
+  sourceScore: number
+): EmployeeCountCandidate {
+  return {
+    value: `${count.toLocaleString()}名`,
+    count,
+    year,
+    month,
+    yearMonth:
+      year != null
+        ? Number(`${year}${String(month ?? 12).padStart(2, "0")}`)
+        : null,
+    officeName,
+    prefecture,
+    city,
+    officeMatched,
+    prefectureMatched,
+    cityMatched,
+    consolidated,
+    standalone,
+    sourceScore,
+  };
+}
+
+function extractEmployeeCountCandidatesFromSnippet(
+  snippet: string,
+  baseScore: number,
+  hints: EmployeeCountContextHints
+) {
+  const normalized = normalizeDigits(normalizeSpace(snippet)).replace(/[，]/g, ",");
+  if (!normalized) return [];
+
+  const officeNamesInSnippet = extractOfficeNamesFromValue(normalized);
+  const officeName = officeNamesInSnippet[0] ?? null;
+  const officeMatched =
+    officeNamesInSnippet.length > 0 &&
+    officeNamesInSnippet.some((name) => hints.officeNames.includes(name));
+
+  const prefecture = extractPrefectureName(normalized);
+  const city = extractCityName(normalized);
+  const prefectureMatched =
+    !!prefecture && !!hints.prefecture && prefecture === hints.prefecture;
+  const cityMatched = !!city && !!hints.city && city === hints.city;
+
+  const consolidated = /(?:連結|consolidated)/i.test(normalized);
+  const standalone =
+    /(?:単体|単独|個別|individual|non-consolidated|nonconsolidated)/i.test(
+      normalized
+    );
+
+  const candidates: EmployeeCountCandidate[] = [];
+
+  const pushCandidate = (
+    count: number | null,
+    year: number | null,
+    month: number | null,
+    sourceAdjust: number
+  ) => {
+    if (count == null || count <= 0) return;
+
+    let score = baseScore + sourceAdjust;
+
+    if (officeMatched) score += 400;
+    if (cityMatched) score += 180;
+    if (prefectureMatched) score += 100;
+
+    if (!officeMatched && hints.officeNames.length > 0 && officeName) score -= 260;
+    if (!cityMatched && hints.city && city) score -= 100;
+    if (!prefectureMatched && hints.prefecture && prefecture) score -= 50;
+
+    if (consolidated) score += 20;
+    if (standalone) score += 15;
+
+    candidates.push(
+      buildEmployeeCountCandidate(
+        count,
+        year,
+        month,
+        officeName,
+        prefecture,
+        city,
+        officeMatched,
+        prefectureMatched,
+        cityMatched,
+        consolidated,
+        standalone,
+        score
+      )
+    );
+  };
+
+  const yearCountMatches = Array.from(
+    normalized.matchAll(
+      /([12][0-9]{3})\s*年(?:\s*([0-9]{1,2})\s*月)?[^0-9]{0,16}(?:現在|時点|末時点|末)?[^0-9]{0,16}([0-9][0-9,]*)\s*(?:名|人)/g
+    )
+  );
+
+  for (const match of yearCountMatches) {
+    const year = Number(match[1]);
+    const month = match[2] ? Number(match[2]) : 12;
+    const count = Number((match[3] || "").replace(/,/g, ""));
+    pushCandidate(
+      Number.isFinite(count) ? count : null,
+      Number.isFinite(year) ? year : null,
+      Number.isFinite(month) ? month : null,
+      80
+    );
+  }
+
+  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+
+  const labelAfterMatches = Array.from(
+    normalized.matchAll(
+      new RegExp(
+        `(?:${labelPattern})\\s*[:：]?\\s*([0-9][0-9,]*)\\s*(?:名|人)`,
+        "gi"
+      )
+    )
+  );
+
+  for (const match of labelAfterMatches) {
+    const count = Number((match[1] || "").replace(/,/g, ""));
+    pushCandidate(Number.isFinite(count) ? count : null, null, null, 60);
+  }
+
+  const labelBeforeMatches = Array.from(
+    normalized.matchAll(
+      new RegExp(
+        `([0-9][0-9,]*)\\s*(?:名|人)[^0-9]{0,16}(?:${labelPattern})`,
+        "gi"
+      )
+    )
+  );
+
+  for (const match of labelBeforeMatches) {
+    const count = Number((match[1] || "").replace(/,/g, ""));
+    pushCandidate(Number.isFinite(count) ? count : null, null, null, 40);
+  }
+
+  if (
+    candidates.length === 0 &&
+    EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(normalized))
+  ) {
+    const fallbackValue = normalizeEmployeeCount(normalized);
+    const fallbackCount = parseEmployeeCountNumber(fallbackValue);
+    pushCandidate(fallbackCount, null, null, 20);
+  }
+
+  return dedupeEmployeeCountCandidates(candidates);
+}
+
+function selectBestEmployeeCountCandidate(
+  candidates: EmployeeCountCandidate[],
+  hints: EmployeeCountContextHints
+) {
+  if (candidates.length === 0) return null;
+
+  let filtered = [...candidates];
+
+  if (hints.officeNames.length > 0) {
+    const officeMatched = filtered.filter((candidate) => candidate.officeMatched);
+    if (officeMatched.length > 0) {
+      filtered = officeMatched;
+    }
+  }
+
+  if (hints.city) {
+    const cityMatched = filtered.filter((candidate) => candidate.cityMatched);
+    if (cityMatched.length > 0) {
+      filtered = cityMatched;
+    }
+  }
+
+  if (hints.prefecture) {
+    const prefectureMatched = filtered.filter(
+      (candidate) => candidate.prefectureMatched
+    );
+    if (prefectureMatched.length > 0) {
+      filtered = prefectureMatched;
+    }
+  }
+
+  filtered.sort((a, b) => {
+    return (
+      Number(b.officeMatched) - Number(a.officeMatched) ||
+      Number(b.cityMatched) - Number(a.cityMatched) ||
+      Number(b.prefectureMatched) - Number(a.prefectureMatched) ||
+      (b.yearMonth ?? -1) - (a.yearMonth ?? -1) ||
+      b.sourceScore - a.sourceScore ||
+      Number(b.standalone) - Number(a.standalone) ||
+      Number(b.consolidated) - Number(a.consolidated) ||
+      b.count - a.count
+    );
+  });
+
+  return filtered[0] ?? null;
+}
+
+function extractEmployeeCountFromPage(
+  page: PageData,
+  sourceCompany?: string | null,
+  sourceAddress?: string | null
+) {
+  const hints = buildEmployeeCountContextHints(sourceCompany, sourceAddress);
+  const boost = pageBoost(page.finalUrl);
+  const pairs = extractPairs(page.html);
+  const candidates: EmployeeCountCandidate[] = [];
+  const processedSnippets = new Set<string>();
+
+  const pushSnippetCandidates = (snippet: string, score: number) => {
+    const normalizedSnippet = normalizeSpace(snippet);
+    if (!normalizedSnippet) return;
+
+    const key = `${score}__${normalizedSnippet}`;
+    if (processedSnippets.has(key)) return;
+    processedSnippets.add(key);
+
+    candidates.push(
+      ...extractEmployeeCountCandidatesFromSnippet(
+        normalizedSnippet,
+        score,
+        hints
+      )
+    );
+  };
+
+  for (const pair of pairs) {
+    if (!EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(pair.label))) continue;
+
+    pushSnippetCandidates(`${pair.label} ${pair.value}`, 280 + boost);
+  }
+
+  const lines = page.structuredText
+    .split("\n")
+    .map((line) => normalizeSpace(line))
+    .filter((line) => line !== "");
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    const lineHasEmployeeLabel = EMPLOYEE_COUNT_LABELS.some((regex) =>
+      regex.test(line)
+    );
+    const lineHasYearCount =
+      /[12][0-9]{3}\s*年/.test(line) &&
+      /[0-9][0-9,]*\s*(?:名|人)/.test(line);
+
+    if (!lineHasEmployeeLabel && !lineHasYearCount) {
+      continue;
+    }
+
+    const start = Math.max(0, i - 2);
+    const end = Math.min(lines.length, i + 3);
+    const nearLines = lines.slice(start, end);
+    const snippet = nearLines.join(" ");
+
+    const hasOfficeScope = nearLines.some(
+      (targetLine) => extractOfficeNamesFromValue(targetLine).length > 0
+    );
+
+    if (lineHasEmployeeLabel) {
+      pushSnippetCandidates(snippet, 250 + boost);
+      continue;
+    }
+
+    if (lineHasYearCount && (hasOfficeScope || !!hints.city || !!hints.prefecture)) {
+      pushSnippetCandidates(snippet, 230 + boost);
+    }
+  }
+
+  const selected = selectBestEmployeeCountCandidate(candidates, hints);
+  return selected;
+}
+
 function extractAllEmails(value: string) {
   const matches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
   return uniqueNonEmpty(matches);
@@ -1146,6 +1540,137 @@ function looksLikeRepresentativeNoise(value: string) {
   );
 }
 
+function normalizeRepresentativeComparisonValue(value: string) {
+  return normalizeSpace(value)
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksLikeRepresentativeDeleteValue(value: string) {
+  const normalized = normalizeRepresentativeComparisonValue(value);
+  if (!normalized) return true;
+
+  if (looksLikeRepresentativeNoise(normalized)) return true;
+
+  if (
+    /^(?:不明|ふめい|未定|なし|無し|該当なし|担当者不明|代表者不明|各位|御中|一同|関係者各位|お問い合わせ)$/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /^(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|執行役員(?:専務|常務)?|常務取締役?|専務取締役?|専務|常務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長)$/iu.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /^(?:北海道|東北|関東|中部|近畿|関西|中国|四国|九州|沖縄|東海|名古屋|北名古屋|北九州|伊勢志摩|東近江|西三河|東三河)$/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (/^[0-9０-９]+$/u.test(normalized)) return true;
+  if (/@/.test(normalized)) return true;
+
+  if (/株式会社|有限会社|合同会社|合資会社|合名会社|御中|様/u.test(normalized)) {
+    return true;
+  }
+
+  if (
+    /(?:丁目|番地|番|号|都道府県|市.+区|県.+市|市.+町|市.+村|区.+町|区.+村)/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /^(?:[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{3,}(?:市|区|町|村)|[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{2,}市立[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+)$/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /(?:会社|法人|組合|協会|事務局|センター|会館|病院|医院|クリニック|学校|学園|大学|高校|中学|小学校|幼稚園|保育園|施設|寮|館|ホール|ビル|タワー|本社|支社|支店|営業所|工場|研究所|製作所|製麺所|商店|店舗|ホテル|旅館|神社|寺院|農場|牧場|倉庫|公園|市場|駅|空港|港|団地|マンション|ハイツ|コーポ|号室|事務所|部署|部門|売場|園|店|会)$/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function inspectRepresentativeNameValue(value: string | null) {
+  const original = typeof value === "string" ? value.trim() : "";
+
+  if (original === "") {
+    return {
+      cleanedValue: null as string | null,
+      shouldUpdate: false,
+      shouldDelete: false,
+      shouldReview: false,
+      reason: "",
+    };
+  }
+
+  const extractedName = normalizeRepresentativeNameCore(original);
+
+  if (extractedName) {
+    const normalizedOriginal = normalizeRepresentativeComparisonValue(original);
+    const normalizedExtracted =
+      normalizeRepresentativeComparisonValue(extractedName);
+
+    if (normalizedOriginal !== normalizedExtracted) {
+      return {
+        cleanedValue: extractedName,
+        shouldUpdate: true,
+        shouldDelete: false,
+        shouldReview: false,
+        reason: "氏名を抽出できたため更新候補",
+      };
+    }
+
+    return {
+      cleanedValue: extractedName,
+      shouldUpdate: false,
+      shouldDelete: false,
+      shouldReview: false,
+      reason: "",
+    };
+  }
+
+  const normalizedSource = normalizeRepresentativeComparisonValue(original);
+
+  if (!normalizedSource || looksLikeRepresentativeDeleteValue(normalizedSource)) {
+    return {
+      cleanedValue: null as string | null,
+      shouldUpdate: false,
+      shouldDelete: true,
+      shouldReview: false,
+      reason: "氏名ではない可能性が高いため削除候補",
+    };
+  }
+
+  return {
+    cleanedValue: null as string | null,
+    shouldUpdate: false,
+    shouldDelete: false,
+    shouldReview: true,
+    reason: "氏名か断定できないため要確認",
+  };
+}
+
 function pickLikelyRepresentativeName(value: string) {
   const normalized = normalizeSpace(value);
   if (!normalized) return null;
@@ -1174,7 +1699,7 @@ function pickLikelyRepresentativeName(value: string) {
   return null;
 }
 
-function normalizeRepresentativeName(value: string) {
+function normalizeRepresentativeNameCore(value: string) {
   const original = normalizeSpace(value);
   if (!original) return null;
 
@@ -1259,6 +1784,16 @@ function normalizeRepresentativeName(value: string) {
   }
 
   return null;
+}
+
+function normalizeRepresentativeName(value: string) {
+  const result = inspectRepresentativeNameValue(value);
+
+  if (result.shouldDelete || result.shouldReview) {
+    return null;
+  }
+
+  return result.cleanedValue;
 }
 
 function extractRepresentativeNameFromText(text: string) {
@@ -1754,6 +2289,12 @@ function getCandidateLinkScore(
     selectedFieldSet,
     "representative_name"
   );
+
+  const needsEmployeeCountPages = hasSelectedCrawlField(
+    selectedFieldSet,
+    "employee_count"
+  );
+
   const needsBusinessPages = hasSelectedCrawlField(
     selectedFieldSet,
     "business_content"
@@ -1764,6 +2305,24 @@ function getCandidateLinkScore(
     score += 110;
   if (CONTACT_KEYWORDS.test(target) && needsContactPages) score += 160;
   if (STAFF_KEYWORDS.test(target) && needsRepresentativePages) score += 180;
+
+  if (
+    needsEmployeeCountPages &&
+    /(従業員数|社員数|職員数|スタッフ数|人数|人員|会社データ|数字で見る|data|numbers|ir|profile|outline)/i.test(
+      target
+    )
+  ) {
+    score += 260;
+  }
+
+  if (
+    needsEmployeeCountPages &&
+    /(会社概要|企業情報|会社案内|corporate|company|about|outline|profile)/i.test(
+      target
+    )
+  ) {
+    score += 80;
+  }
 
   if (
     hasSelectedCrawlField(selectedFieldSet, "form_url") &&
@@ -1873,13 +2432,30 @@ function pickCandidatePageUrls(
     pushIfValid(item.url);
   }
 
-  for (const path of COMMON_CANDIDATE_PATHS) {
-    try {
-      pushIfValid(new URL(path, base).toString());
-    } catch {
-      continue;
+    const scoredCommonPaths = COMMON_CANDIDATE_PATHS.map((path) => {
+      try {
+        const url = new URL(path, base).toString();
+        return {
+          url,
+          score: getCandidateLinkScore(
+            {
+              url,
+              text: path,
+              sameOrigin: true,
+            },
+            selectedFieldSet
+          ),
+        };
+      } catch {
+        return null;
+      }
+    })
+      .filter((item): item is { url: string; score: number } => item !== null)
+      .sort((a, b) => b.score - a.score);
+
+    for (const item of scoredCommonPaths) {
+      pushIfValid(item.url);
     }
-  }
 
   return urls.slice(0, getCandidatePageLimit(selectedFieldSet));
 }
@@ -1914,13 +2490,21 @@ function getRepresentativeEnoughScore(
 function getCandidatePageLimit(
   selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
+  const needsEmployeeCount = hasSelectedCrawlField(
+    selectedFieldSet,
+    "employee_count"
+  );
+
   if (isRepresentativeOnlyMode(selectedFieldSet)) {
     return 15;
   }
 
   if (selectedFieldSet.size === 1) {
     if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 5;
-    if (hasSelectedOfficeFields(selectedFieldSet)) return 8;
+    if (hasSelectedOfficeFields(selectedFieldSet)) {
+      return needsEmployeeCount ? 12 : 8;
+    }
+    if (needsEmployeeCount) return 16;
     return 6;
   }
 
@@ -1928,18 +2512,27 @@ function getCandidatePageLimit(
     selectedFieldSet.size <= 3 &&
     hasSelectedCrawlField(selectedFieldSet, "representative_name")
   ) {
-    return 12;
+    return needsEmployeeCount ? 18 : 12;
   }
 
   if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
-    return 8;
+    return needsEmployeeCount ? 18 : 8;
   }
 
-  if (selectedFieldSet.size <= 3) {
-    return 10;
+  if (needsEmployeeCount) {
+    return 30;
   }
 
   return 20;
+}
+
+function hasHighConfidenceEmployeeCount(
+  best: Partial<Record<keyof CrawlExtractedFields, BestValue>>
+) {
+  return (
+    !!best.employee_count?.value &&
+    (best.employee_count?.score ?? 0) >= 380
+  );
 }
 
 function canStopFetchingAdditionalPages(
@@ -1967,7 +2560,7 @@ function canStopFetchingAdditionalPages(
     }
 
     if (field === "capital") return !!best.capital?.value;
-    if (field === "employee_count") return !!best.employee_count?.value;
+    if (field === "employee_count") return hasHighConfidenceEmployeeCount(best);
     if (field === "business_content") return !!best.business_content?.value;
 
     return true;
@@ -2020,7 +2613,11 @@ function pageBoost(url: string) {
 function processPage(
   page: PageData,
   best: Partial<Record<keyof CrawlExtractedFields, BestValue>>,
-  selectedFieldSet: Set<CrawlSelectableFieldKey>
+  selectedFieldSet: Set<CrawlSelectableFieldKey>,
+  sourceContext?: {
+    company?: string | null;
+    address?: string | null;
+  }
 ) {
   const boost = pageBoost(page.finalUrl);
   const pairs = extractPairs(page.html);
@@ -2194,23 +2791,17 @@ if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
   }
 
   if (hasSelectedCrawlField(selectedFieldSet, "employee_count")) {
-    const employeeCountPairValue =
-      pickPairValue(pairs, EMPLOYEE_COUNT_LABELS) ?? "";
-    const employeeCountTextValue =
-      extractSingleLineLabeledValue(page.structuredText, EMPLOYEE_COUNT_LABELS) ??
-      "";
+    const employeeCountCandidate = extractEmployeeCountFromPage(
+      page,
+      sourceContext?.company ?? null,
+      sourceContext?.address ?? null
+    );
 
     addBest(
       best,
       "employee_count",
-      normalizeEmployeeCount(employeeCountPairValue),
-      200 + boost
-    );
-    addBest(
-      best,
-      "employee_count",
-      normalizeEmployeeCount(employeeCountTextValue),
-      195 + boost
+      employeeCountCandidate?.value ?? null,
+      employeeCountCandidate?.sourceScore ?? 0
     );
   }
 
@@ -2244,7 +2835,11 @@ if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
 
 export async function crawlCompanyWebsite(
   websiteUrl: string,
-  selectedFields: CrawlSelectableFieldKey[] = DEFAULT_CRAWL_SELECTABLE_FIELDS
+  selectedFields: CrawlSelectableFieldKey[] = DEFAULT_CRAWL_SELECTABLE_FIELDS,
+  sourceContext?: {
+    company?: string | null;
+    address?: string | null;
+  }
 ): Promise<CrawlExtractedFields> {
   const selectedFieldSet = new Set(selectedFields);
 
@@ -2303,7 +2898,7 @@ export async function crawlCompanyWebsite(
   }
 
   collectedPages.push(topPage);
-  processPage(topPage, best, selectedFieldSet);
+  processPage(topPage, best, selectedFieldSet, sourceContext);
 
   const fetchedUrlSet = new Set<string>([topPage.finalUrl]);
   const nestedCandidateUrls: string[] = [];
@@ -2334,7 +2929,7 @@ export async function crawlCompanyWebsite(
 
       fetchedUrlSet.add(page.finalUrl);
       collectedPages.push(page);
-      processPage(page, best, selectedFieldSet);
+      processPage(page, best, selectedFieldSet, sourceContext);
 
       const shouldCollectNestedRepresentativePages =
         hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
@@ -2390,7 +2985,7 @@ export async function crawlCompanyWebsite(
 
       fetchedUrlSet.add(nestedPage.finalUrl);
       collectedPages.push(nestedPage);
-      processPage(nestedPage, best, selectedFieldSet);
+      processPage(nestedPage, best, selectedFieldSet, sourceContext);
     }
   }
 

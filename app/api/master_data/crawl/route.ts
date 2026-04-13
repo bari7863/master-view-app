@@ -1284,7 +1284,11 @@ async function runCrawlJob(jobId: string) {
 
         const extracted = await crawlCompanyWebsite(
           websiteUrl,
-          Array.from(selectedFieldSet)
+          Array.from(selectedFieldSet),
+          {
+            company: normalizeNullableText(row.company),
+            address: normalizeNullableText(row.address),
+          }
         );
 
         const bundles = buildCrawlPayloadBundles(

@@ -105,7 +105,7 @@ type RepresentativeNameInspectionPreviewChange = {
   fieldLabel: string;
   beforeValue: string | null;
   afterValue: string | null;
-  action: "update" | "delete";
+  action: "update" | "delete" | "review";
   reason: string;
 };
 
@@ -862,6 +862,33 @@ const REPRESENTATIVE_AREA_NAME_TOKENS = new Set<string>([
   "熊本",
 ]);
 
+const REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS = new Set<string>([
+  "北海道",
+  "東北",
+  "関東",
+  "中部",
+  "近畿",
+  "関西",
+  "中国",
+  "四国",
+  "九州",
+  "沖縄",
+  "東海",
+  "名古屋",
+  "北名古屋",
+  "北九州",
+  "伊勢志摩",
+  "東近江",
+  "西三河",
+  "東三河",
+]);
+
+const REPRESENTATIVE_STRONG_NAME_TOKEN_REGEX =
+  /^(?:[\p{sc=Han}々ヶヵ]{1,5}|[\p{sc=Hiragana}]{2,8}|[\p{sc=Katakana}ー]{2,12}|[A-Za-z]{2,20})$/u;
+
+const REPRESENTATIVE_ORGANIZATION_LIKE_REGEX =
+  /(?:紙器|紙工|鋼材|電装|工業|工務|建設|住建|工機|工房|工藝|工芸|製材|製茶|製粉|製菓|製鋼|製作所|製作|機工|機器|器械|設備|電工|電設|電機|電子|通信|運輸|通運|産業|化学|化工|化成|鐵工|鉄工|織機|理化|光学|薬品|薬局|眼科|歯科|医院|病院|幼稚園|保育所|保育園|信用金庫|銀行|郵便局|研究所|研究機関|大学|短期大|学園|学校|高校|小学校|中学校|生協|協会|神宮|神社|茶屋|温泉|商店|家具|無線|木材|測量|登記|缶詰|道路|海運|建材|空調|鉄道|製本|看板|解体|葬祭|整体院|料理|酒房|生花|工作所|製麺|総業|乳業|産機)$/u;
+
 const REPRESENTATIVE_NON_NAME_PREFIX_REGEX =
   /^(?:関係者各位|各位|御中|一同|不明|ふめい|未定|該当なし|お問い合わせ)$/u;
 
@@ -898,11 +925,14 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "店舗",
     "製品",
     "商品",
+    "商品名",
     "注文",
     "対象者",
     "取引先",
+    "取引銀行",
     "問題",
     "品質",
+    "利便性",
     "維持",
     "施工",
     "設計",
@@ -927,10 +957,13 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "測定",
     "測定機",
     "分析",
+    "診断",
+    "診断装置",
     "試作",
     "量産",
     "量産対応",
     "包装",
+    "梱包",
     "発送",
     "印刷",
     "輪転機",
@@ -942,10 +975,13 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "電装",
     "電気設備工事",
     "電気工事",
+    "電気制御",
     "自動制御",
     "材料",
     "素材",
     "部材",
+    "衝撃吸収材",
+    "制振遮音技術",
     "治具",
     "工具",
     "重量",
@@ -955,6 +991,9 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "気密",
     "特殊鋼",
     "特殊印刷",
+    "熱処理",
+    "表面処理",
+    "真空技術",
     "不動産",
     "建設",
     "建築",
@@ -963,12 +1002,17 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "修繕",
     "大規模修繕工事",
     "分譲",
+    "分譲地",
+    "土地",
     "賃貸",
     "売却",
+    "売買",
     "中古車",
-    "自動車",
+    "新車",
+    "輸入車",
     "車検",
     "車両",
+    "車輌",
     "車専門物流",
     "運輸",
     "運送",
@@ -980,10 +1024,15 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "保育",
     "介護",
     "看護",
+    "障害福祉",
+    "障害者共同生活",
+    "福祉用具",
     "訪問介護",
     "訪問看護",
     "訪問入浴",
+    "介護事業",
     "在宅診療",
+    "専門入院自然療法",
     "診療所",
     "病院",
     "医院",
@@ -995,6 +1044,7 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "呼吸器内",
     "放射線科",
     "腎臓内科",
+    "神経科",
     "精神科",
     "皮膚科",
     "眼科",
@@ -1003,6 +1053,7 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "整形外科",
     "接骨院",
     "歯科",
+    "歯医者",
     "矯正歯科",
     "美容皮膚科",
     "調剤薬局",
@@ -1017,6 +1068,7 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "認会計士",
     "理事長",
     "病院長",
+    "最高経営責任者",
     "役員指名",
     "役員報酬",
     "取締役",
@@ -1029,6 +1081,10 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "報酬規程",
     "報酬支給基準",
     "名簿",
+    "顧問名簿",
+    "組織図",
+    "組織概要",
+    "組織機構",
     "職員",
     "全従業員",
     "全職員",
@@ -1039,9 +1095,11 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "入力",
     "確認",
     "送信",
+    "受信可能",
     "事項",
     "項目",
     "編集",
+    "削除",
     "権限",
     "公式",
     "最新",
@@ -1051,9 +1109,13 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "歴史",
     "沿革",
     "活動",
+    "活動内容",
+    "取組",
     "体制",
     "変更",
+    "業務改変",
     "配色変更",
+    "余白設定追加",
     "色変換",
     "策定",
     "実行",
@@ -1066,71 +1128,67 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "設立年月日",
     "法人設立年月日",
     "体験",
+    "参加同意",
     "見学",
     "公演",
     "授業",
+    "受験対策",
     "講座",
     "作品",
+    "油彩",
+    "日本画",
     "特産物",
+    "地産地消",
     "洋菓子",
+    "生菓子",
+    "焼菓子",
     "和菓子",
     "味噌",
     "料理",
+    "中華",
+    "泡盛",
+    "焼酎",
+    "着物",
     "呉服",
     "弁当",
+    "腕時計",
     "時計",
     "宝石",
     "花火",
     "園芸",
+    "野菜収穫",
     "薬草",
     "焼肉",
-    "信用金庫",
-    "郵便局",
-    "研究機関",
-    "公共施設",
-    "市役所",
-    "会員登録",
-    "宿泊予約",
-    "地図検索",
-    "公園",
-    "緑地",
-    "温泉",
-    "茶屋",
-    "楽器",
-    "木材",
-    "工業",
-    "未来工業",
-    "紙器",
-    "鋼材",
-    "技研",
-    "工機",
-    "化学",
-    "商事",
-    "東急",
-    "中文",
-    "简体",
-    "繁體",
-    "中文簡体",
-    "中文简体字",
-    "全球",
-    "网络",
-    "網絡",
-    "集团",
-    "举报",
-    "站点",
-    "浏览",
+    "研究会",
+    "研究",
+    "生涯学習",
+    "国立長寿医療研究",
+    "世界基準",
+    "世界情勢",
     "世界最高水準",
-    "検索",
-    "料金",
-    "価格",
-    "予約",
-    "相談",
-    "利用案内",
-    "利用方法",
-    "利用時間",
-    "利用料金",
-    "免責事項",
-    "特定商取引",
+    "持続可能",
+    "創意工夫",
+    "付加価値",
+    "人材派遣",
+    "人材育成",
+    "進路",
+    "就職支援",
+    "新卒",
+    "中途採用",
+    "求人",
+    "求人情報",
+    "広告",
+    "広告代",
+    "映像",
+    "動画",
+    "動画付記事",
+    "解説動画",
+    "展示情報",
+    "展示会",
+    "展示車",
+    "試乗車",
+    "宿泊予約",
+    "会員登録",
     "資料請求",
     "商品検索",
     "物件検索",
@@ -1147,8 +1205,8 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "事例",
     "実績",
     "受賞履歴",
-    "風景",
     "作業内容",
+    "作業工程",
     "事前",
     "作業所",
     "事業所",
@@ -1158,7 +1216,50 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "情報提供",
     "提案",
     "企画",
-    "受注生産"
+    "受注生産",
+    "地図検索",
+    "周辺情報",
+    "利用案内",
+    "利用方法",
+    "利用時間",
+    "利用料金",
+    "最低価格",
+    "午後最速",
+    "無料貸出",
+    "送料無料",
+    "全画面表示",
+    "表示拡大",
+    "言語切替",
+    "今準備中",
+    "年末年始休業",
+    "冬季休業",
+    "定休日",
+    "受付時間",
+    "参加同意",
+    "保存",
+    "更新",
+    "同意管理",
+    "目的",
+    "役割",
+    "税務行政",
+    "多国語展開",
+    "中国料理",
+    "中文",
+    "简体",
+    "繁體",
+    "中文簡体",
+    "中文简体字",
+    "全球",
+    "网络",
+    "網絡",
+    "集团",
+    "举报",
+    "站点",
+    "浏览",
+    "关于我们",
+    "关于征途国际数码",
+    "您的域名已过期",
+    "参观公司张澜文献"
   ].join("|"),
   "u"
 );
@@ -1174,6 +1275,13 @@ const REPRESENTATIVE_SUFFIX_TITLE_TRIM_REGEX =
 
 const REPRESENTATIVE_NOISE_TOKEN_REGEX =
   /^(?:男性|女性|男|女|担当|担当者|責任者|窓口|受付|御中|様|さん|氏|代表|社長|会長)$/u;
+
+function normalizeRepresentativeComparisonValue(value: string) {
+  return value
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim();
+}
   
 function trimRepresentativeAffixes(value: string) {
   let text = value.normalize("NFKC").trim();
@@ -1244,14 +1352,44 @@ function isRepresentativeAreaToken(value: string) {
   return REPRESENTATIVE_AREA_NAME_TOKENS.has(value.normalize("NFKC"));
 }
 
+function looksLikeProtectedRepresentativeName(value: string) {
+  const text = trimRepresentativeAffixes(value.trim());
+
+  if (!text) return false;
+  if (/[0-9０-９]/.test(text)) return false;
+  if (/株式会社|有限会社|合同会社|御中|様/.test(text)) return false;
+  if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return false;
+
+  const parts = text.split(/\s+/).filter((part) => part !== "");
+
+  if (parts.length === 0 || parts.length > 2) return false;
+
+  return parts.every((part) => {
+    const normalized = part.normalize("NFKC");
+
+    if (!REPRESENTATIVE_STRONG_NAME_TOKEN_REGEX.test(part)) return false;
+    if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(normalized)) return false;
+    if (REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(part)) return false;
+    if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(part)) return false;
+    if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(part)) return false;
+
+    return true;
+  });
+}
+
 function looksLikeNonNameToken(value: string) {
   const text = trimRepresentativeAffixes(value.trim());
   if (!text) return true;
 
+  if (looksLikeProtectedRepresentativeName(text)) return false;
   if (REPRESENTATIVE_NON_NAME_EXACT_VALUES.has(text)) return true;
+  if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(text.normalize("NFKC"))) {
+    return true;
+  }
   if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
   if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
   if (REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text)) return true;
+  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return true;
   if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return true;
   if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return true;
   if (/株式会社|有限会社|合同会社|御中|様/.test(text)) return true;
@@ -1282,8 +1420,10 @@ function looksLikeRepresentativeName(value: string) {
   const text = trimRepresentativeAffixes(value.trim());
 
   if (!text) return false;
+  if (looksLikeProtectedRepresentativeName(text)) return true;
   if (/[0-9０-９]/.test(text)) return false;
   if (/株式会社|有限会社|合同会社|御中|様/.test(text)) return false;
+  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return false;
   if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return false;
   if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return false;
 
@@ -1292,7 +1432,21 @@ function looksLikeRepresentativeName(value: string) {
   if (parts.length === 0 || parts.length > 2) return false;
   if (parts.some((part) => looksLikeNonNameToken(part))) return false;
 
-  if (parts.length === 2 && parts.every((part) => isRepresentativeAreaToken(part))) {
+  if (
+    parts.length === 1 &&
+    REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(parts[0].normalize("NFKC"))
+  ) {
+    return false;
+  }
+
+  if (
+    parts.length === 2 &&
+    parts.every(
+      (part) =>
+        isRepresentativeAreaToken(part) ||
+        REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(part.normalize("NFKC"))
+    )
+  ) {
     return false;
   }
 
@@ -1411,26 +1565,57 @@ function inspectRepresentativeNameValue(value: string | null) {
       cleanedValue: null as string | null,
       shouldUpdate: false,
       shouldDelete: false,
+      shouldReview: false,
       reason: "",
     };
   }
 
   const extractedName = extractRepresentativeName(original);
 
-  if (!extractedName) {
+  if (extractedName) {
+    const normalizedOriginal = normalizeRepresentativeComparisonValue(original);
+    const normalizedExtracted =
+      normalizeRepresentativeComparisonValue(extractedName);
+
+    if (normalizedOriginal !== normalizedExtracted) {
+      return {
+        cleanedValue: extractedName,
+        shouldUpdate: true,
+        shouldDelete: false,
+        shouldReview: false,
+        reason: "氏名を抽出できたため更新候補",
+      };
+    }
+
+    return {
+      cleanedValue: extractedName,
+      shouldUpdate: false,
+      shouldDelete: false,
+      shouldReview: false,
+      reason: "",
+    };
+  }
+
+  const normalizedSource = trimRepresentativeAffixes(
+    normalizeRepresentativeSource(original)
+  );
+
+  if (!normalizedSource || looksLikeNonNameToken(normalizedSource)) {
     return {
       cleanedValue: null as string | null,
       shouldUpdate: false,
       shouldDelete: true,
-      reason: "氏名を判定できなかったため削除候補",
+      shouldReview: false,
+      reason: "氏名ではない可能性が高いため削除候補",
     };
   }
 
   return {
-    cleanedValue: extractedName,
+    cleanedValue: null as string | null,
     shouldUpdate: false,
     shouldDelete: false,
-    reason: "",
+    shouldReview: true,
+    reason: "氏名か断定できないため要確認",
   };
 }
 
@@ -1438,8 +1623,16 @@ function getJobSnapshot(job: ItemInspectionJob) {
   const processingCount =
     job.status === "running" && job.currentCompany ? 1 : 0;
 
+  const updateCount = job.inspectionPreviewChanges.filter(
+    (row) => row.action === "update"
+  ).length;
+
   const deleteCount = job.inspectionPreviewChanges.filter(
     (row) => row.action === "delete"
+  ).length;
+
+  const reviewCount = job.inspectionPreviewChanges.filter(
+    (row) => row.action === "review"
   ).length;
 
   return {
@@ -1464,9 +1657,9 @@ function getJobSnapshot(job: ItemInspectionJob) {
     completed: job.status === "completed",
     message:
       job.status === "completed"
-        ? deleteCount > 0
-          ? `${deleteCount.toLocaleString()}件の削除候補を抽出しました`
-          : "削除候補はありませんでした"
+        ? updateCount === 0 && deleteCount === 0 && reviewCount === 0
+          ? "候補はありませんでした"
+          : `更新候補 ${updateCount.toLocaleString()}件 / 削除候補 ${deleteCount.toLocaleString()}件 / 要確認 ${reviewCount.toLocaleString()}件`
         : job.status === "paused"
         ? "項目精査を中断しました"
         : undefined,
@@ -1562,7 +1755,7 @@ async function processItemInspectionJob(jobId: string) {
     try {
       const result = inspectRepresentativeNameValue(row.representativeName);
 
-    if (result.shouldDelete) {
+      if (result.shouldDelete) {
         job.inspectionPreviewChanges.push({
           rowId: row.rowId,
           company: row.company,
@@ -1570,6 +1763,26 @@ async function processItemInspectionJob(jobId: string) {
           beforeValue: row.representativeName,
           afterValue: null,
           action: "delete",
+          reason: result.reason,
+        });
+      } else if (result.shouldUpdate) {
+        job.inspectionPreviewChanges.push({
+          rowId: row.rowId,
+          company: row.company,
+          fieldLabel: "代表者名",
+          beforeValue: row.representativeName,
+          afterValue: result.cleanedValue,
+          action: "update",
+          reason: result.reason,
+        });
+      } else if (result.shouldReview) {
+        job.inspectionPreviewChanges.push({
+          rowId: row.rowId,
+          company: row.company,
+          fieldLabel: "代表者名",
+          beforeValue: row.representativeName,
+          afterValue: null,
+          action: "review",
           reason: result.reason,
         });
       } else {
