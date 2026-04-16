@@ -195,6 +195,7 @@ type CrawlPreviewRow = {
   preview_row_id: string;
   company: string | null;
   website_url: string | null;
+  source_row: Row | null;
   changes: CrawlPreviewChange[];
 };
 
@@ -204,7 +205,9 @@ type CrawlSelectedChanges = Record<
   Partial<Record<CrawlFieldKey, CrawlSelectedChangeValue>>
 >;
 
-type ItemInspectionMethodKey = "representative_name_remove_non_name";
+type ItemInspectionMethodKey =
+  | "representative_name_remove_non_name"
+  | "representative_name_inspect_name";
 
 type ItemInspectionPreviewChange = {
   rowId: string;
@@ -212,8 +215,9 @@ type ItemInspectionPreviewChange = {
   fieldLabel: string;
   beforeValue: string | null;
   afterValue: string | null;
-  action: "update" | "delete";
+  action: "update" | "delete" | "review" | "none";
   reason: string;
+  source_row: Row | null;
 };
 
 function createInitialItemInspectionMethodSelections(): Record<
@@ -222,6 +226,7 @@ function createInitialItemInspectionMethodSelections(): Record<
 > {
   return {
     representative_name_remove_non_name: false,
+    representative_name_inspect_name: false,
   };
 }
 
@@ -231,6 +236,7 @@ function createEmptyItemInspectionMethodSelections(): Record<
 > {
   return {
     representative_name_remove_non_name: false,
+    representative_name_inspect_name: false,
   };
 }
 
@@ -289,6 +295,22 @@ type ApiResponse = {
   remainingCount?: number;
   paused?: boolean;
   completed?: boolean;
+
+  mynaviTotalPages?: number;
+  mynaviSelectedPageCount?: number;
+  mynaviTotalUrls?: number;
+  mynaviProcessedCount?: number;
+  mynaviSuccessCount?: number;
+  mynaviFailedCount?: number;
+  mynaviCurrentPageNumber?: number;
+  mynaviCsvFileName?: string;
+  mynaviGradYear?: string;
+  mynaviPhase?: "idle" | "collect_urls" | "scrape_details" | "completed" | "error";
+  mynaviJobMode?: "count_pages" | "scrape";
+  mynaviCurrentField?: string | null;
+  mynaviCurrentCompany?: string | null;
+  mynaviCurrentCompanyIndex?: number;
+  mynaviDetectedTotalPages?: number;
 };
 
 async function readApiResponse(
@@ -316,6 +338,63 @@ type ItemInspectionJobStatus =
   | "paused"
   | "completed"
   | "error";
+
+type MynaviJobStatus = "idle" | "running" | "paused" | "completed" | "error";
+
+type MynaviJobMode = "count_pages" | "scrape";
+
+const MYNAVI_FIELD_LABELS: Record<string, string> = {
+  count_open: "一覧ページを開いています",
+  count_parse: "ページ数を解析しています",
+  prepare: "取得開始準備中",
+  collect_urls: "URL一覧を取得しています",
+  outline: "会社概要",
+  recruit_results: "採用実績",
+  contact: "問合せ先",
+  sanitize: "整形",
+  completed: "完了",
+};
+
+function getMynaviFieldLabel(value: string | null) {
+  if (!value || value.trim() === "") {
+    return "-";
+  }
+
+  return MYNAVI_FIELD_LABELS[value] ?? value;
+}
+
+function getMynaviPhaseLabel(
+  mode: MynaviJobMode,
+  phase:
+    | "idle"
+    | "count_pages"
+    | "collect_urls"
+    | "scrape_details"
+    | "completed"
+    | "error"
+) {
+  if (mode === "count_pages") {
+    return "ページ数確認";
+  }
+
+  if (phase === "collect_urls") {
+    return "URL取得";
+  }
+
+  if (phase === "scrape_details") {
+    return "全項目取得";
+  }
+
+  if (phase === "completed") {
+    return "完了";
+  }
+
+  if (phase === "error") {
+    return "エラー";
+  }
+
+  return "準備中";
+}
 
 function buildImportFileKey(file: File) {
   return `${file.name}__${file.size}__${file.lastModified}`;
@@ -1667,6 +1746,7 @@ export default function Home() {
 
   const [crawlPreviewOpen, setCrawlPreviewOpen] = useState(false);
   const [crawlPreviewRows, setCrawlPreviewRows] = useState<CrawlPreviewRow[]>([]);
+  const [crawlPreviewTab, setCrawlPreviewTab] = useState<"candidate" | "excluded">("candidate");
   const [crawlPreviewPage, setCrawlPreviewPage] = useState(1);
   const [crawlPreviewTotalCount, setCrawlPreviewTotalCount] = useState(0);
   const [crawlPreviewLoading, setCrawlPreviewLoading] = useState(false);
@@ -1693,6 +1773,55 @@ export default function Home() {
   const [listDeleteMessage, setListDeleteMessage] = useState("");
   const [listDeleteError, setListDeleteError] = useState("");
 
+  const [listAddSourceOpen, setListAddSourceOpen] = useState(false);
+  const [mynaviYearOpen, setMynaviYearOpen] = useState(false);
+  const [mynaviPageCountOpen, setMynaviPageCountOpen] = useState(false);
+  const [mynaviResultOpen, setMynaviResultOpen] = useState(false);
+  const [mynaviProgressOpen, setMynaviProgressOpen] = useState(false);
+
+  const [mynaviLoading, setMynaviLoading] = useState(false);
+  const [mynaviMessage, setMynaviMessage] = useState("");
+  const [mynaviError, setMynaviError] = useState("");
+
+  const [selectedMynaviGradYear, setSelectedMynaviGradYear] = useState("27");
+  const [mynaviTotalPages, setMynaviTotalPages] = useState(0);
+  const [selectedMynaviPageCount, setSelectedMynaviPageCount] = useState("all");
+
+  const [mynaviJobId, setMynaviJobId] = useState<string | null>(null);
+  const [mynaviJobStatus, setMynaviJobStatus] =
+    useState<MynaviJobStatus>("idle");
+
+  const [mynaviPhase, setMynaviPhase] = useState<
+    "idle" | "count_pages" | "collect_urls" | "scrape_details" | "completed" | "error"
+  >("idle");
+
+  const [mynaviTotalUrls, setMynaviTotalUrls] = useState(0);
+  const [mynaviProcessedCount, setMynaviProcessedCount] = useState(0);
+  const [mynaviSuccessCount, setMynaviSuccessCount] = useState(0);
+  const [mynaviFailedCount, setMynaviFailedCount] = useState(0);
+  const [mynaviCurrentPageNumber, setMynaviCurrentPageNumber] = useState(0);
+  const [mynaviCsvFileName, setMynaviCsvFileName] = useState("");
+
+  const [mynaviJobMode, setMynaviJobMode] =
+    useState<MynaviJobMode>("count_pages");
+
+  const [mynaviCurrentField, setMynaviCurrentField] = useState<string | null>(null);
+  const [mynaviCurrentCompany, setMynaviCurrentCompany] = useState<string | null>(null);
+  const [mynaviCurrentCompanyIndex, setMynaviCurrentCompanyIndex] = useState(0);
+  const [mynaviDetectedTotalPages, setMynaviDetectedTotalPages] = useState(0);
+
+  const mynaviPageCountOptions = useMemo(() => {
+    const max = Math.min(mynaviTotalPages, 999);
+
+    if (max <= 0) {
+      return [];
+    }
+
+    return Array.from({ length: max }, (_, index) => String(index + 1));
+  }, [mynaviTotalPages]);
+
+  const mynaviStatusTimerRef = useRef<number | null>(null);
+
   const [itemDeleteScopeOpen, setItemDeleteScopeOpen] = useState(false);
   const [itemDeleteFieldOpen, setItemDeleteFieldOpen] = useState(false);
   const [itemDeleteConfirmOpen, setItemDeleteConfirmOpen] = useState(false);
@@ -1717,25 +1846,22 @@ export default function Home() {
 
   const [itemInspectionPreviewChanges, setItemInspectionPreviewChanges] =
     useState<ItemInspectionPreviewChange[]>([]);
-    
+
+  const [itemInspectionExcludedPreviewRows, setItemInspectionExcludedPreviewRows] =
+    useState<ItemInspectionPreviewChange[]>([]);
+
+  const [itemInspectionExcludedTotalCount, setItemInspectionExcludedTotalCount] =
+    useState(0);
+
   const [itemInspectionCheckedPreviewRowIds, setItemInspectionCheckedPreviewRowIds] =
     useState<Record<string, boolean>>({});
 
   const [itemInspectionPreviewPage, setItemInspectionPreviewPage] = useState(1);
 
-  const itemInspectionPreviewTotalPages = useMemo(
-    () =>
-      Math.max(
-        1,
-        Math.ceil(
-          itemInspectionPreviewChanges.length /
-            ITEM_INSPECTION_PREVIEW_PAGE_SIZE
-        )
-      ),
-    [itemInspectionPreviewChanges.length]
-  );
+  const [itemInspectionPreviewTab, setItemInspectionPreviewTab] =
+    useState<"candidate" | "excluded">("candidate");
 
-  const pagedItemInspectionPreviewChanges = useMemo(() => {
+  const pagedCandidateItemInspectionPreviewChanges = useMemo(() => {
     const start =
       (itemInspectionPreviewPage - 1) * ITEM_INSPECTION_PREVIEW_PAGE_SIZE;
 
@@ -1744,6 +1870,28 @@ export default function Home() {
       start + ITEM_INSPECTION_PREVIEW_PAGE_SIZE
     );
   }, [itemInspectionPreviewChanges, itemInspectionPreviewPage]);
+
+  const visibleItemInspectionPreviewChanges =
+    itemInspectionPreviewTab === "candidate"
+      ? pagedCandidateItemInspectionPreviewChanges
+      : itemInspectionExcludedPreviewRows;
+
+  const visibleItemInspectionPreviewTotalCount =
+    itemInspectionPreviewTab === "candidate"
+      ? itemInspectionPreviewChanges.length
+      : itemInspectionExcludedTotalCount;
+
+  const itemInspectionPreviewTotalPages = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.ceil(
+          visibleItemInspectionPreviewTotalCount /
+            ITEM_INSPECTION_PREVIEW_PAGE_SIZE
+        )
+      ),
+    [visibleItemInspectionPreviewTotalCount]
+  );
 
   const [itemInspectionSelections, setItemInspectionSelections] = useState<
     Record<FilterKey, boolean>
@@ -1812,6 +1960,15 @@ export default function Home() {
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [exportDuplicateConfirmOpen, setExportDuplicateConfirmOpen] = useState(false);
   const [exportMode, setExportMode] = useState<"all" | "filtered">("filtered");
+
+  const [previewCsvScopeOpen, setPreviewCsvScopeOpen] = useState(false);
+  const [previewCsvConfirmOpen, setPreviewCsvConfirmOpen] = useState(false);
+  const [previewCsvSource, setPreviewCsvSource] = useState<
+    "crawl" | "item_inspection" | null
+  >(null);
+  const [previewCsvMode, setPreviewCsvMode] = useState<"all" | "candidate">(
+    "all"
+  );
 
   const [singleFilterClearConfirm, setSingleFilterClearConfirm] =
     useState<FilterClearConfirmTarget | null>(null);
@@ -2096,6 +2253,12 @@ export default function Home() {
   useEffect(() => {
     fetchData();
   }, [page, limit, appliedColumnStates, appliedAdvancedFilters]);
+
+  useEffect(() => {
+    return () => {
+      clearMynaviStatusPolling();
+    };
+  }, []);
 
   useEffect(() => {
     setHeaderStickyTop(0);
@@ -3266,14 +3429,23 @@ export default function Home() {
     if (openSidebarPanel === "list") {
       return (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
             <button
               type="button"
               onClick={() => setListDeleteScopeOpen(true)}
               disabled={listDeleting}
-              className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
+              className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-rose-500 disabled:opacity-50"
             >
               リスト削除
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenListAdd}
+              disabled={mynaviLoading}
+              className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {mynaviLoading ? "取得中..." : "リスト追加"}
             </button>
 
             <button
@@ -3286,7 +3458,7 @@ export default function Home() {
                 setItemDeleteScopeOpen(true);
               }}
               disabled={itemDeleting}
-              className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+              className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-cyan-500 disabled:opacity-50"
             >
               項目削除
             </button>
@@ -3298,11 +3470,23 @@ export default function Home() {
                 setDedupeScopeOpen(true);
               }}
               disabled={deduplicating}
-              className="h-11 rounded-xl bg-violet-600 px-5 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-50"
+              className="h-11 rounded-xl bg-violet-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-violet-500 disabled:opacity-50"
             >
               {deduplicating ? "重複削除中..." : "重複削除"}
             </button>
           </div>
+
+          {mynaviMessage && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {mynaviMessage}
+            </div>
+          )}
+
+          {mynaviError && (
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              {mynaviError}
+            </div>
+          )}
 
           {listDeleteMessage && (
             <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
@@ -3337,6 +3521,29 @@ export default function Home() {
           {dedupeError && (
             <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {dedupeError}
+            </div>
+          )}
+
+          {mynaviJobStatus === "running" && (
+            <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-200">
+              {mynaviPhase === "collect_urls" && (
+                <div>
+                  URL取得中：
+                  {mynaviCurrentPageNumber > 0
+                    ? ` ${mynaviCurrentPageNumber}ページ目`
+                    : ""}
+                </div>
+              )}
+
+              {mynaviPhase === "scrape_details" && (
+                <div>
+                  全項目取得中：{mynaviProcessedCount.toLocaleString()} / {mynaviTotalUrls.toLocaleString()}
+                </div>
+              )}
+
+              <div className="mt-1 text-xs text-sky-100/80">
+                成功 {mynaviSuccessCount.toLocaleString()} 件 / 失敗 {mynaviFailedCount.toLocaleString()} 件
+              </div>
             </div>
           )}
         </div>
@@ -3466,6 +3673,10 @@ export default function Home() {
                   createEmptyItemInspectionMethodSelections()
                 );
                 setItemInspectionPreviewChanges([]);
+                setItemInspectionExcludedPreviewRows([]);
+                setItemInspectionExcludedTotalCount(0);
+                setItemInspectionPreviewTab("candidate");
+                setItemInspectionPreviewPage(1);
                 setItemInspectionCheckedPreviewRowIds({});
                 setItemInspectionMessage("");
                 setItemInspectionError("");
@@ -3545,6 +3756,387 @@ export default function Home() {
     }
 
     return null;
+  };
+
+  const clearMynaviStatusPolling = () => {
+    if (mynaviStatusTimerRef.current !== null) {
+      window.clearInterval(mynaviStatusTimerRef.current);
+      mynaviStatusTimerRef.current = null;
+    }
+  };
+
+  const applyMynaviStatus = (data: ApiResponse) => {
+    setMynaviJobId(data.jobId ?? null);
+    setMynaviJobStatus((data.jobStatus as MynaviJobStatus) ?? "idle");
+    setMynaviJobMode((data.mynaviJobMode as MynaviJobMode) ?? "count_pages");
+    setMynaviPhase(
+      (data.mynaviPhase as
+        | "idle"
+        | "count_pages"
+        | "collect_urls"
+        | "scrape_details"
+        | "completed"
+        | "error") ?? "idle"
+    );
+
+    setMynaviTotalPages(
+      data.mynaviTotalPages ?? data.mynaviDetectedTotalPages ?? 0
+    );
+    setMynaviDetectedTotalPages(data.mynaviDetectedTotalPages ?? 0);
+    setMynaviTotalUrls(data.mynaviTotalUrls ?? 0);
+    setMynaviProcessedCount(data.mynaviProcessedCount ?? 0);
+    setMynaviSuccessCount(data.mynaviSuccessCount ?? 0);
+    setMynaviFailedCount(data.mynaviFailedCount ?? 0);
+    setMynaviCurrentPageNumber(data.mynaviCurrentPageNumber ?? 0);
+    setMynaviCsvFileName(data.mynaviCsvFileName ?? "");
+    setMynaviCurrentField(data.mynaviCurrentField ?? null);
+    setMynaviCurrentCompany(data.mynaviCurrentCompany ?? null);
+    setMynaviCurrentCompanyIndex(data.mynaviCurrentCompanyIndex ?? 0);
+  };
+
+  const startMynaviStatusPolling = (jobId: string) => {
+    clearMynaviStatusPolling();
+
+    mynaviStatusTimerRef.current = window.setInterval(async () => {
+      try {
+        const res = await fetch("/api/master_data/mynavi", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "get_job_status",
+            jobId,
+          }),
+        });
+
+        const data = await readApiResponse(res);
+
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "マイナビ新卒の進捗取得に失敗しました");
+        }
+
+        applyMynaviStatus(data);
+
+        if (data.jobStatus === "paused") {
+          clearMynaviStatusPolling();
+          setMynaviLoading(false);
+          setMynaviProgressOpen(false);
+          setMynaviResultOpen(true);
+          setMynaviMessage("マイナビ新卒を中断しました");
+          setMynaviError("");
+          return;
+        }
+
+        if (data.jobStatus === "completed") {
+          clearMynaviStatusPolling();
+          setMynaviLoading(false);
+
+          if (data.mynaviJobMode === "count_pages") {
+            setMynaviProgressOpen(false);
+            setMynaviTotalPages(
+              data.mynaviTotalPages ?? data.mynaviDetectedTotalPages ?? 0
+            );
+            setSelectedMynaviPageCount("all");
+            setMynaviPageCountOpen(true);
+            return;
+          }
+
+          setMynaviProgressOpen(false);
+          setMynaviResultOpen(true);
+          setMynaviMessage("マイナビ新卒の取得が完了しました");
+          setMynaviError("");
+          return;
+        }
+
+        if (data.jobStatus === "error") {
+          clearMynaviStatusPolling();
+          setMynaviLoading(false);
+          setMynaviProgressOpen(false);
+          setMynaviError(data.error || "マイナビ新卒の取得でエラーが発生しました");
+        }
+      } catch (e) {
+        clearMynaviStatusPolling();
+        setMynaviLoading(false);
+        setMynaviProgressOpen(false);
+        setMynaviError(
+          e instanceof Error
+            ? e.message
+            : "マイナビ新卒の進捗取得でエラーが発生しました"
+        );
+      }
+    }, 1200);
+  };
+
+  const handleOpenListAdd = () => {
+    setMynaviMessage("");
+    setMynaviError("");
+    setListAddSourceOpen(true);
+  };
+
+  const handleOpenMynaviYear = () => {
+    setListAddSourceOpen(false);
+    setMynaviYearOpen(true);
+  };
+
+  const handleConfirmMynaviGradYear = async () => {
+    setMynaviLoading(true);
+    setMynaviError("");
+    setMynaviMessage("");
+    setMynaviPageCountOpen(false);
+    setMynaviResultOpen(false);
+    setMynaviProgressOpen(true);
+    setMynaviJobId(null);
+    setMynaviJobStatus("running");
+    setMynaviJobMode("count_pages");
+    setMynaviPhase("count_pages");
+    setMynaviDetectedTotalPages(0);
+    setMynaviCurrentField("ページ数を確認しています");
+    setMynaviCurrentCompany(null);
+    setMynaviCurrentCompanyIndex(0);
+    setMynaviTotalUrls(0);
+    setMynaviProcessedCount(0);
+    setMynaviSuccessCount(0);
+    setMynaviFailedCount(0);
+    setMynaviCurrentPageNumber(1);
+
+    try {
+      const res = await fetch("/api/master_data/mynavi", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "start_count_job",
+          gradYear: selectedMynaviGradYear,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "ページ数の取得開始に失敗しました");
+      }
+
+      applyMynaviStatus(data);
+      setMynaviYearOpen(false);
+
+      if (data.jobId) {
+        startMynaviStatusPolling(data.jobId);
+      }
+    } catch (e) {
+      setMynaviLoading(false);
+      setMynaviProgressOpen(false);
+      setMynaviJobStatus("error");
+      setMynaviError(
+        e instanceof Error ? e.message : "ページ数取得でエラーが発生しました"
+      );
+    }
+  };
+
+  const handleStartMynaviJob = async () => {
+    setMynaviLoading(true);
+    setMynaviError("");
+    setMynaviMessage("");
+    setMynaviResultOpen(false);
+    setMynaviProgressOpen(true);
+    setMynaviJobId(null);
+    setMynaviJobStatus("running");
+    setMynaviJobMode("scrape");
+    setMynaviPhase("idle");
+    setMynaviCurrentField("取得開始準備中");
+    setMynaviCurrentCompany(null);
+    setMynaviCurrentCompanyIndex(0);
+    setMynaviTotalUrls(0);
+    setMynaviProcessedCount(0);
+    setMynaviSuccessCount(0);
+    setMynaviFailedCount(0);
+    setMynaviCurrentPageNumber(0);
+    setMynaviCsvFileName("");
+
+    try {
+      const res = await fetch("/api/master_data/mynavi", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "start_job",
+          gradYear: selectedMynaviGradYear,
+          pageCount:
+            selectedMynaviPageCount === "all"
+              ? "all"
+              : Number(selectedMynaviPageCount),
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "マイナビ新卒の取得開始に失敗しました");
+      }
+
+      applyMynaviStatus(data);
+      setMynaviPageCountOpen(false);
+
+      if (data.jobId) {
+        startMynaviStatusPolling(data.jobId);
+      }
+    } catch (e) {
+      setMynaviLoading(false);
+      setMynaviProgressOpen(false);
+      setMynaviJobStatus("error");
+      setMynaviError(
+        e instanceof Error ? e.message : "マイナビ新卒の取得開始でエラーが発生しました"
+      );
+    }
+  };
+
+  const handleDownloadMynaviCsv = async () => {
+    if (!mynaviJobId) return;
+
+    try {
+      const res = await fetch(
+        `/api/master_data/mynavi?action=download_csv&jobId=${encodeURIComponent(
+          mynaviJobId
+        )}`,
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      if (!res.ok) {
+        const data = await readApiResponse(res);
+        throw new Error(data.error || "CSVダウンロードに失敗しました");
+      }
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+
+      a.href = downloadUrl;
+      a.download =
+        mynaviCsvFileName ||
+        `mynavi_${selectedMynaviGradYear}_result.csv`;
+
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (e) {
+      setMynaviError(
+        e instanceof Error ? e.message : "CSVダウンロードでエラーが発生しました"
+      );
+    }
+  };
+
+  const handlePauseMynaviJob = async () => {
+    if (!mynaviJobId) return;
+
+    try {
+      const res = await fetch("/api/master_data/mynavi", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "pause_job",
+          jobId: mynaviJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "中断に失敗しました");
+      }
+
+      setMynaviMessage("中断指示を受け付けました");
+      setMynaviError("");
+    } catch (e) {
+      setMynaviError(
+        e instanceof Error ? e.message : "中断処理でエラーが発生しました"
+      );
+    }
+  };
+
+  const handleCancelMynaviJob = async () => {
+    if (!mynaviJobId) return;
+
+    try {
+      const res = await fetch("/api/master_data/mynavi", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "cancel_job",
+          jobId: mynaviJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "中止に失敗しました");
+      }
+
+      clearMynaviStatusPolling();
+      setMynaviLoading(false);
+      setMynaviProgressOpen(false);
+      setMynaviResultOpen(false);
+      setMynaviJobId(null);
+      setMynaviJobStatus("idle");
+      setMynaviPhase("idle");
+      setMynaviCurrentField(null);
+      setMynaviCurrentCompany(null);
+      setMynaviCurrentCompanyIndex(0);
+      setMynaviMessage("マイナビ新卒を中止しました");
+      setMynaviError("");
+    } catch (e) {
+      setMynaviError(
+        e instanceof Error ? e.message : "中止処理でエラーが発生しました"
+      );
+    }
+  };
+
+  const handleResumeMynaviJob = async () => {
+    if (!mynaviJobId) return;
+
+    setMynaviLoading(true);
+    setMynaviError("");
+    setMynaviMessage("");
+    setMynaviResultOpen(false);
+    setMynaviProgressOpen(true);
+
+    try {
+      const res = await fetch("/api/master_data/mynavi", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "resume_job",
+          jobId: mynaviJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "再開に失敗しました");
+      }
+
+      applyMynaviStatus(data);
+      startMynaviStatusPolling(mynaviJobId);
+    } catch (e) {
+      setMynaviLoading(false);
+      setMynaviProgressOpen(false);
+      setMynaviError(
+        e instanceof Error ? e.message : "再開処理でエラーが発生しました"
+      );
+    }
   };
 
 const handleExportClick = () => {
@@ -3753,13 +4345,11 @@ const handleDownloadTemplate = async () => {
     ).showSaveFilePicker;
 
     if (!showSaveFilePicker) {
-      throw new Error(
-        "この環境では保存場所の選択に対応していません"
-      );
+      throw new Error("この環境では保存場所の選択に対応していません");
     }
 
     const fileHandle = await showSaveFilePicker({
-      suggestedName: "CSVテンプレート_マスタデータ.csv",
+      suggestedName: "master_data_template.csv",
       types: [
         {
           description: "CSVファイル",
@@ -3781,12 +4371,510 @@ const handleDownloadTemplate = async () => {
     }
 
     setImportError(
-      e instanceof Error
-        ? e.message
-        : "CSVテンプレートの保存に失敗しました"
+      e instanceof Error ? e.message : "CSVテンプレート保存に失敗しました"
     );
   }
 };
+
+const openPreviewCsvScope = (source: "crawl" | "item_inspection") => {
+  setPreviewCsvSource(source);
+  setPreviewCsvMode("all");
+  setPreviewCsvConfirmOpen(false);
+  setPreviewCsvScopeOpen(true);
+};
+
+const handlePreviewCsvExport = async () => {
+  if (!previewCsvSource) {
+    return;
+  }
+
+  setPreviewCsvConfirmOpen(false);
+
+  try {
+    if (previewCsvSource === "crawl") {
+      if (!crawlJobId) {
+        throw new Error("クローリングジョブが見つかりません");
+      }
+
+      const candidateRows = await fetchAllCrawlPreviewRowsForCsv(
+        crawlJobId,
+        "candidate"
+      );
+
+      const candidateKeys = collectCrawlPreviewCandidateKeys(candidateRows);
+
+      const exportRows =
+        previewCsvMode === "candidate"
+          ? buildCrawlPreviewCsvRows(candidateRows, "candidate", candidateKeys)
+          : [
+              ...buildCrawlPreviewCsvRows(
+                candidateRows,
+                "candidate",
+                candidateKeys
+              ),
+              ...buildCrawlPreviewCsvRows(
+                await fetchAllCrawlPreviewRowsForCsv(crawlJobId, "excluded"),
+                "excluded",
+                candidateKeys
+              ),
+            ];
+
+      if (exportRows.length === 0) {
+        throw new Error("CSV抽出対象がありません");
+      }
+
+      const csvText = buildPreviewCsvText(
+        buildPreviewCsvHeaders(candidateKeys),
+        exportRows
+      );
+
+      await savePreviewCsvText(
+        csvText,
+        createPreviewCsvFileName("crawl", previewCsvMode)
+      );
+
+      setPreviewCsvSource(null);
+      setCrawlMessage(
+        previewCsvMode === "all"
+          ? "全てのリストをCSV保存しました"
+          : "候補のみリストをCSV保存しました"
+      );
+      return;
+    }
+
+    if (!itemInspectionJobId) {
+      throw new Error("項目精査ジョブが見つかりません");
+    }
+
+    const candidateRows = await fetchAllItemInspectionPreviewRowsForCsv(
+      itemInspectionJobId,
+      "candidate"
+    );
+
+    const candidateKeys =
+      collectItemInspectionPreviewCandidateKeys(candidateRows);
+
+    const exportRows =
+      previewCsvMode === "candidate"
+        ? buildItemInspectionPreviewCsvRows(
+            candidateRows,
+            "candidate",
+            candidateKeys
+          )
+        : [
+            ...buildItemInspectionPreviewCsvRows(
+              candidateRows,
+              "candidate",
+              candidateKeys
+            ),
+            ...buildItemInspectionPreviewCsvRows(
+              await fetchAllItemInspectionPreviewRowsForCsv(
+                itemInspectionJobId,
+                "excluded"
+              ),
+              "excluded",
+              candidateKeys
+            ),
+          ];
+
+    if (exportRows.length === 0) {
+      throw new Error("CSV抽出対象がありません");
+    }
+
+    const csvText = buildPreviewCsvText(
+      buildPreviewCsvHeaders(candidateKeys),
+      exportRows
+    );
+
+    await savePreviewCsvText(
+      csvText,
+      createPreviewCsvFileName("item_inspection", previewCsvMode)
+    );
+
+    setPreviewCsvSource(null);
+    setItemInspectionMessage(
+      previewCsvMode === "all"
+        ? "全てのリストをCSV保存しました"
+        : "候補のみリストをCSV保存しました"
+    );
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "CSV抽出に失敗しました";
+
+    if (previewCsvSource === "crawl") {
+      setCrawlError(message);
+    } else {
+      setItemInspectionError(message);
+    }
+  }
+};
+
+  const PREVIEW_CSV_BASE_FIELDS: Array<{
+    key: keyof Row;
+    label: string;
+  }> = [
+    { key: "company", label: "企業名" },
+    { key: "zipcode", label: "郵便番号" },
+    { key: "address", label: "住所" },
+    { key: "big_industry", label: "大業種" },
+    { key: "small_industry", label: "小業種" },
+    { key: "company_kana", label: "企業名（かな）" },
+    { key: "summary", label: "企業概要" },
+    { key: "website_url", label: "企業URL" },
+    { key: "form_url", label: "お問い合わせフォームURL" },
+    { key: "phone", label: "電話番号" },
+    { key: "fax", label: "FAX番号" },
+    { key: "email", label: "メールアドレス" },
+    { key: "established_date", label: "設立年月" },
+    { key: "representative_name", label: "代表者名" },
+    { key: "representative_title", label: "代表者役職" },
+    { key: "capital", label: "資本金" },
+    { key: "employee_count", label: "従業員数" },
+    { key: "employee_count_year", label: "従業員数年度" },
+    { key: "previous_sales", label: "前年売上高" },
+    { key: "latest_sales", label: "直近売上高" },
+    { key: "closing_month", label: "決算月" },
+    { key: "office_count", label: "事業所数" },
+    { key: "tag", label: "タグ" },
+    { key: "business_type", label: "業種" },
+    { key: "business_content", label: "事業内容" },
+    { key: "industry_category", label: "業界" },
+    { key: "memo", label: "メモ" },
+  ];
+
+  const ITEM_INSPECTION_FIELD_LABEL_TO_KEY: Partial<
+    Record<string, keyof Row>
+  > = {
+    代表者名: "representative_name",
+  };
+
+  const escapePreviewCsvValue = (value: unknown) => {
+    const text = value == null ? "" : String(value);
+    return `"${text.replace(/"/g, `""`)}"`;
+  };
+
+  const buildPreviewCsvText = (
+    headers: string[],
+    rows: Array<Record<string, unknown>>
+  ) => {
+    const lines = [
+      headers.map((header) => escapePreviewCsvValue(header)).join(","),
+      ...rows.map((row) =>
+        headers.map((header) => escapePreviewCsvValue(row[header] ?? "")).join(",")
+      ),
+    ];
+
+    return "\uFEFF" + lines.join("\r\n");
+  };
+
+  const createPreviewCsvFileName = (
+    source: "crawl" | "item_inspection",
+    mode: "all" | "candidate"
+  ) => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, "0");
+    const dd = String(now.getDate()).padStart(2, "0");
+    const hh = String(now.getHours()).padStart(2, "0");
+    const mi = String(now.getMinutes()).padStart(2, "0");
+    const ss = String(now.getSeconds()).padStart(2, "0");
+
+    return `master_data_${source}_${mode}_${yyyy}${mm}${dd}_${hh}${mi}${ss}.csv`;
+  };
+
+  const savePreviewCsvText = async (csvText: string, fileName: string) => {
+    const showSaveFilePicker = (
+      window as Window & {
+        showSaveFilePicker?: (options?: {
+          suggestedName?: string;
+          types?: Array<{
+            description?: string;
+            accept: Record<string, string[]>;
+          }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+        }>;
+      }
+    ).showSaveFilePicker;
+
+    if (!showSaveFilePicker) {
+      throw new Error("この環境では保存場所の選択に対応していません");
+    }
+
+    const fileHandle = await showSaveFilePicker({
+      suggestedName: fileName,
+      types: [
+        {
+          description: "CSVファイル",
+          accept: {
+            "text/csv": [".csv"],
+          },
+        },
+      ],
+    });
+
+    const writable = await fileHandle.createWritable();
+    await writable.write(new Blob([csvText], { type: "text/csv;charset=utf-8;" }));
+    await writable.close();
+  };
+
+  const buildPreviewCsvHeaders = (candidateKeys: Array<keyof Row>) => {
+    const candidateKeySet = new Set<keyof Row>(candidateKeys);
+    const headers = ["区分"];
+
+    PREVIEW_CSV_BASE_FIELDS.forEach((field) => {
+      if (candidateKeySet.has(field.key)) {
+        headers.push(`${field.label}（変更前）`);
+        headers.push(`${field.label}（候補一覧）`);
+      } else {
+        headers.push(field.label);
+      }
+    });
+
+    return headers;
+  };
+
+  const createBasePreviewCsvRow = (
+    sourceRow: Row | null,
+    sectionLabel: string
+  ) => {
+    const csvRow: Record<string, unknown> = {
+      区分: sectionLabel,
+    };
+
+    PREVIEW_CSV_BASE_FIELDS.forEach((field) => {
+      csvRow[field.label] = sourceRow?.[field.key] ?? "";
+    });
+
+    return csvRow;
+  };
+
+  const fetchAllCrawlPreviewRowsForCsv = async (
+    jobId: string,
+    previewTab: "candidate" | "excluded"
+  ) => {
+    const allRows: CrawlPreviewRow[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const res = await fetch("/api/master_data/crawl", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "get_job_status",
+          jobId,
+          previewTab,
+          previewPage: page,
+          previewPageSize: 100,
+        }),
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "クローリング結果確認の取得に失敗しました");
+      }
+
+      allRows.push(...(data.previewRows || []));
+
+      const pageSize = Math.max(Number(data.previewPageSize ?? 100), 1);
+      totalPages = Math.max(
+        1,
+        Math.ceil((data.previewTotal ?? 0) / pageSize)
+      );
+
+      page += 1;
+    }
+
+    return allRows;
+  };
+
+  const fetchAllItemInspectionPreviewRowsForCsv = async (
+    jobId: string,
+    previewTab: "candidate" | "excluded"
+  ) => {
+    if (previewTab === "candidate") {
+      const res = await fetch("/api/master_data/item_inspection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "get_job_status",
+          jobId,
+          previewTab: "candidate",
+          previewPage: 1,
+          previewPageSize: 100,
+        }),
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "項目精査結果確認の取得に失敗しました");
+      }
+
+      return data.inspectionPreviewChanges || [];
+    }
+
+    const allRows: ItemInspectionPreviewChange[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const res = await fetch("/api/master_data/item_inspection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "get_job_status",
+          jobId,
+          previewTab: "excluded",
+          previewPage: page,
+          previewPageSize: 100,
+        }),
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "項目精査結果確認の取得に失敗しました");
+      }
+
+      allRows.push(...(data.inspectionPreviewChanges || []));
+
+      const pageSize = Math.max(Number(data.previewPageSize ?? 100), 1);
+      totalPages = Math.max(
+        1,
+        Math.ceil((data.previewTotal ?? 0) / pageSize)
+      );
+
+      page += 1;
+    }
+
+    return allRows;
+  };
+
+  const collectCrawlPreviewCandidateKeys = (rows: CrawlPreviewRow[]) => {
+    return Array.from(
+      new Set(
+        rows.flatMap((row) =>
+          row.changes.map((change) => change.key as keyof Row)
+        )
+      )
+    );
+  };
+
+  const collectItemInspectionPreviewCandidateKeys = (
+    rows: ItemInspectionPreviewChange[]
+  ) => {
+    return Array.from(
+      new Set(
+        rows
+          .map((row) => ITEM_INSPECTION_FIELD_LABEL_TO_KEY[row.fieldLabel])
+          .filter((value): value is keyof Row => Boolean(value))
+      )
+    );
+  };
+
+  const buildCrawlPreviewCsvRows = (
+    rows: CrawlPreviewRow[],
+    previewTab: "candidate" | "excluded",
+    candidateKeys: Array<keyof Row>
+  ) => {
+    const candidateKeySet = new Set<keyof Row>(candidateKeys);
+
+    return rows.map((row) => {
+      const csvRow = createBasePreviewCsvRow(
+        row.source_row,
+        previewTab === "candidate" ? "候補" : "候補外"
+      );
+
+      const changeMap = new Map<keyof Row, CrawlPreviewChange>(
+        row.changes.map((change) => [change.key as keyof Row, change])
+      );
+
+      PREVIEW_CSV_BASE_FIELDS.forEach((field) => {
+        if (!candidateKeySet.has(field.key)) {
+          return;
+        }
+
+        const change = changeMap.get(field.key);
+        delete csvRow[field.label];
+        csvRow[`${field.label}（変更前）`] = change?.before ?? "";
+        csvRow[`${field.label}（候補一覧）`] = change
+          ? change.candidates.length > 0
+            ? change.candidates.join(" / ")
+            : change.after ?? ""
+          : "";
+      });
+
+      return csvRow;
+    });
+  };
+
+  const getItemInspectionCandidateText = (row: ItemInspectionPreviewChange) => {
+    if (row.action === "delete") {
+      return "(削除)";
+    }
+
+    if (row.action === "review") {
+      return "(要確認)";
+    }
+
+    if (row.action === "none") {
+      return "";
+    }
+
+    return row.afterValue ?? "";
+  };
+
+  const buildItemInspectionPreviewCsvRows = (
+    rows: ItemInspectionPreviewChange[],
+    previewTab: "candidate" | "excluded",
+    candidateKeys: Array<keyof Row>
+  ) => {
+    const candidateKeySet = new Set<keyof Row>(candidateKeys);
+
+    return rows.map((row) => {
+      const csvRow = createBasePreviewCsvRow(
+        row.source_row,
+        previewTab === "candidate" ? "候補" : "候補外"
+      );
+
+      const fieldKey = ITEM_INSPECTION_FIELD_LABEL_TO_KEY[row.fieldLabel];
+
+      PREVIEW_CSV_BASE_FIELDS.forEach((field) => {
+        if (!candidateKeySet.has(field.key)) {
+          return;
+        }
+
+        delete csvRow[field.label];
+
+        if (fieldKey === field.key) {
+          csvRow[`${field.label}（変更前）`] = row.beforeValue ?? "";
+          csvRow[`${field.label}（候補一覧）`] =
+            previewTab === "candidate"
+              ? getItemInspectionCandidateText(row)
+              : "";
+        } else {
+          csvRow[`${field.label}（変更前）`] = "";
+          csvRow[`${field.label}（候補一覧）`] = "";
+        }
+      });
+
+      return csvRow;
+    });
+  };
 
   const getDefaultCrawlPreviewValue = (change: CrawlPreviewChange) => {
     return change.candidates.length > 1
@@ -3882,7 +4970,11 @@ const handleDownloadTemplate = async () => {
     });
   };
 
-  const fetchCrawlPreviewPage = async (jobId: string, nextPage: number) => {
+  const fetchCrawlPreviewPage = async (
+    jobId: string,
+    nextPage: number,
+    previewTab: "candidate" | "excluded" = crawlPreviewTab
+  ) => {
     setCrawlPreviewLoading(true);
 
     try {
@@ -3896,6 +4988,7 @@ const handleDownloadTemplate = async () => {
           jobId,
           previewPage: nextPage,
           previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
+          previewTab,
         }),
       });
 
@@ -3925,6 +5018,14 @@ const handleDownloadTemplate = async () => {
     if (nextPage < 1 || nextPage > crawlPreviewTotalPages) return;
 
     await fetchCrawlPreviewPage(crawlJobId, nextPage);
+  };
+
+  const handleChangeCrawlPreviewTab = async (
+    nextTab: "candidate" | "excluded"
+  ) => {
+    if (!crawlJobId) return;
+    setCrawlPreviewTab(nextTab);
+    await fetchCrawlPreviewPage(crawlJobId, 1, nextTab);
   };
 
   const clearCrawlElapsedTimer = () => {
@@ -3994,6 +5095,11 @@ const handleDownloadTemplate = async () => {
 
   const averageCrawlMs =
     crawlAverageDivisor > 0 ? Math.round(crawlElapsedMs / crawlAverageDivisor) : 0;
+
+  const crawlCandidatePercent =
+    crawlProcessedCount === 0
+      ? 0
+      : Math.round((crawlUpdatedCount / crawlProcessedCount) * 100);
 
   const clearCrawlStatusPolling = () => {
     if (crawlStatusTimerRef.current !== null) {
@@ -4667,18 +5773,91 @@ const handleDownloadTemplate = async () => {
     data: ApiResponse
   ) => {
     const previewChanges = data.inspectionPreviewChanges || [];
+    const excludedCount = data.skipped ?? 0;
 
     setItemInspectionPreviewChanges(previewChanges);
+    setItemInspectionExcludedPreviewRows([]);
+    setItemInspectionExcludedTotalCount(excludedCount);
     setItemInspectionCheckedPreviewRowIds(
       Object.fromEntries(previewChanges.map((row) => [row.rowId, true]))
     );
-
+    setItemInspectionPreviewTab("candidate");
     setItemInspectionPreviewPage(1);
 
-    if (previewChanges.length > 0) {
+    if (previewChanges.length > 0 || excludedCount > 0) {
       setItemInspectionPreviewConfirmOpen(true);
     } else {
       setItemInspectionPreviewConfirmOpen(false);
+    }
+  };
+
+  const fetchItemInspectionExcludedPreviewPage = async (
+    jobId: string,
+    nextPage: number
+  ) => {
+    const res = await fetch("/api/master_data/item_inspection", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "get_job_status",
+        jobId,
+        previewTab: "excluded",
+        previewPage: nextPage,
+        previewPageSize: ITEM_INSPECTION_PREVIEW_PAGE_SIZE,
+      }),
+    });
+
+    const data = await readApiResponse(res);
+
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || "候補外の取得に失敗しました");
+    }
+
+    applyItemInspectionStatus(data);
+    setItemInspectionExcludedPreviewRows(data.inspectionPreviewChanges || []);
+    setItemInspectionExcludedTotalCount(data.previewTotal ?? 0);
+    setItemInspectionPreviewPage(data.previewPage ?? nextPage);
+  };
+
+  const handleItemInspectionPreviewTabChange = async (
+    nextTab: "candidate" | "excluded"
+  ) => {
+    setItemInspectionPreviewTab(nextTab);
+    setItemInspectionPreviewPage(1);
+
+    if (nextTab === "excluded" && itemInspectionJobId) {
+      try {
+        await fetchItemInspectionExcludedPreviewPage(itemInspectionJobId, 1);
+      } catch (e) {
+        setItemInspectionError(
+          e instanceof Error ? e.message : "候補外取得でエラーが発生しました"
+        );
+      }
+    }
+  };
+
+  const handleItemInspectionPreviewPageChange = async (nextPage: number) => {
+    if (nextPage < 1 || nextPage > itemInspectionPreviewTotalPages) {
+      return;
+    }
+
+    if (itemInspectionPreviewTab === "candidate") {
+      setItemInspectionPreviewPage(nextPage);
+      return;
+    }
+
+    if (!itemInspectionJobId) {
+      return;
+    }
+
+    try {
+      await fetchItemInspectionExcludedPreviewPage(itemInspectionJobId, nextPage);
+    } catch (e) {
+      setItemInspectionError(
+        e instanceof Error ? e.message : "候補外取得でエラーが発生しました"
+      );
     }
   };
 
@@ -4756,7 +5935,16 @@ const handleDownloadTemplate = async () => {
   };
 
   const handleCancelItemInspection = async () => {
-    if (!itemInspectionJobId) return;
+    if (!itemInspectionJobId) {
+      setItemInspectionPreviewConfirmOpen(false);
+      setItemInspectionPreviewChanges([]);
+      setItemInspectionExcludedPreviewRows([]);
+      setItemInspectionExcludedTotalCount(0);
+      setItemInspectionPreviewTab("candidate");
+      setItemInspectionPreviewPage(1);
+      setItemInspectionCheckedPreviewRowIds({});
+      return;
+    }
 
     try {
       const res = await fetch("/api/master_data/item_inspection", {
@@ -4780,6 +5968,13 @@ const handleDownloadTemplate = async () => {
       stopItemInspectionElapsedTracking();
       setItemInspecting(false);
       setItemInspectionProgressOpen(false);
+      setItemInspectionPreviewConfirmOpen(false);
+      setItemInspectionPreviewChanges([]);
+      setItemInspectionExcludedPreviewRows([]);
+      setItemInspectionExcludedTotalCount(0);
+      setItemInspectionPreviewTab("candidate");
+      setItemInspectionPreviewPage(1);
+      setItemInspectionCheckedPreviewRowIds({});
       setItemInspectionJobId(null);
       setItemInspectionJobStatus("idle");
       setItemInspectionTotalTargets(0);
@@ -4829,6 +6024,54 @@ const handleDownloadTemplate = async () => {
     }
   };
 
+  const handleResumeItemInspection = async () => {
+    if (!itemInspectionJobId) return;
+
+    setItemInspectionPreviewConfirmOpen(false);
+    setItemInspectionPreviewChanges([]);
+    setItemInspectionExcludedPreviewRows([]);
+    setItemInspectionExcludedTotalCount(0);
+    setItemInspectionPreviewTab("candidate");
+    setItemInspectionPreviewPage(1);
+    setItemInspectionCheckedPreviewRowIds({});
+    setItemInspectionError("");
+    setItemInspectionMessage("");
+    setItemInspecting(true);
+    setItemInspectionJobStatus("running");
+    setItemInspectionProgressOpen(true);
+    startItemInspectionElapsedTracking(false);
+
+    try {
+      const res = await fetch("/api/master_data/item_inspection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "resume_job",
+          jobId: itemInspectionJobId,
+        }),
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "再開に失敗しました");
+      }
+
+      applyItemInspectionStatus(data);
+      startItemInspectionStatusPolling(itemInspectionJobId);
+    } catch (e) {
+      clearItemInspectionStatusPolling();
+      stopItemInspectionElapsedTracking();
+      setItemInspecting(false);
+      setItemInspectionProgressOpen(false);
+      setItemInspectionError(
+        e instanceof Error ? e.message : "再開処理でエラーが発生しました"
+      );
+    }
+  };
+
   const handleRunItemInspection = async () => {
     if (!itemInspectionTargetScope) return;
 
@@ -4841,7 +6084,7 @@ const handleDownloadTemplate = async () => {
       return;
     }
 
-    if (!itemInspectionMethodSelections.representative_name_remove_non_name) {
+    if (!hasSelectedItemInspectionMethods) {
       return;
     }
 
@@ -4851,6 +6094,10 @@ const handleDownloadTemplate = async () => {
     setItemInspectionError("");
     setItemInspectionMessage("");
     setItemInspectionPreviewChanges([]);
+    setItemInspectionExcludedPreviewRows([]);
+    setItemInspectionExcludedTotalCount(0);
+    setItemInspectionPreviewTab("candidate");
+    setItemInspectionPreviewPage(1);
     setItemInspectionCheckedPreviewRowIds({});
     setItemInspectionJobId(null);
     setItemInspectionJobStatus("running");
@@ -4921,7 +6168,9 @@ const handleDownloadTemplate = async () => {
 
   const handleApplyItemInspectionChanges = async () => {
     const targetChanges = itemInspectionPreviewChanges.filter(
-      (row) => itemInspectionCheckedPreviewRowIds[row.rowId] !== false
+      (row) =>
+        row.action !== "review" &&
+        itemInspectionCheckedPreviewRowIds[row.rowId] !== false
     );
 
     if (targetChanges.length === 0) {
@@ -4952,6 +6201,10 @@ const handleDownloadTemplate = async () => {
 
       setItemInspectionPreviewConfirmOpen(false);
       setItemInspectionPreviewChanges([]);
+      setItemInspectionExcludedPreviewRows([]);
+      setItemInspectionExcludedTotalCount(0);
+      setItemInspectionPreviewTab("candidate");
+      setItemInspectionPreviewPage(1);
       setItemInspectionCheckedPreviewRowIds({});
       setItemInspectionMessage(data.message || "精査結果を反映しました");
 
@@ -5091,21 +6344,19 @@ const handleDownloadTemplate = async () => {
     selectedItemInspectionFields.length > 0;
 
   const hasSelectedItemInspectionMethods =
-    itemInspectionMethodSelections.representative_name_remove_non_name;
+    itemInspectionMethodSelections.representative_name_remove_non_name ||
+    itemInspectionMethodSelections.representative_name_inspect_name;
 
-  const itemInspectionProcessingCount =
-    itemInspectionJobStatus === "running" && itemInspectionCurrentCompany
-      ? 1
-      : 0;
-
-  const itemInspectionAverageDivisor = Math.max(
-    itemInspectionProcessedCount,
-    itemInspectionProcessingCount
-  );
+  const itemInspectionCandidatePercent =
+    itemInspectionProcessedCount === 0
+      ? 0
+      : Math.round(
+          (itemInspectionUpdatedCount / itemInspectionProcessedCount) * 100
+        );
 
   const averageItemInspectionMs =
-    itemInspectionAverageDivisor > 0
-      ? Math.round(itemInspectionElapsedMs / itemInspectionAverageDivisor)
+    itemInspectionProcessedCount > 0
+      ? Math.round(itemInspectionElapsedMs / itemInspectionProcessedCount)
       : 0;
 
   const itemInspectionProgressPercent =
@@ -5370,6 +6621,468 @@ const handleDownloadTemplate = async () => {
             document.body
           )}
 
+                  {listAddSourceOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => setListAddSourceOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      リスト追加 項目選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setListAddSourceOpen(false)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-6">
+                    <button
+                      type="button"
+                      onClick={handleOpenMynaviYear}
+                      className="h-11 w-full rounded-xl bg-emerald-600 px-5 text-sm font-medium text-white transition hover:bg-emerald-500"
+                    >
+                      マイナビ新卒
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {mynaviYearOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => setMynaviYearOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      マイナビ新卒 年卒選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setMynaviYearOpen(false)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-6">
+                    <select
+                      value={selectedMynaviGradYear}
+                      onChange={(e) => setSelectedMynaviGradYear(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-3 text-sm text-slate-100 outline-none focus:border-sky-500"
+                    >
+                      {Array.from({ length: 99 }, (_, index) => {
+                        const value = String(index + 1).padStart(2, "0");
+                        return (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setMynaviYearOpen(false)}
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleConfirmMynaviGradYear}
+                      disabled={mynaviLoading}
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+                    >
+                      はい
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {mynaviPageCountOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              onClick={() => setMynaviPageCountOpen(false)}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      マイナビ新卒 ページ数選択
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setMynaviPageCountOpen(false)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 px-4 py-6">
+                    <div className="text-sm text-slate-200">
+                      全部で {mynaviTotalPages.toLocaleString()} ページあります
+                    </div>
+
+                    <select
+                      value={selectedMynaviPageCount}
+                      onChange={(e) => setSelectedMynaviPageCount(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-white/10 bg-[#0f172a] px-3 text-sm text-slate-100 outline-none focus:border-sky-500"
+                    >
+                      <option value="all">全ページ</option>
+                      {mynaviPageCountOptions.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setMynaviPageCountOpen(false)}
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
+                    >
+                      いいえ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleStartMynaviJob}
+                      disabled={mynaviLoading}
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+                    >
+                      はい
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {mynaviProgressOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      マイナビ新卒 進行状況
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setMynaviProgressOpen(false)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 px-4 py-6">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">年卒</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {selectedMynaviGradYear}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">処理</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {getMynaviPhaseLabel(mynaviJobMode, mynaviPhase)}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">現在ページ</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {mynaviCurrentPageNumber > 0
+                            ? mynaviCurrentPageNumber.toLocaleString()
+                            : "-"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">
+                          {mynaviJobMode === "count_pages" ? "検出ページ数" : "取得URL数"}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {(mynaviJobMode === "count_pages"
+                            ? mynaviDetectedTotalPages
+                            : mynaviTotalUrls
+                          ).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+
+                    {mynaviJobMode === "count_pages" ? (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                          <div className="text-xs text-slate-400">状況</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-100">
+                            {getMynaviFieldLabel(mynaviCurrentField)}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                          <div className="text-xs text-slate-400">全ページ</div>
+                          <div className="mt-1 text-sm font-semibold text-slate-100">
+                            {mynaviTotalPages > 0 ? mynaviTotalPages.toLocaleString() : "-"}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="text-xs text-slate-400">完了社数</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-100">
+                              {mynaviProcessedCount.toLocaleString()} / {mynaviTotalUrls.toLocaleString()}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="text-xs text-slate-400">現在社数</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-100">
+                              {mynaviCurrentCompanyIndex > 0
+                                ? `${mynaviCurrentCompanyIndex.toLocaleString()}社目`
+                                : "-"}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="text-xs text-slate-400">成功件数</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-100">
+                              {mynaviSuccessCount.toLocaleString()}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="text-xs text-slate-400">失敗件数</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-100">
+                              {mynaviFailedCount.toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="text-xs text-slate-400">現在項目</div>
+                            <div className="mt-1 text-sm font-semibold text-slate-100">
+                              {getMynaviFieldLabel(mynaviCurrentField)}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="text-xs text-slate-400">現在企業</div>
+                            <div className="mt-1 break-all text-sm font-semibold text-slate-100">
+                              {mynaviCurrentCompany && mynaviCurrentCompany.trim() !== ""
+                                ? mynaviCurrentCompany
+                                : "-"}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    {mynaviJobMode === "count_pages" ? (
+                      <button
+                        type="button"
+                        onClick={() => setMynaviProgressOpen(false)}
+                        className="h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                      >
+                        閉じる
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleCancelMynaviJob}
+                          className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
+                        >
+                          中止
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handlePauseMynaviJob}
+                          className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                        >
+                          中断
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {mynaviResultOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                    <div className="text-sm font-semibold text-slate-100">
+                      マイナビ新卒 結果確認
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setMynaviResultOpen(false)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 px-4 py-6">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">状態</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {mynaviJobStatus === "paused" ? "中断" : "完了"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">年卒</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {selectedMynaviGradYear}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">全ページ数</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {mynaviTotalPages.toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">取得対象ページ数</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {selectedMynaviPageCount === "all"
+                            ? "全ページ"
+                            : selectedMynaviPageCount}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">取得URL数</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {mynaviTotalUrls.toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">完了社数</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {mynaviProcessedCount.toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">成功件数</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {mynaviSuccessCount.toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                        <div className="text-xs text-slate-400">失敗件数</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-100">
+                          {mynaviFailedCount.toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setMynaviResultOpen(false)}
+                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                    >
+                      閉じる
+                    </button>
+
+                    {mynaviJobStatus === "paused" && (
+                      <button
+                        type="button"
+                        onClick={handleResumeMynaviJob}
+                        className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        再開
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleDownloadMynaviCsv}
+                      className="h-10 flex-1 rounded-xl bg-emerald-600 px-3 text-sm font-medium text-white transition hover:bg-emerald-500"
+                    >
+                      CSV抽出
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
         {activeAdvancedFilterKey &&
           typeof document !== "undefined" &&
           createPortal(
@@ -5563,7 +7276,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={() => setItemInspectionFieldOpen(false)}
                       disabled={itemInspecting}
-                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -5581,8 +7294,8 @@ const handleDownloadTemplate = async () => {
                       disabled={itemInspecting || !hasSelectedItemInspectionFields}
                       className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
                         !hasSelectedItemInspectionFields
-                          ? "bg-cyan-500/30 text-white/60"
-                          : "bg-cyan-500 hover:bg-cyan-400"
+                          ? "bg-sky-500/30 text-white/60"
+                          : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
                       はい
@@ -5644,7 +7357,7 @@ const handleDownloadTemplate = async () => {
                   </div>
 
                   <div className="px-4 py-6">
-                    <div className="grid grid-cols-1 gap-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                       <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200">
                         <input
                           type="checkbox"
@@ -5662,6 +7375,24 @@ const handleDownloadTemplate = async () => {
                         />
                         <span>氏名以外を削除</span>
                       </label>
+
+                      <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={
+                            itemInspectionMethodSelections.representative_name_inspect_name
+                          }
+                          onChange={() =>
+                            setItemInspectionMethodSelections((prev) => ({
+                              ...prev,
+                              representative_name_inspect_name:
+                                !prev.representative_name_inspect_name,
+                            }))
+                          }
+                          className="h-4 w-4 accent-cyan-500"
+                        />
+                        <span>氏名を精査</span>
+                      </label>
                     </div>
                   </div>
 
@@ -5670,7 +7401,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={() => setItemInspectionMethodOpen(false)}
                       disabled={itemInspecting}
-                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -5683,8 +7414,8 @@ const handleDownloadTemplate = async () => {
                       }
                       className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
                         !hasSelectedItemInspectionMethods
-                          ? "bg-cyan-500/30 text-white/60"
-                          : "bg-cyan-500 hover:bg-cyan-400"
+                          ? "bg-sky-500/30 text-white/60"
+                          : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
                       {itemInspecting ? "精査中..." : "はい"}
@@ -5776,9 +7507,9 @@ const handleDownloadTemplate = async () => {
                       </div>
 
                       <div className="rounded-xl border border-white/10 bg-[#0f172a] p-4">
-                        <div className="text-xs text-slate-400">処理中</div>
+                        <div className="text-xs text-slate-400">精査率</div>
                         <div className="mt-1 text-lg font-semibold text-slate-100">
-                          {itemInspectionProcessingCount.toLocaleString()}
+                          {itemInspectionCandidatePercent}%
                         </div>
                       </div>
 
@@ -5812,7 +7543,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handlePauseItemInspection}
                       disabled={!itemInspecting}
-                      className="h-10 w-[120px] flex-none rounded-xl bg-cyan-500 px-3 text-sm font-medium text-white transition hover:bg-cyan-400 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
                       中断
                     </button>
@@ -5826,13 +7557,7 @@ const handleDownloadTemplate = async () => {
         {itemInspectionPreviewConfirmOpen &&
           typeof document !== "undefined" &&
           createPortal(
-            <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
-              onClick={() => {
-                if (itemInspecting) return;
-                setItemInspectionPreviewConfirmOpen(false);
-              }}
-            >
+            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
               <div className="flex min-h-full items-center justify-center">
                 <div
                   className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
@@ -5840,7 +7565,7 @@ const handleDownloadTemplate = async () => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      項目精査確認
+                      項目精査 結果確認
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -5878,7 +7603,13 @@ const handleDownloadTemplate = async () => {
                       チェックした項目のみ反映します。
                     </div>
 
-                    {itemInspectionPreviewChanges.length === 0 ? (
+                    {itemInspectionPreviewTab === "excluded" && (
+                      <div className="mb-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+                        候補外は確認用の表示です。反映対象にはなりません。
+                      </div>
+                    )}
+
+                    {visibleItemInspectionPreviewTotalCount === 0 ? (
                       <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
                         反映対象はありません
                       </div>
@@ -5887,15 +7618,16 @@ const handleDownloadTemplate = async () => {
                         <div className="mb-4 border-b border-white/10 pb-4">
                           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div className="text-xs text-slate-400">
-                              削除候補 {itemInspectionPreviewChanges.length.toLocaleString()}件中{" "}
-                              {(itemInspectionPreviewPage - 1) *
-                                ITEM_INSPECTION_PREVIEW_PAGE_SIZE +
-                                1}
+                              {itemInspectionPreviewTab === "candidate" ? "精査候補" : "候補外"} {visibleItemInspectionPreviewTotalCount.toLocaleString()}件中{" "}
+                              {visibleItemInspectionPreviewTotalCount === 0
+                                ? 0
+                                : (itemInspectionPreviewPage - 1) *
+                                    ITEM_INSPECTION_PREVIEW_PAGE_SIZE +
+                                  1}
                               〜
                               {Math.min(
-                                itemInspectionPreviewPage *
-                                  ITEM_INSPECTION_PREVIEW_PAGE_SIZE,
-                                itemInspectionPreviewChanges.length
+                                itemInspectionPreviewPage * ITEM_INSPECTION_PREVIEW_PAGE_SIZE,
+                                visibleItemInspectionPreviewTotalCount
                               )}
                               件を表示
                             </div>
@@ -5903,11 +7635,39 @@ const handleDownloadTemplate = async () => {
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setItemInspectionPreviewPage((prev) =>
-                                    Math.max(prev - 1, 1)
-                                  )
-                                }
+                                onClick={() => {
+                                  void handleItemInspectionPreviewTabChange("candidate");
+                                }}
+                                className={`h-8 rounded-lg px-3 text-xs font-medium transition ${
+                                  itemInspectionPreviewTab === "candidate"
+                                    ? "bg-sky-500 text-white"
+                                    : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                                }`}
+                              >
+                                候補
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleItemInspectionPreviewTabChange("excluded");
+                                }}
+                                className={`h-8 rounded-lg px-3 text-xs font-medium transition ${
+                                  itemInspectionPreviewTab === "excluded"
+                                    ? "bg-sky-500 text-white"
+                                    : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                                }`}
+                              >
+                                候補外
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleItemInspectionPreviewPageChange(
+                                    itemInspectionPreviewPage - 1
+                                  );
+                                }}
                                 disabled={
                                   itemInspectionPreviewPage === 1 || itemInspecting
                                 }
@@ -5917,23 +7677,18 @@ const handleDownloadTemplate = async () => {
                               </button>
 
                               <div className="text-xs text-slate-300">
-                                {itemInspectionPreviewPage} /{" "}
-                                {itemInspectionPreviewTotalPages}
+                                {itemInspectionPreviewPage} / {itemInspectionPreviewTotalPages}
                               </div>
 
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setItemInspectionPreviewPage((prev) =>
-                                    Math.min(
-                                      prev + 1,
-                                      itemInspectionPreviewTotalPages
-                                    )
-                                  )
-                                }
+                                onClick={() => {
+                                  void handleItemInspectionPreviewPageChange(
+                                    itemInspectionPreviewPage + 1
+                                  );
+                                }}
                                 disabled={
-                                  itemInspectionPreviewPage >=
-                                    itemInspectionPreviewTotalPages ||
+                                  itemInspectionPreviewPage >= itemInspectionPreviewTotalPages ||
                                   itemInspecting
                                 }
                                 className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
@@ -5945,7 +7700,7 @@ const handleDownloadTemplate = async () => {
                         </div>
 
                         <div className="grid max-h-[60vh] grid-cols-1 gap-2 overflow-y-auto">
-                          {pagedItemInspectionPreviewChanges.map((row) => (
+                          {visibleItemInspectionPreviewChanges.map((row) => (
                             <label
                               key={row.rowId}
                               className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
@@ -5982,6 +7737,10 @@ const handleDownloadTemplate = async () => {
                                   反映後：
                                   {row.action === "delete"
                                     ? "(削除)"
+                                    : row.action === "review"
+                                    ? "(要確認)"
+                                    : row.action === "none"
+                                    ? "(候補外)"
                                     : row.afterValue || "-"}
                                 </div>
 
@@ -5991,7 +7750,13 @@ const handleDownloadTemplate = async () => {
                               </div>
 
                               <div className="shrink-0 rounded-lg border border-white/10 bg-[#0f172a] px-2 py-1 text-xs text-slate-200">
-                                {row.action === "delete" ? "削除" : "更新"}
+                                {row.action === "delete"
+                                  ? "削除"
+                                  : row.action === "review"
+                                  ? "要確認"
+                                  : row.action === "none"
+                                  ? "候補外"
+                                  : "更新"}
                               </div>
                             </label>
                           ))}
@@ -6003,20 +7768,42 @@ const handleDownloadTemplate = async () => {
                   <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
-                      onClick={() => setItemInspectionPreviewConfirmOpen(false)}
+                      onClick={handleCancelItemInspection}
                       disabled={itemInspecting}
-                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
-                      いいえ
+                      中止
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleResumeItemInspection}
+                      disabled={
+                        itemInspecting ||
+                        !itemInspectionJobId ||
+                        itemInspectionRemainingCount <= 0
+                      }
+                      className="h-10 w-[120px] flex-none rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+                    >
+                      再開
                     </button>
 
                     <button
                       type="button"
                       onClick={handleApplyItemInspectionChanges}
                       disabled={itemInspecting}
-                      className="h-10 w-[120px] flex-none rounded-xl bg-cyan-500 px-3 text-sm font-medium text-white transition hover:bg-cyan-400 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
                     >
-                      {itemInspecting ? "反映中..." : "はい"}
+                      {itemInspecting ? "保存中..." : "保存"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openPreviewCsvScope("item_inspection")}
+                      disabled={itemInspecting}
+                      className="h-10 w-[120px] flex-none rounded-xl bg-indigo-500 px-3 text-sm font-medium text-white transition hover:bg-indigo-400 disabled:opacity-50"
+                    >
+                      CSV抽出
                     </button>
                   </div>
                 </div>
@@ -6375,7 +8162,7 @@ const handleDownloadTemplate = async () => {
                         setItemDeleteTarget(null);
                       }}
                       disabled={itemDeleting}
-                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -6389,8 +8176,8 @@ const handleDownloadTemplate = async () => {
                       disabled={itemDeleting || !hasSelectedItemDeleteFields}
                       className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
                         !hasSelectedItemDeleteFields
-                          ? "bg-cyan-500/30 text-white/60"
-                          : "bg-cyan-500 hover:bg-cyan-400"
+                          ? "bg-sky-500/30 text-white/60"
+                          : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
                       はい
@@ -6459,7 +8246,7 @@ const handleDownloadTemplate = async () => {
                         setItemDeleteTarget(null);
                       }}
                       disabled={itemDeleting}
-                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -6468,7 +8255,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handleItemDelete}
                       disabled={itemDeleting}
-                      className="h-10 flex-1 rounded-xl bg-cyan-500 px-3 text-sm font-medium text-white transition hover:bg-cyan-400 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
                       {itemDeleting ? "削除中..." : "はい"}
                     </button>
@@ -6568,7 +8355,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={() => setListDeleteConfirmTarget(null)}
                       disabled={listDeleting}
-                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -6577,7 +8364,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handleListDelete}
                       disabled={listDeleting}
-                      className="h-10 flex-1 rounded-xl bg-rose-500 px-3 text-sm font-medium text-white transition hover:bg-rose-400 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
                       {listDeleting ? "削除中..." : "はい"}
                     </button>
@@ -6612,7 +8399,7 @@ const handleDownloadTemplate = async () => {
                     <button
                       type="button"
                       onClick={() => setSingleFilterClearConfirm(null)}
-                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
                     >
                       いいえ
                     </button>
@@ -6697,7 +8484,7 @@ const handleDownloadTemplate = async () => {
                         />
                       </div>
 
-                      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <div className="mt-4 grid grid-cols-2 gap-3">
                         <div className="rounded-lg bg-white/5 px-3 py-3">
                           <div className="text-xs text-slate-400">完了</div>
                           <div className="mt-1 text-lg font-semibold text-slate-100">
@@ -6706,9 +8493,9 @@ const handleDownloadTemplate = async () => {
                         </div>
 
                         <div className="rounded-lg bg-white/5 px-3 py-3">
-                          <div className="text-xs text-slate-400">処理中</div>
+                          <div className="text-xs text-slate-400">候補率</div>
                           <div className="mt-1 text-lg font-semibold text-slate-100">
-                            {crawlJobStatus === "running" && crawlCurrentCompany ? 1 : 0}
+                            {crawlCandidatePercent}%
                           </div>
                         </div>
 
@@ -6734,7 +8521,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handleCancelCrawl}
                       disabled={!crawlJobId || crawling === false}
-                      className="h-10 w-[120px] flex-none rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 text-sm font-medium text-rose-200 transition hover:bg-rose-500/20 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       中止
                     </button>
@@ -6743,7 +8530,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handlePauseCrawl}
                       disabled={!crawlJobId || crawlJobStatus !== "running" || crawling === false}
-                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
                       中断
                     </button>
@@ -6834,7 +8621,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={() => setCrawlConfirmOpen(false)}
                       disabled={crawling}
-                      className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -6845,8 +8632,8 @@ const handleDownloadTemplate = async () => {
                       disabled={crawling || !hasSelectedCrawlFields}
                       className={`h-10 w-[120px] flex-none rounded-xl px-3 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-100 ${
                         !hasSelectedCrawlFields
-                          ? "bg-amber-500/30 text-white/60"
-                          : "bg-amber-500 hover:bg-amber-400"
+                          ? "bg-sky-500/30 text-white/60"
+                          : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
                       {crawling ? "実行中..." : "はい"}
@@ -6914,7 +8701,7 @@ const handleDownloadTemplate = async () => {
                     <div className="border-b border-white/10 px-4 py-3">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div className="text-xs text-slate-400">
-                          保存候補 {crawlPreviewTotalCount.toLocaleString()}件中{" "}
+                          {crawlPreviewTab === "candidate" ? "保存候補" : "候補外"} {crawlPreviewTotalCount.toLocaleString()}件中{" "}
                           {crawlPreviewTotalCount === 0
                             ? 0
                             : (crawlPreviewPage - 1) * CRAWL_PREVIEW_PAGE_SIZE + 1}
@@ -6927,6 +8714,32 @@ const handleDownloadTemplate = async () => {
                         </div>
 
                         <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleChangeCrawlPreviewTab("candidate")}
+                            disabled={crawlPreviewLoading}
+                            className={`h-8 rounded-lg px-3 text-xs font-medium transition ${
+                              crawlPreviewTab === "candidate"
+                                ? "bg-sky-500 text-white"
+                                : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                            }`}
+                          >
+                            候補
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleChangeCrawlPreviewTab("excluded")}
+                            disabled={crawlPreviewLoading}
+                            className={`h-8 rounded-lg px-3 text-xs font-medium transition ${
+                              crawlPreviewTab === "excluded"
+                                ? "bg-sky-500 text-white"
+                                : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                            }`}
+                          >
+                            候補外
+                          </button>
+
                           <button
                             type="button"
                             onClick={() =>
@@ -6949,8 +8762,7 @@ const handleDownloadTemplate = async () => {
                               void handleCrawlPreviewPageChange(crawlPreviewPage + 1)
                             }
                             disabled={
-                              crawlPreviewPage >= crawlPreviewTotalPages ||
-                              crawlPreviewLoading
+                              crawlPreviewPage >= crawlPreviewTotalPages || crawlPreviewLoading
                             }
                             className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
                           >
@@ -6967,7 +8779,9 @@ const handleDownloadTemplate = async () => {
                         </div>
                       ) : crawlPreviewRows.length === 0 ? (
                         <div className="px-4 py-12 text-center text-slate-500">
-                          保存候補はありません
+                          {crawlPreviewTab === "candidate"
+                            ? "保存候補はありません"
+                            : "候補外はありません"}
                         </div>
                       ) : (
                         crawlPreviewRows.map((row, rowIndex) => (
@@ -6995,110 +8809,112 @@ const handleDownloadTemplate = async () => {
                               )}
                             </div>
 
-                            <div className="mt-4 space-y-2">
-                              <div className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]">
-                                <div className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-300">
-                                  反映
+                            {row.changes.length > 0 && (
+                              <div className="mt-4 space-y-2">
+                                <div className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]">
+                                  <div className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-300">
+                                    反映
+                                  </div>
+                                  <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                    項目
+                                  </div>
+                                  <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                    変更前
+                                  </div>
+                                  <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
+                                    変更候補
+                                  </div>
                                 </div>
-                                <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
-                                  項目
-                                </div>
-                                <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
-                                  変更前
-                                </div>
-                                <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300">
-                                  変更候補
-                                </div>
-                              </div>
 
-                              {row.changes.map((change, changeIndex) => {
-                                const selectedValue = getCrawlPreviewSelectedValue(
-                                  crawlSelectedChanges,
-                                  row.preview_row_id,
-                                  change
-                                );
+                                {row.changes.map((change, changeIndex) => {
+                                  const selectedValue = getCrawlPreviewSelectedValue(
+                                    crawlSelectedChanges,
+                                    row.preview_row_id,
+                                    change
+                                  );
 
-                                const checked = selectedValue !== null;
-                                const displayValue =
-                                  change.after ?? change.candidates[0] ?? null;
-                                const hasMultipleCandidates =
-                                  change.candidates.length > 1;
+                                  const checked = selectedValue !== null;
+                                  const displayValue =
+                                    change.after ?? change.candidates[0] ?? null;
+                                  const hasMultipleCandidates =
+                                    change.candidates.length > 1;
 
-                                return (
-                                  <div
-                                    key={`${row.preview_row_id}-${change.key}-${changeIndex}`}
-                                    className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]"
-                                  >
-                                    <div className="flex items-center justify-center rounded-lg bg-white/5 px-2 py-2">
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={() =>
-                                          toggleCrawlPreviewReflect(
-                                            row.preview_row_id,
-                                            change,
-                                            displayValue
-                                          )
-                                        }
-                                        className="h-4 w-4 accent-amber-500"
-                                      />
-                                    </div>
+                                  return (
+                                    <div
+                                      key={`${row.preview_row_id}-${change.key}-${changeIndex}`}
+                                      className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]"
+                                    >
+                                      <div className="flex items-center justify-center rounded-lg bg-white/5 px-2 py-2">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() =>
+                                            toggleCrawlPreviewReflect(
+                                              row.preview_row_id,
+                                              change,
+                                              displayValue
+                                            )
+                                          }
+                                          className="h-4 w-4 accent-amber-500"
+                                        />
+                                      </div>
 
-                                    <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-medium text-slate-200">
-                                      {change.label}
-                                    </div>
+                                      <div className="rounded-lg bg-white/5 px-3 py-2 text-xs font-medium text-slate-200">
+                                        {change.label}
+                                      </div>
 
-                                    <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
-                                      <PreviewChangeValue
-                                        changeKey={change.key}
-                                        value={change.before}
-                                      />
-                                    </div>
-
-                                    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                                      {hasMultipleCandidates ? (
-                                        <div className="space-y-2">
-                                          {change.candidates.map(
-                                            (candidate, candidateIndex) => {
-                                              const candidateChecked =
-                                                selectedValue === candidate;
-
-                                              return (
-                                                <label
-                                                  key={`${row.preview_row_id}-${change.key}-${candidateIndex}`}
-                                                  className="flex items-start gap-2"
-                                                >
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={candidateChecked}
-                                                    onChange={() =>
-                                                      toggleCrawlPreviewCandidate(
-                                                        row.preview_row_id,
-                                                        change,
-                                                        candidate
-                                                      )
-                                                    }
-                                                    className="mt-0.5 h-4 w-4 accent-amber-500"
-                                                  />
-                                                  <span className="break-all">
-                                                    {candidate}
-                                                  </span>
-                                                </label>
-                                              );
-                                            }
-                                          )}
-                                        </div>
-                                      ) : (
+                                      <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
                                         <PreviewChangeValue
                                           changeKey={change.key}
-                                          value={displayValue}
+                                          value={change.before}
                                         />
-                                      )}
+                                      </div>
+
+                                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                                        {hasMultipleCandidates ? (
+                                          <div className="space-y-2">
+                                            {change.candidates.map(
+                                              (candidate, candidateIndex) => {
+                                                const candidateChecked =
+                                                  selectedValue === candidate;
+
+                                                return (
+                                                  <label
+                                                    key={`${row.preview_row_id}-${change.key}-${candidateIndex}`}
+                                                    className="flex items-start gap-2"
+                                                  >
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={candidateChecked}
+                                                      onChange={() =>
+                                                        toggleCrawlPreviewCandidate(
+                                                          row.preview_row_id,
+                                                          change,
+                                                          candidate
+                                                        )
+                                                      }
+                                                      className="mt-0.5 h-4 w-4 accent-amber-500"
+                                                    />
+                                                    <span className="break-all">
+                                                      {candidate}
+                                                    </span>
+                                                  </label>
+                                                );
+                                              }
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <PreviewChangeValue
+                                            changeKey={change.key}
+                                            value={displayValue}
+                                          />
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         ))
                       )}
@@ -7109,7 +8925,7 @@ const handleDownloadTemplate = async () => {
                         type="button"
                         onClick={() => setCrawlPreviewOpen(false)}
                         disabled={crawling}
-                        className="h-10 w-[120px] flex-none rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                        className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                       >
                         中止
                       </button>
@@ -7129,9 +8945,18 @@ const handleDownloadTemplate = async () => {
                         type="button"
                         onClick={handleCrawlSave}
                         disabled={crawling}
-                        className="h-10 w-[120px] flex-none rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400 disabled:opacity-50"
+                        className="h-10 w-[120px] flex-none rounded-xl bg-emerald-600 px-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
                       >
                         {crawling ? "保存中..." : "保存"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => openPreviewCsvScope("crawl")}
+                        disabled={crawling}
+                        className="h-10 w-[120px] flex-none rounded-xl bg-indigo-500 px-3 text-sm font-medium text-white transition hover:bg-indigo-400 disabled:opacity-50"
+                      >
+                        CSV抽出
                       </button>
                     </div>
                   </div>
@@ -7166,7 +8991,7 @@ const handleDownloadTemplate = async () => {
                         setCrawlJobStatus("idle");
                         setCrawlRemainingCount(0);
                       }}
-                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
                     >
                       いいえ
                     </button>
@@ -7174,7 +8999,7 @@ const handleDownloadTemplate = async () => {
                     <button
                       type="button"
                       onClick={handleResumeCrawl}
-                      className="h-10 flex-1 rounded-xl bg-amber-500 px-3 text-sm font-medium text-white transition hover:bg-amber-400"
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
                     >
                       はい
                     </button>
@@ -7219,7 +9044,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={() => setDedupeConfirmOpen(false)}
                       disabled={deduplicating}
-                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -7228,7 +9053,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={handleDeduplicate}
                       disabled={deduplicating}
-                      className="h-10 flex-1 rounded-xl bg-violet-500 px-3 text-sm font-medium text-white transition hover:bg-violet-400 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
                       {deduplicating ? "実行中..." : "はい"}
                     </button>
@@ -7330,7 +9155,7 @@ const handleDownloadTemplate = async () => {
                       type="button"
                       onClick={() => setImportConfirmOpen(false)}
                       disabled={importing}
-                      className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
@@ -7342,7 +9167,7 @@ const handleDownloadTemplate = async () => {
                         setImportDuplicateConfirmOpen(true);
                       }}
                       disabled={importing}
-                      className="h-10 flex-1 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
                       {importing ? "投入中..." : "はい"}
                     </button>
@@ -7397,6 +9222,137 @@ const handleDownloadTemplate = async () => {
             </div>,
             document.body
           )}
+
+                    {previewCsvScopeOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                onClick={() => {
+                  setPreviewCsvScopeOpen(false);
+                  setPreviewCsvSource(null);
+                }}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                      <div className="text-sm font-semibold text-slate-100">
+                        CSV抽出対象選択
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewCsvScopeOpen(false);
+                          setPreviewCsvSource(null);
+                        }}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                      CSVを抽出する対象を選択してください。
+                      <br />
+                      <span className="text-xs text-slate-400">
+                        画面:
+                        {previewCsvSource === "crawl"
+                          ? " クローリング結果確認"
+                          : " 項目精査 結果確認"}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewCsvMode("all");
+                          setPreviewCsvScopeOpen(false);
+                          setPreviewCsvConfirmOpen(true);
+                        }}
+                        className="h-10 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        全てのリスト
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewCsvMode("candidate");
+                          setPreviewCsvScopeOpen(false);
+                          setPreviewCsvConfirmOpen(true);
+                        }}
+                        className="h-10 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400"
+                      >
+                        候補のみリスト
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {previewCsvConfirmOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                onClick={() => setPreviewCsvConfirmOpen(false)}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                      CSV抽出確認
+                    </div>
+
+                    <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                      本当にCSVを抽出しますか？
+                      <br />
+                      <span className="text-xs text-slate-400">
+                        画面:
+                        {previewCsvSource === "crawl"
+                          ? " クローリング結果確認"
+                          : " 項目精査 結果確認"}
+                      </span>
+                      <br />
+                      <span className="text-xs text-slate-400">
+                        対象:
+                        {previewCsvMode === "all"
+                          ? " 全てのリスト"
+                          : " 候補のみリスト"}
+                      </span>
+                    </div>
+
+                    <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewCsvConfirmOpen(false)}
+                        className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
+                      >
+                        いいえ
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void handlePreviewCsvExport()}
+                        className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        はい
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
 
           {exportScopeOpen &&
             typeof document !== "undefined" &&
@@ -7489,7 +9445,7 @@ const handleDownloadTemplate = async () => {
                       <button
                         type="button"
                         onClick={() => setExportConfirmOpen(false)}
-                        className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                        className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
                       >
                         いいえ
                       </button>

@@ -107,6 +107,8 @@ type CrawlPayload = {
   address: string | null;
   established_date: string | null;
   representative_name: string | null;
+  representative_name_raw: string | null;
+  representative_name_reason: string | null;
   representative_title: string | null;
   capital: string | null;
   employee_count: string | null;
@@ -143,11 +145,42 @@ type CrawlPreviewChange = {
   candidates: string[];
 };
 
+type PreviewSourceRow = {
+  company: string | null;
+  zipcode: string | null;
+  address: string | null;
+  big_industry: string | null;
+  small_industry: string | null;
+  company_kana: string | null;
+  summary: string | null;
+  website_url: string | null;
+  form_url: string | null;
+  phone: string | null;
+  fax: string | null;
+  email: string | null;
+  established_date: string | null;
+  representative_name: string | null;
+  representative_title: string | null;
+  capital: string | null;
+  employee_count: string | null;
+  employee_count_year: string | null;
+  previous_sales: string | null;
+  latest_sales: string | null;
+  closing_month: string | null;
+  office_count: string | null;
+  tag: string | null;
+  business_type: string | null;
+  business_content: string | null;
+  industry_category: string | null;
+  memo: string | null;
+};
+
 type CrawlPreviewRow = {
   row_id: string;
   preview_row_id: string;
   company: string | null;
   website_url: string | null;
+  source_row: PreviewSourceRow | null;
   changes: CrawlPreviewChange[];
 };
 
@@ -176,6 +209,7 @@ type CrawlRequestBody = {
   selectedFields?: CrawlSelectableFieldKey[];
   previewPage?: number;
   previewPageSize?: number;
+  previewTab?: "candidate" | "excluded";
 };
 
 type DbClient = PoolClient;
@@ -855,6 +889,12 @@ function buildCrawlPayloadBundles(
         representative_name: normalizeNullableText(
           extracted.representative_name
         ),
+        representative_name_raw: normalizeNullableText(
+          extracted.representative_name_raw
+        ),
+        representative_name_reason: normalizeNullableText(
+          extracted.representative_name_reason
+        ),
         representative_title: normalizeNullableText(
           extracted.representative_title
         ),
@@ -1045,13 +1085,68 @@ function buildInsertRow(
   };
 }
 
+function buildPreviewSourceRow(
+  row: Record<string, unknown>
+): PreviewSourceRow {
+  return {
+    company: normalizeNullableText(row.company),
+    zipcode: normalizeNullableText(row.zipcode),
+    address: normalizeNullableText(row.address),
+    big_industry: normalizeNullableText(row.big_industry),
+    small_industry: normalizeNullableText(row.small_industry),
+    company_kana: normalizeNullableText(row.company_kana),
+    summary: normalizeNullableText(row.summary),
+    website_url: normalizeNullableText(row.website_url),
+    form_url: normalizeNullableText(row.form_url),
+    phone: normalizeNullableText(row.phone),
+    fax: normalizeNullableText(row.fax),
+    email: normalizeNullableText(row.email),
+    established_date: normalizeNullableText(row.established_date),
+    representative_name: normalizeNullableText(row.representative_name),
+    representative_title: normalizeNullableText(row.representative_title),
+    capital: normalizeNullableText(row.capital),
+    employee_count: normalizeNullableText(row.employee_count),
+    employee_count_year: normalizeNullableText(row.employee_count_year),
+    previous_sales: normalizeNullableText(row.previous_sales),
+    latest_sales: normalizeNullableText(row.latest_sales),
+    closing_month: normalizeNullableText(row.closing_month),
+    office_count: normalizeNullableText(row.office_count),
+    tag: normalizeNullableText(row.tag),
+    business_type: normalizeNullableText(row.business_type),
+    business_content: normalizeNullableText(row.business_content),
+    industry_category: normalizeNullableText(row.industry_category),
+    memo: normalizeNullableText(row.memo),
+  };
+}
+
+async function fetchSourceRowForInsert(
+  client: DbClient,
+  rowId: string
+): Promise<Record<string, unknown> | null> {
+  const res = await client.query(
+    `
+      SELECT to_jsonb(md) AS source_row
+      FROM public.master_data AS md
+      WHERE md.id = $1::bigint
+      LIMIT 1
+    `,
+    [rowId]
+  );
+
+  const sourceRow = res.rows[0]?.source_row;
+
+  return sourceRow && typeof sourceRow === "object"
+    ? (sourceRow as Record<string, unknown>)
+    : null;
+}
+
 type CrawlJobPreviewItem = {
   row_id: string;
   preview_row_id: string;
   officeIndex: number;
   company: string | null;
   website_url: string | null;
-  source_row: Record<string, unknown>;
+  source_row: PreviewSourceRow | null;
   bundle: CrawlPayloadBundle;
   changes: CrawlPreviewChange[];
 };
@@ -1075,6 +1170,7 @@ type CrawlJobState = {
   completed: boolean;
   error: string | null;
   previewItems: CrawlJobPreviewItem[];
+  excludedPreviewRows: CrawlPreviewRow[];
   savedPreviewRowIds: Set<string>;
   sortKey?: FilterKey | null;
   sortDirection?: SortDirection | "" | null;
@@ -1108,6 +1204,22 @@ if (!globalForCrawlJobs.__masterDataCrawlJobs) {
   globalForCrawlJobs.__masterDataCrawlJobs = crawlJobs;
 }
 
+const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
+
+function isCrawlPausedError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message === CRAWL_PAUSED_ERROR_MESSAGE
+  );
+}
+
+function markCrawlJobPaused(job: CrawlJobState) {
+  job.running = false;
+  job.paused = true;
+  job.currentCompany = null;
+  job.currentWebsiteUrl = null;
+}
+
 function buildSelectedFieldLabels(selectedFields: CrawlSelectableFieldKey[]) {
   return selectedFields.map((field) => CRAWL_FIELD_LABEL_MAP[field]);
 }
@@ -1133,26 +1245,99 @@ function normalizePreviewPageSize(value: unknown) {
 function buildPublicPreviewRows(
   job: CrawlJobState,
   page: number,
-  pageSize: number
+  pageSize: number,
+  previewTab: "candidate" | "excluded" = "candidate"
 ) {
   const unsavedItems = job.previewItems.filter(
     (item) => !job.savedPreviewRowIds.has(item.preview_row_id)
   );
 
-  const total = unsavedItems.length;
+  if (previewTab === "candidate") {
+    const total = unsavedItems.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(Math.max(page, 1), totalPages);
+    const start = (safePage - 1) * pageSize;
+
+    const rows = unsavedItems
+      .slice(start, start + pageSize)
+      .map((item) => ({
+        row_id: item.row_id,
+        preview_row_id: item.preview_row_id,
+        company: item.company,
+        website_url: item.website_url,
+        source_row: item.source_row,
+        changes: item.changes,
+      }));
+
+    return {
+      rows,
+      total,
+      page: safePage,
+      pageSize,
+    };
+  }
+
+  const completedTargets = job.targets.slice(
+    0,
+    Math.max(job.nextIndex, job.processed)
+  );
+
+  const candidateRowIdSet = new Set(unsavedItems.map((item) => item.row_id));
+
+  const explicitExcludedRowMap = new Map<string, CrawlPreviewRow>();
+  for (const item of job.excludedPreviewRows) {
+    if (job.savedPreviewRowIds.has(item.preview_row_id)) {
+      continue;
+    }
+
+    if (candidateRowIdSet.has(item.row_id)) {
+      continue;
+    }
+
+    if (!explicitExcludedRowMap.has(item.row_id)) {
+      explicitExcludedRowMap.set(item.row_id, item);
+    }
+  }
+
+  const excludedBaseRows = completedTargets.filter((row) => {
+    const rowId = String(row.row_id ?? "");
+    return !candidateRowIdSet.has(rowId);
+  });
+
+  const total = excludedBaseRows.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(Math.max(page, 1), totalPages);
   const start = (safePage - 1) * pageSize;
+  const end = start + pageSize;
 
-  const rows: CrawlPreviewRow[] = unsavedItems
-    .slice(start, start + pageSize)
-    .map((item) => ({
-      row_id: item.row_id,
-      preview_row_id: item.preview_row_id,
-      company: item.company,
-      website_url: item.website_url,
-      changes: item.changes,
-    }));
+  const rows: CrawlPreviewRow[] = [];
+  let excludedIndex = 0;
+
+  for (const row of excludedBaseRows) {
+    const rowId = String(row.row_id ?? "");
+
+    if (excludedIndex >= start && excludedIndex < end) {
+      const explicitRow = explicitExcludedRowMap.get(rowId);
+
+      rows.push(
+        explicitRow ?? {
+          row_id: rowId,
+          preview_row_id: `${rowId}__excluded`,
+          company: typeof row.company === "string" ? row.company : null,
+          website_url:
+            typeof row.website_url === "string" ? row.website_url : null,
+          source_row: buildPreviewSourceRow(row as Record<string, unknown>),
+          changes: [],
+        }
+      );
+    }
+
+    excludedIndex += 1;
+
+    if (excludedIndex >= end) {
+      break;
+    }
+  }
 
   return {
     rows,
@@ -1168,14 +1353,21 @@ function buildJobResponse(
     includePreviewRows?: boolean;
     previewPage?: number;
     previewPageSize?: number;
+    previewTab?: "candidate" | "excluded";
   } = {}
 ) {
   const previewPage = normalizePreviewPage(options.previewPage);
   const previewPageSize = normalizePreviewPageSize(options.previewPageSize);
+  const previewTab = options.previewTab ?? "candidate";
 
   const previewResult = options.includePreviewRows
-    ? buildPublicPreviewRows(job, previewPage, previewPageSize)
-    : null;
+    ? buildPublicPreviewRows(job, previewPage, previewPageSize, previewTab)
+    : {
+        rows: undefined,
+        total: 0,
+        page: previewPage,
+        pageSize: previewPageSize,
+      };
 
   return {
     ok: true,
@@ -1197,10 +1389,10 @@ function buildJobResponse(
     currentFields: job.selectedFieldLabels,
     progressPercent:
       job.total === 0 ? 0 : Math.round((job.processed / job.total) * 100),
-    previewRows: previewResult?.rows,
-    previewTotal: previewResult?.total ?? 0,
-    previewPage: previewResult?.page ?? previewPage,
-    previewPageSize: previewResult?.pageSize ?? previewPageSize,
+    previewRows: previewResult.rows,
+    previewTotal: previewResult.total,
+    previewPage: previewResult.page,
+    previewPageSize: previewResult.pageSize,
     remainingCount: Math.max(job.total - job.nextIndex, 0),
     paused: job.paused,
     completed: job.completed,
@@ -1223,21 +1415,33 @@ async function fetchCrawlTargets(
   const targetSql = `
     SELECT
       md.id::text AS row_id,
-      to_jsonb(md) AS source_row,
       md."企業名" AS company,
+      md."郵便番号" AS zipcode,
+      md."住所" AS address,
+      md."大業種名" AS big_industry,
+      md."小業種名" AS small_industry,
+      md."企業名（かな）" AS company_kana,
+      md."企業概要" AS summary,
       md."企業サイトURL" AS website_url,
       md."問い合わせフォームURL" AS form_url,
       md."電話番号" AS phone,
       md."FAX番号" AS fax,
       md."メールアドレス" AS email,
-      md."郵便番号" AS zipcode,
-      md."住所" AS address,
       md."設立年月" AS established_date,
       md."代表者名" AS representative_name,
       md."代表者役職" AS representative_title,
       md."資本金" AS capital,
       md."従業員数" AS employee_count,
-      md."事業内容" AS business_content
+      md."従業員数年度" AS employee_count_year,
+      md."前年売上高" AS previous_sales,
+      md."直近売上高" AS latest_sales,
+      md."決算月" AS closing_month,
+      md."事業所数" AS office_count,
+      md."新規登録タグ" AS tag,
+      md."業種" AS business_type,
+      md."事業内容" AS business_content,
+      md."業界" AS industry_category,
+      md."メモ" AS memo
     FROM public.master_data AS md
     ${targetWhereSql}
     ${buildOrderBy(body.sortKey, body.sortDirection)}
@@ -1256,16 +1460,22 @@ async function runCrawlJob(jobId: string) {
   firstJob.pauseRequested = false;
   firstJob.error = null;
 
+  const shouldStop = () => {
+    const currentJob = crawlJobs.get(jobId);
+    return !currentJob || currentJob.pauseRequested;
+  };
+
   try {
-    for (let index = firstJob.nextIndex; index < firstJob.targets.length; index += 1) {
+    for (
+      let index = firstJob.nextIndex;
+      index < firstJob.targets.length;
+      index += 1
+    ) {
       const job = crawlJobs.get(jobId);
       if (!job) return;
 
       if (job.pauseRequested) {
-        job.running = false;
-        job.paused = true;
-        job.currentCompany = null;
-        job.currentWebsiteUrl = null;
+        markCrawlJobPaused(job);
         return;
       }
 
@@ -1273,70 +1483,127 @@ async function runCrawlJob(jobId: string) {
       job.currentCompany = normalizeNullableText(row.company);
       job.currentWebsiteUrl = normalizeNullableText(row.website_url);
 
+      let pauseTriggered = false;
+
       try {
         const selectedFieldSet = new Set(job.selectedFields);
         const websiteUrl = normalizeNullableText(row.website_url);
 
         if (!websiteUrl) {
           job.skipped += 1;
-          continue;
-        }
-
-        const extracted = await crawlCompanyWebsite(
-          websiteUrl,
-          Array.from(selectedFieldSet),
-          {
-            company: normalizeNullableText(row.company),
-            address: normalizeNullableText(row.address),
-          }
-        );
-
-        const bundles = buildCrawlPayloadBundles(
-          extracted,
-          normalizeNullableText(row.company)
-        );
-
-        if (bundles.length === 0) {
-          job.skipped += 1;
         } else {
-          let previewAdded = 0;
+          const extracted = await crawlCompanyWebsite(
+            websiteUrl,
+            Array.from(selectedFieldSet),
+            {
+              company: normalizeNullableText(row.company),
+              address: normalizeNullableText(row.address),
+            },
+            {
+              shouldStop,
+            }
+          );
 
-          bundles.forEach((bundle, officeIndex) => {
-            const changes = buildPreviewChanges(
-              row as Record<string, unknown>,
-              bundle,
-              selectedFieldSet
+          if (shouldStop()) {
+            pauseTriggered = true;
+          } else {
+            const bundles = buildCrawlPayloadBundles(
+              extracted,
+              normalizeNullableText(row.company)
             );
 
-            if (changes.length === 0) {
-              return;
+            if (bundles.length === 0) {
+              job.skipped += 1;
+            } else {
+              let previewAdded = 0;
+
+              bundles.forEach((bundle, officeIndex) => {
+                const changes = buildPreviewChanges(
+                  row as Record<string, unknown>,
+                  bundle,
+                  selectedFieldSet
+                );
+
+                if (changes.length === 0) {
+                  const rejectedRepresentativeValue =
+                    selectedFieldSet.has("representative_name") &&
+                    bundle.payload.representative_name == null &&
+                    bundle.payload.representative_name_raw
+                      ? normalizeNullableText(
+                          bundle.payload.representative_name_raw
+                        )
+                      : null;
+
+                  if (rejectedRepresentativeValue) {
+                    job.excludedPreviewRows.push({
+                      row_id: String(row.row_id ?? ""),
+                      preview_row_id: `${String(row.row_id ?? "")}__excluded__${officeIndex}`,
+                      company:
+                        bundle.payload.company ??
+                        normalizeNullableText(row.company),
+                      website_url: normalizeNullableText(row.website_url),
+                      source_row: buildPreviewSourceRow(
+                        row as Record<string, unknown>
+                      ),
+                      changes: [
+                        {
+                          key: "representative_name",
+                          label: "代表者名",
+                          before: normalizeNullableText(row.representative_name),
+                          after: null,
+                          candidates: [rejectedRepresentativeValue],
+                        },
+                      ],
+                    });
+                  }
+
+                  return;
+                }
+
+                job.previewItems.push({
+                  row_id: String(row.row_id ?? ""),
+                  preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
+                  officeIndex,
+                  company:
+                    bundle.payload.company ??
+                    normalizeNullableText(row.company),
+                  website_url: normalizeNullableText(row.website_url),
+                  source_row: buildPreviewSourceRow(
+                    row as Record<string, unknown>
+                  ),
+                  bundle,
+                  changes,
+                });
+
+                previewAdded += 1;
+              });
+
+              if (previewAdded > 0) {
+                job.updated += previewAdded;
+              } else {
+                job.skipped += 1;
+              }
             }
-
-            job.previewItems.push({
-              row_id: String(row.row_id ?? ""),
-              preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
-              officeIndex,
-              company: bundle.payload.company ?? normalizeNullableText(row.company),
-              website_url: normalizeNullableText(row.website_url),
-              source_row: (row.source_row ?? {}) as Record<string, unknown>,
-              bundle,
-              changes,
-            });
-
-            previewAdded += 1;
-          });
-
-          if (previewAdded > 0) {
-            job.updated += previewAdded;
-          } else {
-            job.skipped += 1;
           }
         }
-      } catch {
-        job.failed += 1;
+      } catch (error) {
+        if (isCrawlPausedError(error) || shouldStop()) {
+          pauseTriggered = true;
+        } else {
+          job.failed += 1;
+        }
       } finally {
-        job.processed += 1;
-        job.nextIndex = index + 1;
+        if (!pauseTriggered) {
+          job.processed += 1;
+          job.nextIndex = index + 1;
+        }
+      }
+
+      if (pauseTriggered) {
+        const currentJob = crawlJobs.get(jobId);
+        if (!currentJob) return;
+        markCrawlJobPaused(currentJob);
+        return;
       }
     }
 
@@ -1353,6 +1620,11 @@ async function runCrawlJob(jobId: string) {
     const job = crawlJobs.get(jobId);
     if (!job) return;
 
+    if (isCrawlPausedError(error) || job.pauseRequested) {
+      markCrawlJobPaused(job);
+      return;
+    }
+
     job.running = false;
     job.paused = false;
     job.completed = false;
@@ -1361,7 +1633,7 @@ async function runCrawlJob(jobId: string) {
     job.error =
       error instanceof Error
         ? error.message
-        : "クローリングでエラーが発生しました";
+        : "クローリング中にエラーが発生しました";
   }
 }
 
@@ -1376,12 +1648,21 @@ async function savePreviewItems(
   let skipped = 0;
   let failed = 0;
 
+const sourceRowCache = new Map<string, Record<string, unknown> | null>();
+
   for (const item of job.previewItems) {
     if (job.savedPreviewRowIds.has(item.preview_row_id)) {
       continue;
     }
 
     processed += 1;
+
+    if (!sourceRowCache.has(item.row_id)) {
+      sourceRowCache.set(
+        item.row_id,
+        await fetchSourceRowForInsert(client, item.row_id)
+      );
+    }
 
     try {
       if (!hasAnySelectedCandidate(item, selectedChanges)) {
@@ -1462,8 +1743,15 @@ async function savePreviewItems(
         continue;
       }
 
+      const sourceRow = sourceRowCache.get(item.row_id);
+
+      if (!sourceRow) {
+        failed += 1;
+        continue;
+      }
+
       const insertRow = buildInsertRow(
-        item.source_row,
+        sourceRow,
         item.bundle,
         payload,
         selectedKeys
@@ -1528,6 +1816,7 @@ export async function POST(req: NextRequest) {
           includePreviewRows,
           previewPage: body.previewPage,
           previewPageSize: body.previewPageSize,
+          previewTab: body.previewTab,
         })
       );
     }
@@ -1634,7 +1923,8 @@ export async function POST(req: NextRequest) {
       const previewResult = buildPublicPreviewRows(
         job,
         1,
-        DEFAULT_CRAWL_PREVIEW_PAGE_SIZE
+        DEFAULT_CRAWL_PREVIEW_PAGE_SIZE,
+        body.previewTab ?? "candidate"
       );
 
       if (remainingCount === 0 && job.previewItems.length === 0) {
@@ -1695,6 +1985,7 @@ export async function POST(req: NextRequest) {
         completed: false,
         error: null,
         previewItems: [],
+        excludedPreviewRows: [],
         savedPreviewRowIds: new Set<string>(),
         sortKey: body.sortKey,
         sortDirection: body.sortDirection,

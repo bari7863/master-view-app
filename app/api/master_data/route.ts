@@ -1049,7 +1049,7 @@ const REPRESENTATIVE_NON_NAME_SUFFIX_REGEX =
   /(?:会社|法人|組合|協会|事務局|センター|会館|病院|医院|クリニック|学校|学園|大学|高校|中学|小学校|幼稚園|保育園|施設|寮|館|ホール|ビル|タワー|本社|支社|支店|営業所|工場|研究所|製作所|製麺所|商店|店舗|ホテル|旅館|神社|寺院|農場|牧場|倉庫|公園|市場|駅|空港|港|団地|マンション|ハイツ|コーポ|号室|事務所|部署|部門|売場|園|店|会)$/u;
 
 const REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX =
-  /^(?:[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{3,}(?:市|区|町|村)|[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{2,}市立[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+)$/u;
+  /^(?:[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{4,}(?:市|区|町|村)|[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{2,}市立[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+)$/u;
 
 const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
   [
@@ -1505,6 +1505,18 @@ function isRepresentativeAreaToken(value: string) {
   return REPRESENTATIVE_AREA_NAME_TOKENS.has(value.normalize("NFKC"));
 }
 
+function isLikelyPersonalNameEndingWithShi(value: string) {
+  const text = trimRepresentativeAffixes(value.trim()).normalize("NFKC");
+
+  if (!/^[\p{sc=Han}々ヶヵ]{3,5}市$/u.test(text)) return false;
+  if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(text)) return false;
+  if (isRepresentativeAreaToken(text)) return false;
+  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return false;
+  if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return false;
+
+  return true;
+}
+
 function looksLikeProtectedRepresentativeName(value: string) {
   const text = trimRepresentativeAffixes(value.trim());
 
@@ -1522,7 +1534,14 @@ function looksLikeProtectedRepresentativeName(value: string) {
 
     if (!REPRESENTATIVE_STRONG_NAME_TOKEN_REGEX.test(part)) return false;
     if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(normalized)) return false;
-    if (REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(part)) return false;
+    
+    if (
+      REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(part) &&
+      !isLikelyPersonalNameEndingWithShi(part)
+    ) {
+      return false;
+    }
+
     if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(part)) return false;
     if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(part)) return false;
 
@@ -1541,7 +1560,14 @@ function looksLikeNonNameToken(value: string) {
   }
   if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
   if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
-  if (REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text)) return true;
+
+  if (
+    REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text) &&
+    !isLikelyPersonalNameEndingWithShi(text)
+  ) {
+    return true;
+  }
+
   if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return true;
   if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return true;
   if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return true;
@@ -1808,6 +1834,18 @@ async function handleRepresentativeNameInspectionPreview(
       params
     );
 
+    const removeNonNameSelected =
+      payload.methodSelections != null &&
+      typeof payload.methodSelections === "object" &&
+      (payload.methodSelections as Record<string, unknown>)
+        .representative_name_remove_non_name === true;
+
+    const inspectNameSelected =
+      payload.methodSelections != null &&
+      typeof payload.methodSelections === "object" &&
+      (payload.methodSelections as Record<string, unknown>)
+        .representative_name_inspect_name === true;
+
     const inspectionCandidates: RepresentativeNameDeleteCandidate[] = [];
 
     targetRes.rows.forEach((row) => {
@@ -1821,7 +1859,7 @@ async function handleRepresentativeNameInspectionPreview(
 
       const result = inspectRepresentativeNameValue(representativeName);
 
-      if (result.shouldDelete) {
+      if (result.shouldDelete && removeNonNameSelected) {
         inspectionCandidates.push({
           rowId,
           company,
@@ -1830,7 +1868,7 @@ async function handleRepresentativeNameInspectionPreview(
           action: "delete",
           reason: result.reason,
         });
-      } else if (result.shouldUpdate) {
+      } else if (result.shouldUpdate && inspectNameSelected) {
         inspectionCandidates.push({
           rowId,
           company,
@@ -1839,7 +1877,7 @@ async function handleRepresentativeNameInspectionPreview(
           action: "update",
           reason: result.reason,
         });
-      } else if (result.shouldReview) {
+      } else if (result.shouldReview && inspectNameSelected) {
         inspectionCandidates.push({
           rowId,
           company,
@@ -1865,7 +1903,7 @@ async function handleRepresentativeNameInspectionPreview(
 
     return NextResponse.json({
       ok: true,
-      updated: 0,
+      updated: inspectionCandidates.length,
       inspectionCandidates,
       inspectionDeleteCandidates: inspectionCandidates.filter(
         (candidate) => candidate.action === "delete"

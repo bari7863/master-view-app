@@ -99,20 +99,52 @@ type AdvancedFilters = {
   tags?: AdvancedTagFilters;
 };
 
+type PreviewSourceRow = {
+  company: string | null;
+  zipcode: string | null;
+  address: string | null;
+  big_industry: string | null;
+  small_industry: string | null;
+  company_kana: string | null;
+  summary: string | null;
+  website_url: string | null;
+  form_url: string | null;
+  phone: string | null;
+  fax: string | null;
+  email: string | null;
+  established_date: string | null;
+  representative_name: string | null;
+  representative_title: string | null;
+  capital: string | null;
+  employee_count: string | null;
+  employee_count_year: string | null;
+  previous_sales: string | null;
+  latest_sales: string | null;
+  closing_month: string | null;
+  office_count: string | null;
+  tag: string | null;
+  business_type: string | null;
+  business_content: string | null;
+  industry_category: string | null;
+  memo: string | null;
+};
+
 type RepresentativeNameInspectionPreviewChange = {
   rowId: string;
   company: string | null;
   fieldLabel: string;
   beforeValue: string | null;
   afterValue: string | null;
-  action: "update" | "delete" | "review";
+  action: "update" | "delete" | "review" | "none";
   reason: string;
+  source_row: PreviewSourceRow | null;
 };
 
 type InspectionTargetRow = {
   rowId: string;
   company: string | null;
   representativeName: string | null;
+  sourceRow: PreviewSourceRow | null;
 };
 
 type ItemInspectionJobStatus = "running" | "paused" | "completed" | "error";
@@ -133,13 +165,152 @@ type ItemInspectionJob = {
   currentInspectionValue: string | null;
   currentInspectionFieldLabel: string | null;
   inspectionPreviewChanges: RepresentativeNameInspectionPreviewChange[];
+  previewUpdateCount: number;
+  previewDeleteCount: number;
+  previewReviewCount: number;
   error: string | null;
   pauseRequested: boolean;
   cancelRequested: boolean;
+  methodSelections: {
+    representative_name_remove_non_name: boolean;
+    representative_name_inspect_name: boolean;
+  };
 };
 
 const itemInspectionJobs = new Map<string, ItemInspectionJob>();
 const JOB_TTL_MS = 1000 * 60 * 30;
+
+const DEFAULT_ITEM_INSPECTION_PREVIEW_PAGE_SIZE = 20;
+const MAX_ITEM_INSPECTION_PREVIEW_PAGE_SIZE = 100;
+
+function normalizeInspectionPreviewPage(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.floor(num) : 1;
+}
+
+function normalizeInspectionPreviewPageSize(value: unknown) {
+  const num = Number(value);
+
+  if (!Number.isFinite(num) || num <= 0) {
+    return DEFAULT_ITEM_INSPECTION_PREVIEW_PAGE_SIZE;
+  }
+
+  return Math.min(Math.floor(num), MAX_ITEM_INSPECTION_PREVIEW_PAGE_SIZE);
+}
+
+function buildPreviewSourceRow(
+  row: Record<string, unknown>
+): PreviewSourceRow {
+  return {
+    company: typeof row.company === "string" ? row.company : null,
+    zipcode: typeof row.zipcode === "string" ? row.zipcode : null,
+    address: typeof row.address === "string" ? row.address : null,
+    big_industry:
+      typeof row.big_industry === "string" ? row.big_industry : null,
+    small_industry:
+      typeof row.small_industry === "string" ? row.small_industry : null,
+    company_kana:
+      typeof row.company_kana === "string" ? row.company_kana : null,
+    summary: typeof row.summary === "string" ? row.summary : null,
+    website_url: typeof row.website_url === "string" ? row.website_url : null,
+    form_url: typeof row.form_url === "string" ? row.form_url : null,
+    phone: typeof row.phone === "string" ? row.phone : null,
+    fax: typeof row.fax === "string" ? row.fax : null,
+    email: typeof row.email === "string" ? row.email : null,
+    established_date:
+      typeof row.established_date === "string" ? row.established_date : null,
+    representative_name:
+      typeof row.representative_name === "string"
+        ? row.representative_name
+        : null,
+    representative_title:
+      typeof row.representative_title === "string"
+        ? row.representative_title
+        : null,
+    capital: typeof row.capital === "string" ? row.capital : null,
+    employee_count:
+      typeof row.employee_count === "string" ? row.employee_count : null,
+    employee_count_year:
+      typeof row.employee_count_year === "string"
+        ? row.employee_count_year
+        : null,
+    previous_sales:
+      typeof row.previous_sales === "string" ? row.previous_sales : null,
+    latest_sales:
+      typeof row.latest_sales === "string" ? row.latest_sales : null,
+    closing_month:
+      typeof row.closing_month === "string" ? row.closing_month : null,
+    office_count:
+      typeof row.office_count === "string" ? row.office_count : null,
+    tag: typeof row.tag === "string" ? row.tag : null,
+    business_type:
+      typeof row.business_type === "string" ? row.business_type : null,
+    business_content:
+      typeof row.business_content === "string" ? row.business_content : null,
+    industry_category:
+      typeof row.industry_category === "string" ? row.industry_category : null,
+    memo: typeof row.memo === "string" ? row.memo : null,
+  };
+}
+
+function buildExcludedInspectionPreviewRows(
+  job: ItemInspectionJob,
+  page: number,
+  pageSize: number
+) {
+  const completedRows = job.targetRows.slice(0, job.processed);
+
+  const candidateRowIdSet = new Set(
+    job.inspectionPreviewChanges.map((row) => row.rowId)
+  );
+
+  let total = 0;
+  for (const row of completedRows) {
+    if (!candidateRowIdSet.has(row.rowId)) {
+      total += 1;
+    }
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const start = (safePage - 1) * pageSize;
+  const end = start + pageSize;
+
+  const rows: RepresentativeNameInspectionPreviewChange[] = [];
+  let excludedIndex = 0;
+
+  for (const row of completedRows) {
+    if (candidateRowIdSet.has(row.rowId)) {
+      continue;
+    }
+
+    if (excludedIndex >= start && excludedIndex < end) {
+      rows.push({
+        rowId: row.rowId,
+        company: row.company,
+        fieldLabel: "代表者名",
+        beforeValue: row.representativeName,
+        afterValue: row.representativeName,
+        action: "none",
+        reason: "候補外",
+        source_row: row.sourceRow,
+      });
+    }
+
+    excludedIndex += 1;
+
+    if (excludedIndex >= end) {
+      break;
+    }
+  }
+
+  return {
+    rows,
+    total,
+    page: safePage,
+    pageSize,
+  };
+}
 
 async function ensureMasterDataIdColumn(
   client: { query: (sql: string) => Promise<unknown> }
@@ -896,7 +1067,7 @@ const REPRESENTATIVE_NON_NAME_SUFFIX_REGEX =
   /(?:会社|法人|組合|協会|事務局|センター|会館|病院|医院|クリニック|学校|学園|大学|高校|中学|小学校|幼稚園|保育園|施設|寮|館|ホール|ビル|タワー|本社|支社|支店|営業所|工場|研究所|製作所|製麺所|商店|店舗|ホテル|旅館|神社|寺院|農場|牧場|倉庫|公園|市場|駅|空港|港|団地|マンション|ハイツ|コーポ|号室|事務所|部署|部門|売場|園|店|会)$/u;
 
 const REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX =
-  /^(?:[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{3,}(?:市|区|町|村)|[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{2,}市立[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+)$/u;
+  /^(?:[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{4,}(?:市|区|町|村)|[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{2,}市立[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+)$/u;
 
 const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
   [
@@ -1244,7 +1415,6 @@ const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
     "税務行政",
     "多国語展開",
     "中国料理",
-    "中文",
     "简体",
     "繁體",
     "中文簡体",
@@ -1352,6 +1522,18 @@ function isRepresentativeAreaToken(value: string) {
   return REPRESENTATIVE_AREA_NAME_TOKENS.has(value.normalize("NFKC"));
 }
 
+function isLikelyPersonalNameEndingWithShi(value: string) {
+  const text = trimRepresentativeAffixes(value.trim()).normalize("NFKC");
+
+  if (!/^[\p{sc=Han}々ヶヵ]{3,5}市$/u.test(text)) return false;
+  if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(text)) return false;
+  if (isRepresentativeAreaToken(text)) return false;
+  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return false;
+  if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return false;
+
+  return true;
+}
+
 function looksLikeProtectedRepresentativeName(value: string) {
   const text = trimRepresentativeAffixes(value.trim());
 
@@ -1369,7 +1551,14 @@ function looksLikeProtectedRepresentativeName(value: string) {
 
     if (!REPRESENTATIVE_STRONG_NAME_TOKEN_REGEX.test(part)) return false;
     if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(normalized)) return false;
-    if (REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(part)) return false;
+    
+    if (
+      REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(part) &&
+      !isLikelyPersonalNameEndingWithShi(part)
+    ) {
+      return false;
+    }
+
     if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(part)) return false;
     if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(part)) return false;
 
@@ -1388,7 +1577,14 @@ function looksLikeNonNameToken(value: string) {
   }
   if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
   if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
-  if (REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text)) return true;
+  
+  if (
+    REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text) &&
+    !isLikelyPersonalNameEndingWithShi(text)
+  ) {
+    return true;
+  }
+
   if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return true;
   if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return true;
   if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return true;
@@ -1619,21 +1815,29 @@ function inspectRepresentativeNameValue(value: string | null) {
   };
 }
 
-function getJobSnapshot(job: ItemInspectionJob) {
+function getJobSnapshot(
+  job: ItemInspectionJob,
+  options: {
+    includePreviewRows?: boolean;
+    previewPage?: unknown;
+    previewPageSize?: unknown;
+    previewTab?: "candidate" | "excluded";
+  } = {}
+) {
   const processingCount =
     job.status === "running" && job.currentCompany ? 1 : 0;
 
-  const updateCount = job.inspectionPreviewChanges.filter(
-    (row) => row.action === "update"
-  ).length;
+  const includePreviewRows = options.includePreviewRows ?? false;
+  const previewTab = options.previewTab ?? "candidate";
+  const previewPage = normalizeInspectionPreviewPage(options.previewPage);
+  const previewPageSize = normalizeInspectionPreviewPageSize(
+    options.previewPageSize
+  );
 
-  const deleteCount = job.inspectionPreviewChanges.filter(
-    (row) => row.action === "delete"
-  ).length;
-
-  const reviewCount = job.inspectionPreviewChanges.filter(
-    (row) => row.action === "review"
-  ).length;
+  const excludedPreviewResult =
+    includePreviewRows && previewTab === "excluded"
+      ? buildExcludedInspectionPreviewRows(job, previewPage, previewPageSize)
+      : null;
 
   return {
     ok: true,
@@ -1651,15 +1855,36 @@ function getJobSnapshot(job: ItemInspectionJob) {
       job.totalTargets - job.processed - processingCount,
       0
     ),
-    inspectionPreviewChanges: job.inspectionPreviewChanges,
+    inspectionPreviewChanges: includePreviewRows
+      ? previewTab === "excluded"
+        ? excludedPreviewResult?.rows ?? []
+        : job.inspectionPreviewChanges
+      : [],
+    previewTotal: includePreviewRows
+      ? previewTab === "excluded"
+        ? excludedPreviewResult?.total ?? 0
+        : job.inspectionPreviewChanges.length
+      : 0,
+    previewPage: includePreviewRows
+      ? previewTab === "excluded"
+        ? excludedPreviewResult?.page ?? previewPage
+        : 1
+      : 1,
+    previewPageSize: includePreviewRows
+      ? previewTab === "excluded"
+        ? excludedPreviewResult?.pageSize ?? previewPageSize
+        : Math.max(job.inspectionPreviewChanges.length, 1)
+      : previewPageSize,
     error: job.error ?? undefined,
     paused: job.status === "paused",
     completed: job.status === "completed",
     message:
       job.status === "completed"
-        ? updateCount === 0 && deleteCount === 0 && reviewCount === 0
+        ? job.previewUpdateCount === 0 &&
+          job.previewDeleteCount === 0 &&
+          job.previewReviewCount === 0
           ? "候補はありませんでした"
-          : `更新候補 ${updateCount.toLocaleString()}件 / 削除候補 ${deleteCount.toLocaleString()}件 / 要確認 ${reviewCount.toLocaleString()}件`
+          : `更新候補 ${job.previewUpdateCount.toLocaleString()}件 / 削除候補 ${job.previewDeleteCount.toLocaleString()}件 / 要確認 ${job.previewReviewCount.toLocaleString()}件`
         : job.status === "paused"
         ? "項目精査を中断しました"
         : undefined,
@@ -1694,7 +1919,32 @@ async function fetchInspectionTargets(
         SELECT
           id,
           "企業名" AS company,
-          "代表者名" AS representative_name
+          "郵便番号" AS zipcode,
+          "住所" AS address,
+          "大業種名" AS big_industry,
+          "小業種名" AS small_industry,
+          "企業名（かな）" AS company_kana,
+          "企業概要" AS summary,
+          "企業サイトURL" AS website_url,
+          "問い合わせフォームURL" AS form_url,
+          "電話番号" AS phone,
+          "FAX番号" AS fax,
+          "メールアドレス" AS email,
+          "設立年月" AS established_date,
+          "代表者名" AS representative_name,
+          "代表者役職" AS representative_title,
+          "資本金" AS capital,
+          "従業員数" AS employee_count,
+          "従業員数年度" AS employee_count_year,
+          "前年売上高" AS previous_sales,
+          "直近売上高" AS latest_sales,
+          "決算月" AS closing_month,
+          "事業所数" AS office_count,
+          "新規登録タグ" AS tag,
+          "業種" AS business_type,
+          "事業内容" AS business_content,
+          "業界" AS industry_category,
+          "メモ" AS memo
         FROM public.master_data
         ${targetWhereSql}
         ORDER BY id ASC
@@ -1709,6 +1959,7 @@ async function fetchInspectionTargets(
         typeof row.representative_name === "string"
           ? row.representative_name
           : null,
+      sourceRow: buildPreviewSourceRow(row as Record<string, unknown>),
     }));
   } finally {
     client.release();
@@ -1755,7 +2006,10 @@ async function processItemInspectionJob(jobId: string) {
     try {
       const result = inspectRepresentativeNameValue(row.representativeName);
 
-      if (result.shouldDelete) {
+      if (
+        result.shouldDelete &&
+        job.methodSelections.representative_name_remove_non_name
+      ) {
         job.inspectionPreviewChanges.push({
           rowId: row.rowId,
           company: row.company,
@@ -1764,8 +2018,14 @@ async function processItemInspectionJob(jobId: string) {
           afterValue: null,
           action: "delete",
           reason: result.reason,
+          source_row: row.sourceRow,
         });
-      } else if (result.shouldUpdate) {
+        job.previewDeleteCount += 1;
+        job.updated += 1;
+      } else if (
+        result.shouldUpdate &&
+        job.methodSelections.representative_name_inspect_name
+      ) {
         job.inspectionPreviewChanges.push({
           rowId: row.rowId,
           company: row.company,
@@ -1774,8 +2034,14 @@ async function processItemInspectionJob(jobId: string) {
           afterValue: result.cleanedValue,
           action: "update",
           reason: result.reason,
+          source_row: row.sourceRow,
         });
-      } else if (result.shouldReview) {
+        job.previewUpdateCount += 1;
+        job.updated += 1;
+      } else if (
+        result.shouldReview &&
+        job.methodSelections.representative_name_inspect_name
+      ) {
         job.inspectionPreviewChanges.push({
           rowId: row.rowId,
           company: row.company,
@@ -1784,7 +2050,10 @@ async function processItemInspectionJob(jobId: string) {
           afterValue: null,
           action: "review",
           reason: result.reason,
+          source_row: row.sourceRow,
         });
+        job.previewReviewCount += 1;
+        job.updated += 1;
       } else {
         job.skipped += 1;
       }
@@ -1814,6 +2083,12 @@ async function handleStartJob(payload: Record<string, unknown>) {
       ? (payload.methodSelections as Record<string, unknown>)
       : {};
 
+  const removeNonNameSelected =
+    methodSelections.representative_name_remove_non_name === true;
+
+  const inspectNameSelected =
+    methodSelections.representative_name_inspect_name === true;
+
   if (
     !(
       selectedFields.length === 1 &&
@@ -1826,7 +2101,7 @@ async function handleStartJob(payload: Record<string, unknown>) {
     );
   }
 
-  if (methodSelections.representative_name_remove_non_name !== true) {
+  if (!removeNonNameSelected && !inspectNameSelected) {
     return NextResponse.json(
       { ok: false, error: "精査方法が選択されていません" },
       { status: 400 }
@@ -1871,9 +2146,16 @@ async function handleStartJob(payload: Record<string, unknown>) {
     currentInspectionValue: null,
     currentInspectionFieldLabel: "代表者名",
     inspectionPreviewChanges: [],
+    previewUpdateCount: 0,
+    previewDeleteCount: 0,
+    previewReviewCount: 0,
     error: null,
     pauseRequested: false,
     cancelRequested: false,
+    methodSelections: {
+      representative_name_remove_non_name: removeNonNameSelected,
+      representative_name_inspect_name: inspectNameSelected,
+    },
   };
 
   itemInspectionJobs.set(jobId, job);
@@ -1882,7 +2164,9 @@ async function handleStartJob(payload: Record<string, unknown>) {
     void processItemInspectionJob(jobId);
   });
 
-  return NextResponse.json(getJobSnapshot(job));
+  return NextResponse.json(
+    getJobSnapshot(job, { includePreviewRows: false })
+  );
 }
 
 async function handleGetJobStatus(payload: Record<string, unknown>) {
@@ -1904,7 +2188,17 @@ async function handleGetJobStatus(payload: Record<string, unknown>) {
     );
   }
 
-  return NextResponse.json(getJobSnapshot(job));
+  const previewTab =
+    payload.previewTab === "excluded" ? "excluded" : "candidate";
+
+  return NextResponse.json(
+    getJobSnapshot(job, {
+      includePreviewRows: job.status !== "running",
+      previewTab,
+      previewPage: payload.previewPage,
+      previewPageSize: payload.previewPageSize,
+    })
+  );
 }
 
 async function handlePauseJob(payload: Record<string, unknown>) {
@@ -1968,6 +2262,49 @@ async function handleCancelJob(payload: Record<string, unknown>) {
   return NextResponse.json({
     ok: true,
     message: "項目精査を中止しました",
+  });
+}
+
+async function handleResumeJob(payload: Record<string, unknown>) {
+  const jobId = String(payload.jobId ?? "").trim();
+
+  if (!jobId) {
+    return NextResponse.json(
+      { ok: false, error: "jobIdが指定されていません" },
+      { status: 400 }
+    );
+  }
+
+  const job = itemInspectionJobs.get(jobId);
+
+  if (!job) {
+    return NextResponse.json(
+      { ok: false, error: "項目精査ジョブが見つかりません" },
+      { status: 404 }
+    );
+  }
+
+  if (job.status === "completed") {
+    return NextResponse.json({
+      ...getJobSnapshot(job),
+      message: "すでに完了しています",
+    });
+  }
+
+  job.pauseRequested = false;
+  job.cancelRequested = false;
+  job.status = "running";
+  job.error = null;
+  job.updatedAt = Date.now();
+
+  queueMicrotask(() => {
+    void processItemInspectionJob(jobId);
+  });
+
+  return NextResponse.json({
+    ...getJobSnapshot(job, { includePreviewRows: false }),
+    jobStatus: "running",
+    message: "途中から再開しました",
   });
 }
 
@@ -2099,6 +2436,10 @@ export async function POST(req: NextRequest) {
 
     if (action === "cancel_job") {
       return handleCancelJob(payload);
+    }
+
+    if (action === "resume_job") {
+      return handleResumeJob(payload);
     }
 
     if (action === "apply_preview_changes") {
