@@ -25,6 +25,7 @@ export type CrawlExtractedFields = {
   capital: string | null;
   employee_count: string | null;
   business_content: string | null;
+  permit_number: string | null;
   offices: CrawlExtractedOffice[];
 };
 
@@ -41,7 +42,9 @@ export type CrawlSelectableFieldKey =
   | "representative_name"
   | "capital"
   | "employee_count"
-  | "business_content";
+  | "business_content"
+  | "worker_dispatch_license"
+  | "paid_job_placement_license";
 
 const DEFAULT_CRAWL_SELECTABLE_FIELDS: CrawlSelectableFieldKey[] = [
   "company",
@@ -57,6 +60,8 @@ const DEFAULT_CRAWL_SELECTABLE_FIELDS: CrawlSelectableFieldKey[] = [
   "capital",
   "employee_count",
   "business_content",
+  "worker_dispatch_license",
+  "paid_job_placement_license",
 ];
 
 function hasSelectedCrawlField(
@@ -93,6 +98,42 @@ type CrawlRuntimeOptions = {
 };
 
 const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
+
+const WORKER_DISPATCH_LICENSE_REGEX =
+  /派\s*[0-9０-９]{2}\s*[-－ー―]\s*[0-9０-９]{6}/i;
+
+const PAID_JOB_PLACEMENT_LICENSE_REGEX =
+  /[0-9０-９]{2}\s*[-－ー―]\s*ユ\s*[-－ー―]\s*[0-9０-９]{6}/i;
+
+function hasSelectedPermitFields(
+  selectedFieldSet: Set<CrawlSelectableFieldKey>
+) {
+  return (
+    hasSelectedCrawlField(selectedFieldSet, "worker_dispatch_license") ||
+    hasSelectedCrawlField(selectedFieldSet, "paid_job_placement_license")
+  );
+}
+
+function extractPermitNumberCategory(text: string) {
+  const normalized = text.normalize("NFKC");
+
+  const hasWorkerDispatch = WORKER_DISPATCH_LICENSE_REGEX.test(normalized);
+  const hasPaidPlacement = PAID_JOB_PLACEMENT_LICENSE_REGEX.test(normalized);
+
+  if (hasWorkerDispatch && hasPaidPlacement) {
+    return "労働者派遣・有料職業紹介";
+  }
+
+  if (hasWorkerDispatch) {
+    return "労働者派遣";
+  }
+
+  if (hasPaidPlacement) {
+    return "有料職業紹介";
+  }
+
+  return null;
+}
 
 function throwIfCrawlShouldStop(runtimeOptions?: CrawlRuntimeOptions) {
   if (runtimeOptions?.shouldStop?.()) {
@@ -3260,6 +3301,7 @@ function getCandidatePageLimit(
     selectedFieldSet,
     "employee_count"
   );
+  const needsPermit = hasSelectedPermitFields(selectedFieldSet);
 
   if (isRepresentativeOnlyMode(selectedFieldSet)) {
     return 18;
@@ -3267,6 +3309,7 @@ function getCandidatePageLimit(
 
   if (selectedFieldSet.size === 1) {
     if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 5;
+    if (needsPermit) return 12;
     if (hasSelectedOfficeFields(selectedFieldSet)) {
       return needsEmployeeCount ? 12 : 8;
     }
@@ -3278,15 +3321,19 @@ function getCandidatePageLimit(
     selectedFieldSet.size <= 3 &&
     hasSelectedCrawlField(selectedFieldSet, "representative_name")
   ) {
-    return needsEmployeeCount ? 18 : 12;
+    return needsEmployeeCount || needsPermit ? 18 : 12;
   }
 
   if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
-    return needsEmployeeCount ? 18 : 8;
+    return needsEmployeeCount || needsPermit ? 18 : 8;
   }
 
   if (needsEmployeeCount) {
     return 30;
+  }
+
+  if (needsPermit) {
+    return 24;
   }
 
   return 20;
@@ -3328,6 +3375,13 @@ function canStopFetchingAdditionalPages(
     if (field === "capital") return !!best.capital?.value;
     if (field === "employee_count") return hasHighConfidenceEmployeeCount(best);
     if (field === "business_content") return !!best.business_content?.value;
+
+    if (
+      field === "worker_dispatch_license" ||
+      field === "paid_job_placement_license"
+    ) {
+      return !!best.permit_number?.value;
+    }
 
     return true;
   });
@@ -3608,6 +3662,19 @@ if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
       90 + boost
     );
   }
+
+  if (hasSelectedPermitFields(selectedFieldSet)) {
+    const permitCategory = extractPermitNumberCategory(
+      [page.structuredText, page.text, page.title, page.h1].join("\n")
+    );
+
+    addBest(
+      best,
+      "permit_number",
+      permitCategory,
+      230 + boost
+    );
+  }
 }
 
 function findRejectedRepresentativeValue(pages: PageData[]) {
@@ -3665,6 +3732,7 @@ export async function crawlCompanyWebsite(
       capital: null,
       employee_count: null,
       business_content: null,
+      permit_number: null,
       offices: [],
     };
   }
@@ -3704,6 +3772,7 @@ export async function crawlCompanyWebsite(
       capital: null,
       employee_count: null,
       business_content: null,
+      permit_number: null,
       offices: [],
     };
   }
@@ -3890,6 +3959,7 @@ export async function crawlCompanyWebsite(
     business_content: hasSelectedCrawlField(selectedFieldSet, "business_content")
       ? best.business_content?.value ?? null
       : null,
+    permit_number: best.permit_number?.value ?? null,
     offices,
   };
 }

@@ -31,6 +31,7 @@ type Row = {
   business_type: string | null;
   business_content: string | null;
   industry_category: string | null;
+  permit_number: string | null;
   memo: string | null;
 };
 
@@ -155,6 +156,8 @@ const CRAWL_CONFIRM_FIELD_OPTIONS = [
   { key: "capital", label: "資本金" },
   { key: "employee_count", label: "従業員数" },
   { key: "business_content", label: "事業内容" },
+  { key: "worker_dispatch_license", label: "労働者派遣" },
+  { key: "paid_job_placement_license", label: "有料職業紹介" },
 ] as const;
 
 type CrawlFieldKey =
@@ -447,6 +450,7 @@ const GRID_TEMPLATE = `
   minmax(140px,1fr)
   minmax(320px,2.2fr)
   minmax(160px,1.1fr)
+  minmax(180px,1.2fr)
   minmax(320px,2.2fr)
 `;
 
@@ -497,6 +501,7 @@ const CSV_TEMPLATE_HEADERS = [
   "業種",
   "事業内容",
   "業界",
+  "許可番号",
   "メモ",
 ] as const;
 
@@ -527,6 +532,7 @@ const COLUMN_DEFS: { key: FilterKey; label: string }[] = [
   { key: "business_type", label: "業種" },
   { key: "business_content", label: "事業内容" },
   { key: "industry_category", label: "業界" },
+  { key: "permit_number", label: "許可番号" },
   { key: "memo", label: "メモ" },
 ];
 
@@ -1648,6 +1654,7 @@ function VirtualRow({
         <Cell title={row.business_type || ""}><EmptyValue value={row.business_type} /></Cell>
         <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
         <Cell title={row.industry_category || ""}><EmptyValue value={row.industry_category} /></Cell>
+        <Cell title={row.permit_number || ""}><EmptyValue value={row.permit_number} /></Cell>
         <Cell title={row.memo || ""} className="whitespace-pre-wrap"><EmptyValue value={row.memo} /></Cell>
       </div>
     </div>
@@ -3615,14 +3622,14 @@ export default function Home() {
               disabled={importing}
               className="h-11 min-w-[160px] rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
             >
-              {importing ? "投入中..." : "CSVを投入"}
+              {importing ? "投入中..." : "CSV投入"}
             </button>
 
             <button
               onClick={handleExportClick}
               className="h-11 min-w-[160px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
             >
-              CSVを抽出
+              CSV抽出
             </button>
 
             <button
@@ -4538,6 +4545,7 @@ const handlePreviewCsvExport = async () => {
     { key: "business_type", label: "業種" },
     { key: "business_content", label: "事業内容" },
     { key: "industry_category", label: "業界" },
+    { key: "permit_number", label: "許可番号" },
     { key: "memo", label: "メモ" },
   ];
 
@@ -6428,6 +6436,7 @@ const handlePreviewCsvExport = async () => {
             <Cell title={row.business_type || ""}><EmptyValue value={row.business_type} /></Cell>
             <Cell title={row.business_content || ""} className="whitespace-pre-wrap"><EmptyValue value={row.business_content} /></Cell>
             <Cell title={row.industry_category || ""}><EmptyValue value={row.industry_category} /></Cell>
+            <Cell title={row.permit_number || ""}><EmptyValue value={row.permit_number} /></Cell>
             <Cell title={row.memo || ""} className="whitespace-pre-wrap"><EmptyValue value={row.memo} /></Cell>
           </div>
         ))}

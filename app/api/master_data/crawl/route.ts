@@ -30,6 +30,7 @@ const FILTER_COLUMN_MAP = {
   business_type: `"業種"`,
   business_content: `"事業内容"`,
   industry_category: `"業界"`,
+  permit_number: `"許可番号"`,
   memo: `"メモ"`,
 } as const;
 
@@ -113,6 +114,7 @@ type CrawlPayload = {
   capital: string | null;
   employee_count: string | null;
   business_content: string | null;
+  permit_number: string | null;
 };
 
 type CrawlSelectableFieldKey =
@@ -128,14 +130,21 @@ type CrawlSelectableFieldKey =
   | "representative_name"
   | "capital"
   | "employee_count"
-  | "business_content";
+  | "business_content"
+  | "worker_dispatch_license"
+  | "paid_job_placement_license";
 
 type CrawlPayloadCandidateKey = Extract<
   CrawlSelectableFieldKey,
   "phone" | "fax" | "email" | "zipcode" | "address"
 >;
 
-type CrawlPreviewSelectableKey = CrawlSelectableFieldKey;
+type CrawlPreviewSelectableKey =
+  | Exclude<
+      CrawlSelectableFieldKey,
+      "worker_dispatch_license" | "paid_job_placement_license"
+    >
+  | "permit_number";
 
 type CrawlPreviewChange = {
   key: CrawlPreviewSelectableKey;
@@ -172,6 +181,7 @@ type PreviewSourceRow = {
   business_type: string | null;
   business_content: string | null;
   industry_category: string | null;
+  permit_number: string | null;
   memo: string | null;
 };
 
@@ -218,6 +228,11 @@ async function ensureMasterDataIdColumn(client: DbClient) {
   await client.query(`
     ALTER TABLE public.master_data
     ADD COLUMN IF NOT EXISTS id BIGSERIAL
+  `);
+
+  await client.query(`
+    ALTER TABLE public.master_data
+    ADD COLUMN IF NOT EXISTS "許可番号" text
   `);
 
   await client.query(`
@@ -744,6 +759,10 @@ const MASTER_DATA_COLUMNS = [
   "削除タグ",
   "削除フラグ",
   "強制フラグ",
+  "業種",
+  "業界",
+  "許可番号",
+  "メモ",
 ] as const;
 
 const CRAWL_CANDIDATE_FIELDS: Array<{
@@ -769,6 +788,7 @@ const CRAWL_SINGLE_VALUE_FIELDS: Array<{
   { key: "capital", label: "資本金" },
   { key: "employee_count", label: "従業員数" },
   { key: "business_content", label: "事業内容" },
+  { key: "permit_number", label: "許可番号" },
 ];
 
 const CRAWL_SELECTABLE_FIELDS: CrawlSelectableFieldKey[] = [
@@ -785,6 +805,8 @@ const CRAWL_SELECTABLE_FIELDS: CrawlSelectableFieldKey[] = [
   "capital",
   "employee_count",
   "business_content",
+  "worker_dispatch_license",
+  "paid_job_placement_license",
 ];
 
 function normalizeSelectedFields(selectedFields?: CrawlSelectableFieldKey[]) {
@@ -837,6 +859,13 @@ function getResolvedValue(current: unknown, next: string | null) {
   const currentValue = normalizeNullableText(current);
   const nextValue = normalizeNullableText(next);
   return nextValue ?? currentValue;
+}
+
+function hasPermitSelection(selectedFieldSet: Set<CrawlSelectableFieldKey>) {
+  return (
+    selectedFieldSet.has("worker_dispatch_license") ||
+    selectedFieldSet.has("paid_job_placement_license")
+  );
 }
 
 function buildCrawlPayloadBundles(
@@ -901,6 +930,7 @@ function buildCrawlPayloadBundles(
         capital: normalizeNullableText(extracted.capital),
         employee_count: normalizeNullableText(extracted.employee_count),
         business_content: normalizeNullableText(extracted.business_content),
+        permit_number: normalizeNullableText(extracted.permit_number),
       },
       candidates: {
         phone: uniqueTextValues(office.phone_candidates),
@@ -941,7 +971,11 @@ function buildPreviewChanges(
   }
 
   for (const field of CRAWL_SINGLE_VALUE_FIELDS) {
-    if (!selectedFieldSet.has(field.key)) continue;
+    if (field.key === "permit_number") {
+      if (!hasPermitSelection(selectedFieldSet)) continue;
+    } else {
+      if (!selectedFieldSet.has(field.key as CrawlSelectableFieldKey)) continue;
+    }
 
     const before = normalizeNullableText(row[field.key]);
     const after = getResolvedValue(row[field.key], bundle.payload[field.key]);
@@ -1025,6 +1059,8 @@ function buildSelectedPayload(
     employee_count: selected.employee_count ?? bundle.payload.employee_count,
     business_content:
       selected.business_content ?? bundle.payload.business_content,
+    permit_number:
+      selected.permit_number ?? bundle.payload.permit_number,
   };
 }
 
@@ -1082,6 +1118,9 @@ function buildInsertRow(
     事業内容: selectedKeys.has("business_content")
       ? payload.business_content
       : sourceRow["事業内容"],
+    許可番号: selectedKeys.has("permit_number")
+      ? payload.permit_number
+      : sourceRow["許可番号"],
   };
 }
 
@@ -1115,6 +1154,7 @@ function buildPreviewSourceRow(
     business_type: normalizeNullableText(row.business_type),
     business_content: normalizeNullableText(row.business_content),
     industry_category: normalizeNullableText(row.industry_category),
+    permit_number: normalizeNullableText(row.permit_number),
     memo: normalizeNullableText(row.memo),
   };
 }
@@ -1190,6 +1230,8 @@ const CRAWL_FIELD_LABEL_MAP: Record<CrawlSelectableFieldKey, string> = {
   capital: "資本金",
   employee_count: "従業員数",
   business_content: "事業内容",
+  worker_dispatch_license: "労働者派遣",
+  paid_job_placement_license: "有料職業紹介",
 };
 
 const globalForCrawlJobs = globalThis as typeof globalThis & {
@@ -1441,6 +1483,7 @@ async function fetchCrawlTargets(
       md."業種" AS business_type,
       md."事業内容" AS business_content,
       md."業界" AS industry_category,
+      md."許可番号" AS permit_number,
       md."メモ" AS memo
     FROM public.master_data AS md
     ${targetWhereSql}
@@ -1686,7 +1729,7 @@ const sourceRowCache = new Map<string, Record<string, unknown> | null>();
           UPDATE public.master_data
           SET
             "企業名" = CASE
-              WHEN $14::boolean THEN COALESCE($1, "企業名")
+              WHEN $15::boolean THEN COALESCE($1, "企業名")
               WHEN NULLIF(BTRIM(COALESCE("企業名"::text, '')), '') IS NULL
                 THEN COALESCE($1, "企業名")
               ELSE "企業名"
@@ -1706,8 +1749,9 @@ const sourceRowCache = new Map<string, Record<string, unknown> | null>();
             "代表者名" = COALESCE($10, "代表者名"),
             "資本金" = COALESCE($11, "資本金"),
             "従業員数" = COALESCE($12, "従業員数"),
-            "事業内容" = COALESCE($13, "事業内容")
-          WHERE id = $15::bigint
+            "事業内容" = COALESCE($13, "事業内容"),
+            "許可番号" = COALESCE($14, "許可番号")
+          WHERE id = $16::bigint
         `;
 
         const updateValues = [
@@ -1726,6 +1770,7 @@ const sourceRowCache = new Map<string, Record<string, unknown> | null>();
           selectedKeys.has("capital") ? payload.capital : null,
           selectedKeys.has("employee_count") ? payload.employee_count : null,
           selectedKeys.has("business_content") ? payload.business_content : null,
+          selectedKeys.has("permit_number") ? payload.permit_number : null,
           selectedKeys.has("company") && item.bundle.forceCompanyUpdate,
           item.row_id,
         ];

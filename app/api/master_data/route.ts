@@ -31,6 +31,7 @@ const FILTER_COLUMN_MAP = {
   business_type: `"業種"`,
   business_content: `"事業内容"`,
   industry_category: `"業界"`,
+  permit_number: `"許可番号"`,
   memo: `"メモ"`,
 } as const;
 
@@ -124,6 +125,7 @@ const CSV_HEADER_COLUMNS = [
   "業種",
   "事業内容",
   "業界",
+  "許可番号",
   "メモ",
 ] as const;
 
@@ -154,6 +156,7 @@ const DB_INSERT_COLUMNS = [
   "業種",
   "事業内容",
   "業界",
+  "許可番号",
   "メモ",
 ] as const;
 
@@ -187,6 +190,7 @@ const DB_INSERT_TO_CSV_HEADER: Record<
   "業種": "業種",
   "事業内容": "事業内容",
   "業界": "業界",
+  "許可番号": "許可番号",
   "メモ": "メモ",
 };
 
@@ -196,6 +200,11 @@ async function ensureMasterDataIdColumn(
   await client.query(`
     ALTER TABLE public.master_data
     ADD COLUMN IF NOT EXISTS id BIGSERIAL
+  `);
+
+  await client.query(`
+    ALTER TABLE public.master_data
+    ADD COLUMN IF NOT EXISTS "許可番号" text
   `);
 
   await client.query(`
@@ -2062,6 +2071,7 @@ async function handleRepresentativeNameInspectionDelete(
 async function handleReadRequest(searchParams: URLSearchParams) {
   try {
     await dbReady;
+    await ensureMasterDataIdColumn(pool);
     const valuesFor = searchParams.get("valuesFor") as FilterKey | null;
     const advancedValuesFor = searchParams.get("advancedValuesFor");
 
@@ -2556,6 +2566,7 @@ async function handleReadRequest(searchParams: URLSearchParams) {
         "業種" AS business_type,
         "事業内容" AS business_content,
         "業界" AS industry_category,
+        "許可番号" AS permit_number,
         "メモ" AS memo
       FROM public.master_data
       ${whereSql}

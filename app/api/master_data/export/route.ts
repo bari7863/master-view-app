@@ -28,6 +28,7 @@ const FILTER_COLUMN_MAP = {
   business_type: `"業種"`,
   business_content: `"事業内容"`,
   industry_category: `"業界"`,
+  permit_number: `"許可番号"`,
   memo: `"メモ"`,
 } as const;
 
@@ -121,6 +122,7 @@ const CSV_COLUMNS = [
   "業種",
   "事業内容",
   "業界",
+  "許可番号",
   "メモ",
 ] as const;
 
@@ -683,6 +685,7 @@ export async function GET(req: NextRequest) {
         "業種" AS "業種",
         "事業内容" AS "事業内容",
         "業界" AS "業界",
+        "許可番号" AS "許可番号",
         "メモ" AS "メモ"
       FROM public.master_data
       ${whereSql}
