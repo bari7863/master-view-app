@@ -143,22 +143,239 @@ function throwIfCrawlShouldStop(runtimeOptions?: CrawlRuntimeOptions) {
 
 const CONTACT_KEYWORDS =
   /(お問い合わせ|お問合せ|お問い合わせ先|お問合せ先|連絡先|contact|inquiry|consult|相談|資料請求|フォーム|form|mail)/i;
+
 const COMPANY_KEYWORDS =
   /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|事務所概要|事業所案内|店舗案内|拠点情報|アクセス|所在地|outline|profile|company|about|corporate|information)/i;
+
 const BUSINESS_KEYWORDS =
   /(事業内容|業務内容|営業内容|取扱業務|取扱内容|取扱商品|サービス|service|business|業容|事業概要|サービス内容)/i;
+
 const STAFF_KEYWORDS =
   /(代表|代表者|社長|会長|役員|理事長|所長|センター長|学院長|校長|学長|施設長|室長|ご挨拶|あいさつ|メッセージ|greeting|message|president|ceo|director|chief|officer|executive)/i;
+
 const RECRUIT_KEYWORDS =
   /(採用|求人|募集要項|recruit|career|job|jobs|entry)/i;
+
 const NEWS_BLOG_KEYWORDS =
   /(お知らせ|新着|news|blog|ブログ|column|コラム|topics|トピックス|works|実績|case|事例|seminar|セミナー|event|イベント|voice|story|success|diary|interview|インタビュー|ひとりごと|卒業生|在校生|コーチ|先生)/i;
+
 const HTML_PAGE_DENY_EXT =
-  /\.(pdf|zip|jpg|jpeg|png|gif|svg|webp|doc|docx|xls|xlsx|ppt|pptx)$/i;
-const REPRESENTATIVE_BAD_VALUE_REGEX =
-  /(基本情報|人事|新卒入社|会社概要(?:・沿革)?|会社案内|会社情報|企業情報|企業理念|経営理念|経営方針|経営者略歴|構成|声明|調査相談専用|番号|事業内容|製造|資本|者名|店舗詳細|営業所所在地|本社所在地|本社住所|採用\s*情報|採用情報|級建築士|登録番号|福山市|府中市|長野事業所|ショップ|shop|キャンパス|campus|一覧|大切にしていること|補償制度|道路工事|会社沿革|会社紹介動画|工場紹介|地域活動|協賛募集|募集要項|福利厚生|企業を知る|社員紹介|社員インタビュー|interview|voice|story|blog|news|topics|column|株式会社$|有限会社$|合同会社$|合資会社$|合名会社$|営業責任者|責任者\s*兼|生年月日|営\s*業|平成|昭和|令和)/i;
+  /\.(zip|jpg|jpeg|png|gif|svg|webp|doc|docx|xls|xlsx|ppt|pptx)$/i;
+
+const PDF_PAGE_REGEX = /\.pdf(?:$|\?)/i;
+
 const REPRESENTATIVE_TRAILING_TITLE_REGEX =
-  /\s*(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長).*$/i;
+  /\s*(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|代表)\s*$/i;
+
+const REPRESENTATIVE_LEADING_LABEL_REGEX =
+  /^(?:代表者氏名|代表氏名|代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長|役員(?!一覧|紹介))\s*[:：]?\s*/i;
+
+const REPRESENTATIVE_INLINE_TITLE_REGEX =
+  /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)(?!から)/i;
+
+const REPRESENTATIVE_STRONG_PAGE_REGEX =
+  /(会社概要(?:・沿革)?|会社案内|会社情報|企業情報|法人概要|企業概要|会社データ|会社紹介|会社基本情報|基本情報|outline|profile|company|corporate|about|gaiyou|overview|information)/i;
+
+const REPRESENTATIVE_GREETING_PAGE_REGEX =
+  /(代表挨拶|社長挨拶|理事長挨拶|所長挨拶|ご挨拶|トップメッセージ|topmessage|greeting|message|president)/i;
+
+const REPRESENTATIVE_WEAK_PAGE_REGEX =
+  /(役員一覧|officer|executive|member|staff)/i;
+
+const REPRESENTATIVE_DENY_PAGE_REGEX =
+  /(recruit|career|job|jobs|entry|採用|新卒|中途|blog|news|topics|column|interview|voice|story|success|diary|shop|shopinfo|campus|店舗|商品|製品|service|faq|contact)/i;
+
+const REPRESENTATIVE_NON_NAME_REGEX =
+  /(会社概要|会社情報|企業情報|法人概要|企業概要|基本情報|会社データ|会社紹介|採用|人事|営業|問い合わせ|お問い合わせ|連絡先|所在地|住所|アクセス|資本金|従業員数|事業内容|サービス|商品|製品|一覧|ブログ|ニュース|お知らせ|沿革|理念|方針|インタビュー|スタッフ|店舗|工場|営業所)/i;
+
+const REPRESENTATIVE_COMPANY_REGEX =
+  /株式会社|有限会社|合同会社|合資会社|合名会社|御中/i;
+
+const REPRESENTATIVE_NAME_BODY_REGEX =
+  /^[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵー]{2,20}(?:\s+[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵー]{1,20})?$/u;
+
+type RepresentativeCandidate = {
+  value: string;
+  score: number;
+};
+
+function cleanRepresentativeCandidate(value: string) {
+  const normalized = normalizeSpace(value)
+    .replace(/[（(][^）)]*[）)]/g, " ")
+    .replace(/[【】\[\]「」『』<>〈〉《》〔〕]/g, " ")
+    .replace(REPRESENTATIVE_LEADING_LABEL_REGEX, "")
+    .replace(
+      /^(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|代表者?|代表|執行役員(?:専務|常務)?|常務取締役?|専務取締役?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工)\s*/i,
+      ""
+    )
+    .replace(
+      /\s*(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|代表者?|代表|執行役員(?:専務|常務)?|常務取締役?|専務取締役?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工)\s*$/i,
+      ""
+    )
+    .replace(/\s*[／/].*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized === "" ? null : normalized;
+}
+
+export function inspectRepresentativeNameValue(value: string | null) {
+  const cleanedValue = cleanRepresentativeCandidate(value ?? "");
+
+  return {
+    cleanedValue,
+    shouldUpdate: false,
+    shouldDelete: false,
+    shouldReview: false,
+    reason: "",
+  };
+}
+
+function normalizeRepresentativeName(
+  value: string,
+  _options?: { allowCompactSingleToken?: boolean }
+) {
+  return cleanRepresentativeCandidate(value);
+}
+
+function normalizeRepresentativeCandidateForBest(value: string) {
+  return cleanRepresentativeCandidate(value);
+}
+
+function pushRepresentativeCandidate(
+  candidateMap: Map<string, number>,
+  rawValue: string | null | undefined,
+  score: number
+) {
+  if (!rawValue) return;
+
+  const cleaned = cleanRepresentativeCandidate(rawValue);
+  if (!cleaned) return;
+
+  const current = candidateMap.get(cleaned);
+  if (current == null || score > current) {
+    candidateMap.set(cleaned, score);
+  }
+}
+
+function collectRepresentativeCandidatesFromText(
+  text: string,
+  baseScore = 0
+): RepresentativeCandidate[] {
+  const candidateMap = new Map<string, number>();
+
+  const lines = text
+    .split("\n")
+    .map((line) => normalizeSpace(line))
+    .filter((line) => line !== "");
+
+  const exactLabelOnlyPattern =
+    /^(?:代表者氏名|代表氏名|代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)$/i;
+
+  const exactSameLinePattern =
+    /^(?:代表者氏名|代表氏名|代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i;
+
+  const sameLineAfterTitlePattern =
+    /^(?:代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|代表)\s*[:：/／]?\s*(.+)$/i;
+
+  const sameLineBeforeTitlePattern =
+    /^(.+?)\s+(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|代表)$/u;
+
+  const titleOnlyPattern =
+    /^(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|代表|一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工)(?:\s+(?:一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工))*$/u;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    const sameLine = line.match(exactSameLinePattern);
+    if (sameLine?.[1]) {
+      pushRepresentativeCandidate(candidateMap, sameLine[1], 1100 + baseScore);
+    }
+
+    if (exactLabelOnlyPattern.test(line)) {
+      pushRepresentativeCandidate(candidateMap, lines[i + 1] ?? null, 1080 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 2] ?? null, 1040 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 3] ?? null, 1000 + baseScore);
+    }
+
+    const sameLineAfterTitle = line.match(sameLineAfterTitlePattern);
+    if (sameLineAfterTitle?.[1]) {
+      pushRepresentativeCandidate(candidateMap, sameLineAfterTitle[1], 980 + baseScore);
+    }
+
+    const sameLineBeforeTitle = line.match(sameLineBeforeTitlePattern);
+    if (sameLineBeforeTitle?.[1]) {
+      pushRepresentativeCandidate(candidateMap, sameLineBeforeTitle[1], 960 + baseScore);
+    }
+
+    if (titleOnlyPattern.test(line)) {
+      pushRepresentativeCandidate(candidateMap, lines[i + 1] ?? null, 1060 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 2] ?? null, 1020 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 3] ?? null, 980 + baseScore);
+    }
+  }
+
+  return Array.from(candidateMap.entries())
+    .map(([value, score]) => ({ value, score }))
+    .sort((a, b) => b.score - a.score);
+}
+
+function extractRepresentativeNameFromText(text: string) {
+  const candidates = collectRepresentativeCandidatesFromText(text, 0);
+  return candidates[0]?.value ?? null;
+}
+
+function getRepresentativePagePriorityBoost(page: PageData) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+
+  let score = 0;
+
+  if (REPRESENTATIVE_STRONG_PAGE_REGEX.test(target)) score += 400;
+  if (/(?:当社|弊社|私たち|わたしたち|会社|企業|法人|事務所|株式会社[^\s　/]{0,30}|有限会社[^\s　/]{0,30}|合同会社[^\s　/]{0,30})について/i.test(target)) score += 260;
+  if (REPRESENTATIVE_GREETING_PAGE_REGEX.test(target)) score += 240;
+  if (REPRESENTATIVE_WEAK_PAGE_REGEX.test(target)) score += 120;
+  if (REPRESENTATIVE_DENY_PAGE_REGEX.test(target)) score -= 320;
+
+  return score;
+}
+
+function collectRepresentativeCandidates(page: PageData): RepresentativeCandidate[] {
+  const candidateMap = new Map<string, number>();
+  const pagePriorityBoost = getRepresentativePagePriorityBoost(page);
+  const pairs = extractPairs(page.html);
+
+  const representativePairValue = pickRepresentativePairValue(pairs);
+  pushRepresentativeCandidate(
+    candidateMap,
+    representativePairValue,
+    1250 + pagePriorityBoost
+  );
+
+  const representativeTextValue =
+    extractSingleLineLabeledValue(page.structuredText, REPRESENTATIVE_NAME_LABELS) ??
+    null;
+
+  pushRepresentativeCandidate(
+    candidateMap,
+    representativeTextValue,
+    1230 + pagePriorityBoost
+  );
+
+  const textCandidates = collectRepresentativeCandidatesFromText(
+    page.structuredText,
+    pagePriorityBoost
+  );
+
+  for (const candidate of textCandidates) {
+    pushRepresentativeCandidate(candidateMap, candidate.value, candidate.score);
+  }
+
+  return Array.from(candidateMap.entries())
+    .map(([value, score]) => ({ value, score }))
+    .sort((a, b) => b.score - a.score);
+}
 
 const COMMON_CANDIDATE_PATHS = [
   "/company.html",
@@ -206,7 +423,7 @@ const COMMON_CANDIDATE_PATHS = [
   "/chubu/office/greeting.html",
   "/domestic/chubu/office/greeting.html",
   "/office/greeting.html",
-    "/aisatsu.html",
+  "/aisatsu.html",
   "/greeting/president.html",
   "/president.html",
   "/president/message.html",
@@ -320,6 +537,8 @@ const ESTABLISHED_LABELS = [
 const REPRESENTATIVE_NAME_LABELS = [
   /^代表者$/,
   /^代表者名$/,
+  /^代表者氏名$/,
+  /^代表氏名$/,
   /^代表取締役$/,
   /^代表取締役社長$/,
   /^代表取締役会長$/,
@@ -337,34 +556,13 @@ const REPRESENTATIVE_NAME_LABELS = [
   /^学長$/,
   /^施設長$/,
   /^室長$/,
+  /代表者氏名/,
+  /代表氏名/,
   /代表者/,
   /代表取締役/,
   /代表社員/,
   /代表理事/,
   /理事長/,
-];
-
-const REPRESENTATIVE_TITLE_LABELS = [
-  /^役職$/,
-  /^代表者役職$/,
-  /^肩書$/,
-  /^職位$/,
-  /^代表取締役$/,
-  /^代表取締役社長$/,
-  /^代表取締役会長$/,
-  /^取締役社長$/,
-  /^代表社員$/,
-  /^代表理事$/,
-  /^理事長$/,
-  /^社長$/,
-  /^会長$/,
-  /^CEO$/,
-  /^COO$/,
-  /^CFO$/,
-  /^代表$/,
-  /役職/,
-  /肩書/,
-  /職位/,
 ];
 
 const CAPITAL_LABELS = [
@@ -384,16 +582,33 @@ const EMPLOYEE_COUNT_LABELS = [
   /^連結従業員数$/,
   /^単体従業員数$/,
   /^単独従業員数$/,
+  /^個別従業員数$/,
   /^グループ従業員数$/,
+  /^グループ社員数$/,
+  /^グループ社員合計$/,
   /^社員数$/,
+  /^社員合計$/,
   /^職員数$/,
+  /^職員合計$/,
   /^スタッフ数$/,
+  /^スタッフ人数$/,
+  /^在籍スタッフ数$/,
   /^人数$/,
   /^総人数$/,
   /^在籍人数$/,
   /^人員構成$/,
   /^人員$/,
+  /^人員数$/,
+  /^総人員$/,
   /^メンバー数$/,
+  /^就業人数$/,
+  /^就業者数$/,
+  /^従業員合計$/,
+  /^常勤職員数$/,
+  /^非常勤職員数$/,
+  /^常勤社員数$/,
+  /^非常勤社員数$/,
+  /^従業員規模$/,
   /従業員数/,
   /従業員/,
   /総従業員数/,
@@ -401,15 +616,49 @@ const EMPLOYEE_COUNT_LABELS = [
   /連結従業員数/,
   /単体従業員数/,
   /単独従業員数/,
+  /個別従業員数/,
   /グループ従業員数/,
+  /グループ社員数/,
+  /グループ社員合計/,
   /社員数/,
+  /社員合計/,
   /職員数/,
+  /職員合計/,
   /スタッフ数/,
+  /スタッフ人数/,
+  /在籍スタッフ数/,
   /人数/,
   /総人数/,
   /在籍人数/,
+  /人員構成/,
+  /人員数/,
   /人員/,
+  /総人員/,
+  /メンバー数/,
+  /就業人数/,
+  /就業者数/,
+  /従業員合計/,
+  /常勤職員数/,
+  /非常勤職員数/,
+  /常勤社員数/,
+  /非常勤社員数/,
+  /従業員規模/,
 ];
+
+const EMPLOYEE_COUNT_CONTEXT_REGEX =
+  /(従業員|社員|職員|スタッフ|人員|メンバー|就業人数|就業者数|連結|単体|単独|個別|グループ社員|正社員|正職員|パート|アルバイト|契約社員|契約職員|派遣社員|派遣スタッフ|嘱託|常勤|非常勤)/i;
+
+const EMPLOYEE_COUNT_DENY_REGEX =
+  /(採用人数|募集人数|募集人員|採用予定人数|定員|参加人数|来場者数|利用者数|会員数|登録者数|フォロワー数|閲覧数|PV|座席数|病床数|車両数|台数|戸数|件数|店舗数|拠点数|事業所数|学校数|顧客数|取引先数|掲載社数|導入社数)/i;
+
+const EMPLOYEE_COUNT_PAGE_KEYWORDS =
+  /(従業員数|社員数|職員数|スタッフ数|人数|人員|人員数|総人員|従業員データ|社員データ|数字で見る|データで見る|会社データ|採用データ|就業人数|就業者数|staff|member|members|data|numbers|facts|ir|esg|sustainability|profile|outline)/i;
+
+const EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS =
+  /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|会社データ|会社基本情報|基本情報|company|corporate|about|outline|profile|overview|information)/i;
+
+const EMPLOYEE_COUNT_SECTION_END_LABELS =
+  /(会社名|商号|代表取締役|代表者|所在地|住所|電話番号|TEL|ＦＡＸ|FAX|従業員数|事業内容|設立|創業|資本金|アクセス|お問い合わせ|営業時間|受付時間|最寄りの交通機関|MAP)/i;
 
 const BUSINESS_CONTENT_LABELS = [
   /^事業内容$/,
@@ -463,60 +712,7 @@ const BUSINESS_HINT_WORDS =
 const PREFECTURE_REGEX_SOURCE =
   "(?:北海道|青森県|岩手県|宮城県|秋田県|山形県|福島県|茨城県|栃木県|群馬県|埼玉県|千葉県|東京都|神奈川県|新潟県|富山県|石川県|福井県|山梨県|長野県|岐阜県|静岡県|愛知県|三重県|滋賀県|京都府|大阪府|兵庫県|奈良県|和歌山県|鳥取県|島根県|岡山県|広島県|山口県|徳島県|香川県|愛媛県|高知県|福岡県|佐賀県|長崎県|熊本県|大分県|宮崎県|鹿児島県|沖縄県)";
 
-const PREFECTURE_NAMES = [
-  "北海道",
-  "青森県",
-  "岩手県",
-  "宮城県",
-  "秋田県",
-  "山形県",
-  "福島県",
-  "茨城県",
-  "栃木県",
-  "群馬県",
-  "埼玉県",
-  "千葉県",
-  "東京都",
-  "神奈川県",
-  "新潟県",
-  "富山県",
-  "石川県",
-  "福井県",
-  "山梨県",
-  "長野県",
-  "岐阜県",
-  "静岡県",
-  "愛知県",
-  "三重県",
-  "滋賀県",
-  "京都府",
-  "大阪府",
-  "兵庫県",
-  "奈良県",
-  "和歌山県",
-  "鳥取県",
-  "島根県",
-  "岡山県",
-  "広島県",
-  "山口県",
-  "徳島県",
-  "香川県",
-  "愛媛県",
-  "高知県",
-  "福岡県",
-  "佐賀県",
-  "長崎県",
-  "熊本県",
-  "大分県",
-  "宮崎県",
-  "鹿児島県",
-  "沖縄県",
-] as const;
-
-const BUSINESS_SECTION_STOP_WORDS =
-  /(〒|住所|所在地|本社所在地|アクセス|Access|TEL|FAX|営業時間|定休日|会社概要|代表者|代表取締役|資本金|従業員数|社員数|スタッフ数|職員数|採用|求人|お知らせ|NEWS|BLOG|COLUMN)/i;
-
-  const MUNICIPALITY_REGEX_SOURCE =
+const MUNICIPALITY_REGEX_SOURCE =
   "(?:[一-龠々ぁ-んァ-ヶー]+市[一-龠々ぁ-んァ-ヶー]*区?|[一-龠々ぁ-んァ-ヶー]+郡[一-龠々ぁ-んァ-ヶー]+町|[一-龠々ぁ-んァ-ヶー]+郡[一-龠々ぁ-んァ-ヶー]+村|[一-龠々ぁ-んァ-ヶー]+区|[一-龠々ぁ-んァ-ヶー]+町|[一-龠々ぁ-んァ-ヶー]+村)";
 
 const ADDRESS_PREFIX_REGEX =
@@ -525,40 +721,10 @@ const ADDRESS_PREFIX_REGEX =
 const ADDRESS_TRAILING_LABEL_REGEX =
   /\s*(?:営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|連絡先|本社|本店|支店|営業所|工場|事業所)\s*$/i;
 
-function pickAddressCore(value: string) {
-  const normalized = normalizeDigits(normalizeSpace(value));
-  if (!normalized) return null;
-
-  const cleaned = normalized
-    .replace(ADDRESS_PREFIX_REGEX, "")
-    .replace(/(?:〒\s*)?\d{3}-?\d{4}\s*/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
-  const stopSource =
-    `${ADDRESS_STOP_WORDS.source}|営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|本社|本店|支店|営業所|工場|事業所`;
-
-  const prefectureMatch = cleaned.match(
-    new RegExp(
-      `((?:${PREFECTURE_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
-    )
+function normalizeDigits(value: string) {
+  return value.replace(/[０-９]/g, (char) =>
+    String.fromCharCode(char.charCodeAt(0) - 0xfee0)
   );
-
-  if (prefectureMatch?.[1]) {
-    return prefectureMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
-  }
-
-  const municipalityMatch = cleaned.match(
-    new RegExp(
-      `((?:${MUNICIPALITY_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
-    )
-  );
-
-  if (municipalityMatch?.[1]) {
-    return municipalityMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
-  }
-
-  return cleaned.replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim() || null;
 }
 
 function normalizeSpace(value: string) {
@@ -585,7 +751,10 @@ function stripHtml(html: string) {
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<!--[\s\S]*?-->/g, " ")
       .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|section|article|li|ul|ol|tr|td|th|dd|dt|h1|h2|h3|h4|h5|h6)>/gi, "\n")
+      .replace(
+        /<\/(p|div|section|article|li|ul|ol|tr|td|th|dd|dt|h1|h2|h3|h4|h5|h6)>/gi,
+        "\n"
+      )
       .replace(/<[^>]+>/g, " ")
   );
 }
@@ -640,8 +809,14 @@ function extractJsonLdOrganizationName(html: string) {
 
   for (const block of scriptMatches) {
     const name =
-      firstMatch(block, /"@type"\s*:\s*"Organization"[\s\S]*?"name"\s*:\s*"([^"]+)"/i) ??
-      firstMatch(block, /"name"\s*:\s*"([^"]+)"[\s\S]*?"@type"\s*:\s*"Organization"/i);
+      firstMatch(
+        block,
+        /"@type"\s*:\s*"Organization"[\s\S]*?"name"\s*:\s*"([^"]+)"/i
+      ) ??
+      firstMatch(
+        block,
+        /"name"\s*:\s*"([^"]+)"[\s\S]*?"@type"\s*:\s*"Organization"/i
+      );
 
     if (name) return name;
   }
@@ -681,17 +856,11 @@ function extractLinks(html: string, baseUrl: string): LinkItem[] {
     const href = normalizeSpace(match[1] || "");
     const text = stripHtml(match[2] || "");
 
-    if (!href || /^javascript:/i.test(href) || href.startsWith("#")) {
-      continue;
-    }
-
-    if (/^(mailto:|tel:)/i.test(href)) {
-      continue;
-    }
+    if (!href || /^javascript:/i.test(href) || href.startsWith("#")) continue;
+    if (/^(mailto:|tel:)/i.test(href)) continue;
 
     try {
       const resolved = normalizeUrlWithoutHash(new URL(href, base).toString());
-
       if (seen.has(resolved)) continue;
       seen.add(resolved);
 
@@ -724,7 +893,9 @@ function cleanCompanyName(value: string) {
     );
 
   const picked = parts.find((item) =>
-    /株式会社|有限会社|合同会社|合資会社|合名会社|Inc\.?|INC\.?|Co\.\s*,?\s*Ltd\.?|CO\.\s*,?\s*LTD\.?/i.test(item)
+    /株式会社|有限会社|合同会社|合資会社|合名会社|Inc\.?|INC\.?|Co\.\s*,?\s*Ltd\.?|CO\.\s*,?\s*LTD\.?/i.test(
+      item
+    )
   );
 
   return picked || parts[0] || null;
@@ -750,7 +921,7 @@ function extractCompanyNameFromText(text: string) {
 function extractSingleLineLabeledValue(
   text: string,
   labelRegexList: RegExp[],
-  maxLength = 120
+  _maxLength = 120
 ) {
   const lines = text
     .split("\n")
@@ -794,53 +965,6 @@ function extractSingleLineLabeledValue(
   return null;
 }
 
-function extractRepresentativeSingleLineValue(text: string) {
-  const lines = text
-    .split("\n")
-    .map((line) => normalizeSpace(line))
-    .filter((line) => line !== "");
-
-  const exactLabelOnlyPattern =
-    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長|役員(?!一覧|紹介))$/i;
-
-  const exactSameLinePattern =
-    /^(?:代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長|役員(?!一覧|紹介))\s*[:：]?\s*(.+)$/i;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-
-    const sameLine = line.match(exactSameLinePattern);
-    if (sameLine?.[1]) {
-      const candidate = normalizeRepresentativeName(sameLine[1], {
-        allowCompactSingleToken: true,
-      });
-      if (candidate) return candidate;
-    }
-
-    if (exactLabelOnlyPattern.test(line)) {
-      const nextLine = lines[i + 1] ?? "";
-      const nextCandidate = normalizeRepresentativeName(nextLine, {
-        allowCompactSingleToken: true,
-      });
-      if (nextCandidate) return nextCandidate;
-
-      const nextNextLine = lines[i + 2] ?? "";
-      const nextNextCandidate = normalizeRepresentativeName(nextNextLine, {
-        allowCompactSingleToken: true,
-      });
-      if (nextNextCandidate) return nextNextCandidate;
-    }
-  }
-
-  return null;
-}
-
-function normalizeDigits(value: string) {
-  return value.replace(/[０-９]/g, (char) =>
-    String.fromCharCode(char.charCodeAt(0) - 0xfee0)
-  );
-}
-
 function formatJapanesePhone(digits: string) {
   const normalized = digits.replace(/\D/g, "");
 
@@ -860,18 +984,6 @@ function formatJapanesePhone(digits: string) {
 
   if (/^(03|06)\d{8}$/.test(normalized)) {
     return `${normalized.slice(0, 2)}-${normalized.slice(2, 6)}-${normalized.slice(6)}`;
-  }
-
-  const area3Prefixes = [
-    "011", "015", "017", "018", "019", "022", "023", "024", "025", "026",
-    "027", "028", "029", "042", "043", "044", "045", "046", "047", "048",
-    "049", "052", "053", "054", "055", "058", "059", "072", "073", "075",
-    "076", "077", "078", "079", "082", "083", "084", "086", "087", "088",
-    "089", "092", "093", "095", "096", "097", "098", "099",
-  ];
-
-  if (normalized.length === 10 && area3Prefixes.some((prefix) => normalized.startsWith(prefix))) {
-    return `${normalized.slice(0, 3)}-${normalized.slice(3, 6)}-${normalized.slice(6)}`;
   }
 
   if (normalized.length === 10) {
@@ -904,7 +1016,6 @@ function normalizePhone(value: string) {
   for (const candidate of candidates) {
     const digits = candidate.replace(/\D/g, "");
     if (digits.length < 10 || digits.length > 11) continue;
-    if (/^\d{3}\d{4}$/.test(digits)) continue;
     return formatJapanesePhone(digits);
   }
 
@@ -935,6 +1046,42 @@ function normalizeZipcode(value: string) {
 
   const matched = normalized.match(/(?:〒\s*)?(\d{3})-?(\d{4})/);
   return matched ? `${matched[1]}-${matched[2]}` : null;
+}
+
+function pickAddressCore(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return null;
+
+  const cleaned = normalized
+    .replace(ADDRESS_PREFIX_REGEX, "")
+    .replace(/(?:〒\s*)?\d{3}-?\d{4}\s*/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const stopSource =
+    `${ADDRESS_STOP_WORDS.source}|営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|本社|本店|支店|営業所|工場|事業所`;
+
+  const prefectureMatch = cleaned.match(
+    new RegExp(
+      `((?:${PREFECTURE_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
+    )
+  );
+
+  if (prefectureMatch?.[1]) {
+    return prefectureMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
+  }
+
+  const municipalityMatch = cleaned.match(
+    new RegExp(
+      `((?:${MUNICIPALITY_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
+    )
+  );
+
+  if (municipalityMatch?.[1]) {
+    return municipalityMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
+  }
+
+  return cleaned.replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim() || null;
 }
 
 function normalizeAddress(value: string) {
@@ -1027,396 +1174,426 @@ function uniqueNonEmpty(values: Array<string | null | undefined>) {
   return result;
 }
 
-type EmployeeCountContextHints = {
-  sourceCompany: string | null;
-  sourceAddress: string | null;
-  officeNames: string[];
-  prefecture: string | null;
-  city: string | null;
-};
+function normalizeEstablished(value: string) {
+  const normalized = normalizeSpace(value);
+  if (!normalized) return null;
 
-type EmployeeCountCandidate = {
-  value: string;
-  count: number;
-  year: number | null;
-  month: number | null;
-  yearMonth: number | null;
-  officeName: string | null;
-  prefecture: string | null;
-  city: string | null;
-  officeMatched: boolean;
-  prefectureMatched: boolean;
-  cityMatched: boolean;
-  consolidated: boolean;
-  standalone: boolean;
+  const matched = normalized.match(/([12][0-9]{3})[^0-9]{0,3}([0-9]{1,2})?/);
+  if (!matched) return null;
+
+  const year = matched[1];
+  const month = matched[2] ? String(Number(matched[2])) : "";
+
+  if (month) {
+    return `${year}年${month}月`;
+  }
+
+  return `${year}年`;
+}
+
+type SimpleEmployeeCountCandidate = {
+  value: string | null;
   sourceScore: number;
 };
 
-const OFFICE_NAME_IN_TEXT_REGEX =
-  /[^\s　]{1,40}?(?:本社|本店|支社|支店|営業所|工場|事業所|センター)/g;
-
-function parseEmployeeCountNumber(value: string | null) {
-  if (!value) return null;
-  const matched = normalizeDigits(value).match(/([0-9][0-9,]*)\s*(?:名|人)/);
-  if (!matched?.[1]) return null;
-
-  const num = Number(matched[1].replace(/,/g, ""));
-  return Number.isFinite(num) ? num : null;
+function hasEmployeeCountContext(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return false;
+  return EMPLOYEE_COUNT_CONTEXT_REGEX.test(normalized);
 }
 
-function extractPrefectureName(value: string | null) {
-  const normalized = normalizeDigits(normalizeSpace(value ?? ""));
-  if (!normalized) return null;
-
-  const matched = normalized.match(new RegExp(PREFECTURE_REGEX_SOURCE));
-  return matched?.[0] ? normalizeSpace(matched[0]) : null;
+function isLikelyEmployeeCountNoise(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return true;
+  if (hasEmployeeCountContext(normalized)) return false;
+  return EMPLOYEE_COUNT_DENY_REGEX.test(normalized);
 }
 
-function extractCityName(value: string | null) {
-  const normalized = normalizeDigits(normalizeSpace(value ?? ""));
-  if (!normalized) return null;
-
-  const matched = normalized.match(new RegExp(MUNICIPALITY_REGEX_SOURCE));
-  return matched?.[0] ? normalizeSpace(matched[0]) : null;
-}
-
-function normalizeOfficeName(value: string) {
-  return normalizeDigits(normalizeSpace(value));
-}
-
-function extractOfficeNamesFromValue(value: string | null) {
-  const normalized = normalizeDigits(normalizeSpace(value ?? ""));
-  if (!normalized) return [];
-
-  const matches = normalized.match(OFFICE_NAME_IN_TEXT_REGEX) ?? [];
-  return uniqueNonEmpty(matches.map((item) => normalizeOfficeName(item)));
-}
-
-function buildEmployeeCountContextHints(
-  sourceCompany?: string | null,
-  sourceAddress?: string | null
-): EmployeeCountContextHints {
-  return {
-    sourceCompany: normalizeSpace(sourceCompany ?? "") || null,
-    sourceAddress: normalizeSpace(sourceAddress ?? "") || null,
-    officeNames: extractOfficeNamesFromValue(sourceCompany ?? null),
-    prefecture: extractPrefectureName(sourceAddress ?? null),
-    city: extractCityName(sourceAddress ?? null),
-  };
-}
-
-function dedupeEmployeeCountCandidates(candidates: EmployeeCountCandidate[]) {
-  const map = new Map<string, EmployeeCountCandidate>();
-
-  for (const candidate of candidates) {
-    const key = [
-      candidate.value,
-      candidate.yearMonth ?? "",
-      candidate.officeName ?? "",
-      candidate.prefecture ?? "",
-      candidate.city ?? "",
-      candidate.officeMatched ? "1" : "0",
-      candidate.prefectureMatched ? "1" : "0",
-      candidate.cityMatched ? "1" : "0",
-    ].join("|");
-
-    const current = map.get(key);
-    if (!current || candidate.sourceScore > current.sourceScore) {
-      map.set(key, candidate);
-    }
-  }
-
-  return Array.from(map.values());
-}
-
-function buildEmployeeCountCandidate(
-  count: number,
-  year: number | null,
-  month: number | null,
-  officeName: string | null,
-  prefecture: string | null,
-  city: string | null,
-  officeMatched: boolean,
-  prefectureMatched: boolean,
-  cityMatched: boolean,
-  consolidated: boolean,
-  standalone: boolean,
-  sourceScore: number
-): EmployeeCountCandidate {
-  return {
-    value: `${count.toLocaleString()}名`,
-    count,
-    year,
-    month,
-    yearMonth:
-      year != null
-        ? Number(`${year}${String(month ?? 12).padStart(2, "0")}`)
-        : null,
-    officeName,
-    prefecture,
-    city,
-    officeMatched,
-    prefectureMatched,
-    cityMatched,
-    consolidated,
-    standalone,
-    sourceScore,
-  };
-}
-
-function extractEmployeeCountCandidatesFromSnippet(
-  snippet: string,
-  baseScore: number,
-  hints: EmployeeCountContextHints
+function pushEmployeeCountCandidate(
+  candidateMap: Map<string, number>,
+  rawValue: string | null | undefined,
+  score: number
 ) {
-  const normalized = normalizeDigits(normalizeSpace(snippet)).replace(/[，]/g, ",");
-  if (!normalized) return [];
+  if (!rawValue) return;
+  if (isLikelyEmployeeCountNoise(rawValue)) return;
 
-  const officeNamesInSnippet = extractOfficeNamesFromValue(normalized);
-  const officeName = officeNamesInSnippet[0] ?? null;
-  const officeMatched =
-    officeNamesInSnippet.length > 0 &&
-    officeNamesInSnippet.some((name) => hints.officeNames.includes(name));
+  const normalized = normalizeEmployeeCount(rawValue);
+  if (!normalized) return;
 
-  const prefecture = extractPrefectureName(normalized);
-  const city = extractCityName(normalized);
-  const prefectureMatched =
-    !!prefecture && !!hints.prefecture && prefecture === hints.prefecture;
-  const cityMatched = !!city && !!hints.city && city === hints.city;
-
-  const consolidated = /(?:連結|consolidated)/i.test(normalized);
-  const standalone =
-    /(?:単体|単独|個別|individual|non-consolidated|nonconsolidated)/i.test(
-      normalized
-    );
-
-  const candidates: EmployeeCountCandidate[] = [];
-
-  const pushCandidate = (
-    count: number | null,
-    year: number | null,
-    month: number | null,
-    sourceAdjust: number
-  ) => {
-    if (count == null || count <= 0) return;
-
-    let score = baseScore + sourceAdjust;
-
-    if (officeMatched) score += 400;
-    if (cityMatched) score += 180;
-    if (prefectureMatched) score += 100;
-
-    if (!officeMatched && hints.officeNames.length > 0 && officeName) score -= 260;
-    if (!cityMatched && hints.city && city) score -= 100;
-    if (!prefectureMatched && hints.prefecture && prefecture) score -= 50;
-
-    if (consolidated) score += 20;
-    if (standalone) score += 15;
-
-    candidates.push(
-      buildEmployeeCountCandidate(
-        count,
-        year,
-        month,
-        officeName,
-        prefecture,
-        city,
-        officeMatched,
-        prefectureMatched,
-        cityMatched,
-        consolidated,
-        standalone,
-        score
-      )
-    );
-  };
-
-  const yearCountMatches = Array.from(
-    normalized.matchAll(
-      /([12][0-9]{3})\s*年(?:\s*([0-9]{1,2})\s*月)?[^0-9]{0,16}(?:現在|時点|末時点|末)?[^0-9]{0,16}([0-9][0-9,]*)\s*(?:名|人)/g
-    )
-  );
-
-  for (const match of yearCountMatches) {
-    const year = Number(match[1]);
-    const month = match[2] ? Number(match[2]) : 12;
-    const count = Number((match[3] || "").replace(/,/g, ""));
-    pushCandidate(
-      Number.isFinite(count) ? count : null,
-      Number.isFinite(year) ? year : null,
-      Number.isFinite(month) ? month : null,
-      80
-    );
+  const current = candidateMap.get(normalized);
+  if (current == null || score > current) {
+    candidateMap.set(normalized, score);
   }
-
-  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
-
-  const labelAfterMatches = Array.from(
-    normalized.matchAll(
-      new RegExp(
-        `(?:${labelPattern})\\s*[:：]?\\s*([0-9][0-9,]*)\\s*(?:名|人)`,
-        "gi"
-      )
-    )
-  );
-
-  for (const match of labelAfterMatches) {
-    const count = Number((match[1] || "").replace(/,/g, ""));
-    pushCandidate(Number.isFinite(count) ? count : null, null, null, 60);
-  }
-
-  const labelBeforeMatches = Array.from(
-    normalized.matchAll(
-      new RegExp(
-        `([0-9][0-9,]*)\\s*(?:名|人)[^0-9]{0,16}(?:${labelPattern})`,
-        "gi"
-      )
-    )
-  );
-
-  for (const match of labelBeforeMatches) {
-    const count = Number((match[1] || "").replace(/,/g, ""));
-    pushCandidate(Number.isFinite(count) ? count : null, null, null, 40);
-  }
-
-  if (
-    candidates.length === 0 &&
-    EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(normalized))
-  ) {
-    const fallbackValue = normalizeEmployeeCount(normalized);
-    const fallbackCount = parseEmployeeCountNumber(fallbackValue);
-    pushCandidate(fallbackCount, null, null, 20);
-  }
-
-  return dedupeEmployeeCountCandidates(candidates);
 }
 
-function selectBestEmployeeCountCandidate(
-  candidates: EmployeeCountCandidate[],
-  hints: EmployeeCountContextHints
-) {
-  if (candidates.length === 0) return null;
+function collectEmployeeCountCandidatesFromText(
+  text: string,
+  baseScore = 0
+): SimpleEmployeeCountCandidate[] {
+  const candidateMap = new Map<string, number>();
 
-  let filtered = [...candidates];
-
-  if (hints.officeNames.length > 0) {
-    const officeMatched = filtered.filter((candidate) => candidate.officeMatched);
-    if (officeMatched.length > 0) {
-      filtered = officeMatched;
-    }
-  }
-
-  if (hints.city) {
-    const cityMatched = filtered.filter((candidate) => candidate.cityMatched);
-    if (cityMatched.length > 0) {
-      filtered = cityMatched;
-    }
-  }
-
-  if (hints.prefecture) {
-    const prefectureMatched = filtered.filter(
-      (candidate) => candidate.prefectureMatched
-    );
-    if (prefectureMatched.length > 0) {
-      filtered = prefectureMatched;
-    }
-  }
-
-  filtered.sort((a, b) => {
-    return (
-      Number(b.officeMatched) - Number(a.officeMatched) ||
-      Number(b.cityMatched) - Number(a.cityMatched) ||
-      Number(b.prefectureMatched) - Number(a.prefectureMatched) ||
-      (b.yearMonth ?? -1) - (a.yearMonth ?? -1) ||
-      b.sourceScore - a.sourceScore ||
-      Number(b.standalone) - Number(a.standalone) ||
-      Number(b.consolidated) - Number(a.consolidated) ||
-      b.count - a.count
-    );
-  });
-
-  return filtered[0] ?? null;
-}
-
-function extractEmployeeCountFromPage(
-  page: PageData,
-  sourceCompany?: string | null,
-  sourceAddress?: string | null
-) {
-  const hints = buildEmployeeCountContextHints(sourceCompany, sourceAddress);
-  const boost = pageBoost(page.finalUrl);
-  const pairs = extractPairs(page.html);
-  const candidates: EmployeeCountCandidate[] = [];
-  const processedSnippets = new Set<string>();
-
-  const pushSnippetCandidates = (snippet: string, score: number) => {
-    const normalizedSnippet = normalizeSpace(snippet);
-    if (!normalizedSnippet) return;
-
-    const key = `${score}__${normalizedSnippet}`;
-    if (processedSnippets.has(key)) return;
-    processedSnippets.add(key);
-
-    candidates.push(
-      ...extractEmployeeCountCandidatesFromSnippet(
-        normalizedSnippet,
-        score,
-        hints
-      )
-    );
-  };
-
-  for (const pair of pairs) {
-    if (!EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(pair.label))) continue;
-
-    pushSnippetCandidates(`${pair.label} ${pair.value}`, 280 + boost);
-  }
-
-  const lines = page.structuredText
+  const lines = text
     .split("\n")
     .map((line) => normalizeSpace(line))
     .filter((line) => line !== "");
 
+  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+
+  const exactLabelOnlyPattern = new RegExp(`^(?:${labelPattern})$`, "i");
+  const exactSameLinePattern = new RegExp(
+    `^(?:${labelPattern})\\s*[:：]?\\s*(.+)$`,
+    "i"
+  );
+
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
+    const next1 = lines[i + 1] ?? "";
+    const next2 = lines[i + 2] ?? "";
+    const next3 = lines[i + 3] ?? "";
 
-    const lineHasEmployeeLabel = EMPLOYEE_COUNT_LABELS.some((regex) =>
-      regex.test(line)
-    );
-    const lineHasYearCount =
-      /[12][0-9]{3}\s*年/.test(line) &&
-      /[0-9][0-9,]*\s*(?:名|人)/.test(line);
-
-    if (!lineHasEmployeeLabel && !lineHasYearCount) {
-      continue;
+    const sameLine = line.match(exactSameLinePattern);
+    if (sameLine?.[1]) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${sameLine[1]}`,
+        1200 + baseScore
+      );
     }
 
-    const start = Math.max(0, i - 2);
-    const end = Math.min(lines.length, i + 3);
-    const nearLines = lines.slice(start, end);
-    const snippet = nearLines.join(" ");
-
-    const hasOfficeScope = nearLines.some(
-      (targetLine) => extractOfficeNamesFromValue(targetLine).length > 0
-    );
-
-    if (lineHasEmployeeLabel) {
-      pushSnippetCandidates(snippet, 250 + boost);
-      continue;
+    if (exactLabelOnlyPattern.test(line)) {
+      pushEmployeeCountCandidate(candidateMap, `${line} ${next1}`, 1180 + baseScore);
+      pushEmployeeCountCandidate(candidateMap, `${line} ${next1} ${next2}`, 1140 + baseScore);
+      pushEmployeeCountCandidate(candidateMap, `${line} ${next2}`, 1100 + baseScore);
+      pushEmployeeCountCandidate(candidateMap, `${line} ${next3}`, 1060 + baseScore);
     }
 
-    if (lineHasYearCount && (hasOfficeScope || !!hints.city || !!hints.prefecture)) {
-      pushSnippetCandidates(snippet, 230 + boost);
+    const block2 = [line, next1].filter(Boolean).join(" ");
+    const block3 = [line, next1, next2].filter(Boolean).join(" ");
+
+    if (hasEmployeeCountContext(line) && /\d/.test(normalizeDigits(line))) {
+      pushEmployeeCountCandidate(candidateMap, line, 1040 + baseScore);
+    }
+
+    if (hasEmployeeCountContext(block2) && /\d/.test(normalizeDigits(block2))) {
+      pushEmployeeCountCandidate(candidateMap, block2, 1020 + baseScore);
+    }
+
+    if (hasEmployeeCountContext(block3) && /\d/.test(normalizeDigits(block3))) {
+      pushEmployeeCountCandidate(candidateMap, block3, 1000 + baseScore);
     }
   }
 
-  const selected = selectBestEmployeeCountCandidate(candidates, hints);
-  return selected;
+  return Array.from(candidateMap.entries())
+    .map(([value, sourceScore]) => ({ value, sourceScore }))
+    .sort((a, b) => b.sourceScore - a.sourceScore);
 }
 
-function extractAllEmails(value: string) {
-  const matches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
-  return uniqueNonEmpty(matches);
+async function extractPdfTextFromArrayBuffer(buffer: ArrayBuffer) {
+  try {
+    const imported = await (
+      new Function("return import('pdf-parse')")() as Promise<any>
+    ).catch(() => null);
+
+    const pdfParse = imported?.default ?? imported;
+    if (typeof pdfParse !== "function") return null;
+
+    const parsed = await pdfParse(Buffer.from(buffer));
+    const text = String(parsed?.text ?? "");
+
+    const normalized = text
+      .split(/\r?\n/)
+      .map((line) => normalizeSpace(line))
+      .filter((line) => line !== "")
+      .join("\n");
+
+    return normalized || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildPdfPageData(
+  requestedUrl: string,
+  finalUrl: string,
+  pdfText: string
+): PageData {
+  const title = decodeURIComponent(finalUrl.split("/").pop() || "document.pdf");
+
+  return {
+    requestedUrl,
+    finalUrl,
+    html: "",
+    text: pdfText,
+    structuredText: pdfText,
+    title,
+    h1: "",
+    links: [],
+  };
+}
+
+function escapeEmployeeCountRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildEmployeeCountStructuredLines(text: string) {
+  const originalLines = text
+    .split("\n")
+    .map((line) => normalizeSpace(line))
+    .filter((line) => line !== "");
+
+  const merged = normalizeSpace(originalLines.join(" "));
+  if (!merged) {
+    return originalLines;
+  }
+
+  const boundaryLabels = [
+    "会社名",
+    "商号",
+    "代表取締役",
+    "代表者",
+    "所在地",
+    "住所",
+    "電話番号",
+    "TEL",
+    "ＦＡＸ",
+    "FAX",
+    "従業員数",
+    "事業内容",
+    "設立",
+    "創業",
+    "資本金",
+    "アクセス",
+    "お問い合わせ",
+    "営業時間",
+    "受付時間",
+    "最寄りの交通機関",
+    "MAP",
+  ];
+
+  const boundaryPattern = boundaryLabels
+    .map((label) => escapeEmployeeCountRegex(label))
+    .join("|");
+
+  const rebuiltLines = merged
+    .split(new RegExp(`(?=(?:${boundaryPattern})\\s*[:：]?)`, "g"))
+    .map((line) => normalizeSpace(line))
+    .filter((line) => line !== "");
+
+  return Array.from(new Set([...originalLines, ...rebuiltLines]));
+}
+
+function extractEmployeeCountInlineSnippet(text: string) {
+  const merged = normalizeSpace(text);
+  if (!merged) return null;
+
+  const employeeLabelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+
+  const boundaryLabels = [
+    "会社名",
+    "商号",
+    "代表取締役",
+    "代表者",
+    "所在地",
+    "住所",
+    "電話番号",
+    "TEL",
+    "ＦＡＸ",
+    "FAX",
+    "事業内容",
+    "設立",
+    "創業",
+    "資本金",
+    "アクセス",
+    "お問い合わせ",
+    "営業時間",
+    "受付時間",
+    "最寄りの交通機関",
+    "MAP",
+  ];
+
+  const boundaryPattern = boundaryLabels
+    .map((label) => escapeEmployeeCountRegex(label))
+    .join("|");
+
+  const matched = merged.match(
+    new RegExp(
+      `((?:${employeeLabelPattern})\\s*[:：]?\\s*[\\s\\S]{0,40}?)(?=(?:${boundaryPattern})\\s*[:：]?|$)`,
+      "i"
+    )
+  );
+
+  return matched?.[1] ? normalizeSpace(matched[1]) : null;
+}
+
+function extractEmployeeCountSectionText(text: string) {
+  const lines = buildEmployeeCountStructuredLines(text);
+
+  const sections: string[] = [];
+  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    if (!EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(line))) {
+      continue;
+    }
+
+    const block: string[] = [line];
+
+    for (let j = i + 1; j < Math.min(lines.length, i + 6); j += 1) {
+      const nextLine = lines[j];
+
+      if (
+        nextLine !== "" &&
+        EMPLOYEE_COUNT_SECTION_END_LABELS.test(nextLine) &&
+        !EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(nextLine))
+      ) {
+        break;
+      }
+
+      block.push(nextLine);
+    }
+
+    sections.push(block.join(" "));
+  }
+
+  const merged = normalizeSpace(lines.join(" "));
+  const matched = merged.match(
+    new RegExp(
+      `((?:${labelPattern})\\s*[:：]?\\s*[\\s\\S]{0,60}?)(?=(?:${EMPLOYEE_COUNT_SECTION_END_LABELS.source})\\s*[:：]?|$)`,
+      "i"
+    )
+  );
+
+  if (matched?.[1]) {
+    sections.push(normalizeSpace(matched[1]));
+  }
+
+  const inlineSnippet = extractEmployeeCountInlineSnippet(merged);
+  if (inlineSnippet) {
+    sections.push(inlineSnippet);
+  }
+
+  return Array.from(
+    new Set(sections.map((section) => normalizeSpace(section)).filter(Boolean))
+  );
+}
+
+function extractEmployeeCountFromPage(
+  page: PageData,
+  _sourceCompany?: string | null,
+  _sourceAddress?: string | null
+): SimpleEmployeeCountCandidate | null {
+  const pageTarget = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+
+  const boost =
+    pageBoost(page.finalUrl) +
+    (EMPLOYEE_COUNT_PAGE_KEYWORDS.test(pageTarget) ? 120 : 0) +
+    (EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS.test(pageTarget) ? 180 : 0);
+
+  const pairs = extractPairs(page.html);
+  const candidateMap = new Map<string, number>();
+
+  for (const pair of pairs) {
+    if (!EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(pair.label))) continue;
+
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `${pair.label} ${pair.value}`,
+      340 + boost
+    );
+  }
+
+  const rebuiltStructuredText = buildEmployeeCountStructuredLines(
+    page.structuredText
+  ).join("\n");
+
+  const labeledTextValue =
+    extractSingleLineLabeledValue(rebuiltStructuredText, EMPLOYEE_COUNT_LABELS) ??
+    extractSingleLineLabeledValue(page.structuredText, EMPLOYEE_COUNT_LABELS) ??
+    null;
+
+  if (labeledTextValue) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `従業員数 ${labeledTextValue}`,
+      320 + boost
+    );
+  }
+
+  const inlineSnippet =
+    extractEmployeeCountInlineSnippet(rebuiltStructuredText) ??
+    extractEmployeeCountInlineSnippet(page.structuredText);
+
+  if (inlineSnippet) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      inlineSnippet,
+      380 + boost
+    );
+  }
+
+  const sectionTexts = extractEmployeeCountSectionText(rebuiltStructuredText);
+
+  for (const sectionText of sectionTexts) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      sectionText,
+      360 + boost
+    );
+
+    const sectionCandidates = collectEmployeeCountCandidatesFromText(
+      sectionText,
+      boost
+    );
+
+    for (const candidate of sectionCandidates) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        candidate.value,
+        340 + candidate.sourceScore
+      );
+    }
+  }
+
+  const structuredTextCandidates = collectEmployeeCountCandidatesFromText(
+    rebuiltStructuredText,
+    boost
+  );
+
+  for (const candidate of structuredTextCandidates) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      candidate.value,
+      260 + candidate.sourceScore
+    );
+  }
+
+  const footerText = stripHtmlKeepLineBreaks(extractFooterHtml(page.html));
+  if (footerText) {
+    const footerCandidates = collectEmployeeCountCandidatesFromText(
+      footerText,
+      boost
+    );
+
+    for (const candidate of footerCandidates) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        candidate.value,
+        220 + candidate.sourceScore
+      );
+    }
+  }
+
+  const bestCandidate = Array.from(candidateMap.entries())
+    .map(([value, sourceScore]) => ({ value, sourceScore }))
+    .sort((a, b) => b.sourceScore - a.sourceScore)[0];
+
+  if (!bestCandidate) return null;
+
+  return bestCandidate;
 }
 
 const OFFICE_HEADER_REGEX =
@@ -1557,7 +1734,7 @@ function extractOfficeResults(
       );
 
       const emailCandidates = uniqueNonEmpty(
-        block.lines.flatMap((line) => extractAllEmails(line))
+        block.lines.map((line) => normalizeEmail(line))
       );
 
       const zipcodeCandidates = uniqueNonEmpty(
@@ -1616,1063 +1793,6 @@ function extractOfficeResults(
       office.zipcode_candidates.length > 0 ||
       office.address_candidates.length > 0
   );
-}
-
-function normalizeEstablished(value: string) {
-  const normalized = normalizeSpace(value);
-  if (!normalized) return null;
-
-  const matched = normalized.match(/([12][0-9]{3})[^0-9]{0,3}([0-9]{1,2})?/);
-  if (!matched) return null;
-
-  const year = matched[1];
-  const month = matched[2] ? String(Number(matched[2])) : "";
-
-  if (month) {
-    return `${year}年${month}月`;
-  }
-
-  return `${year}年`;
-}
-
-function normalizeRepresentativeTitle(value: string) {
-  const normalized = normalizeSpace(value)
-    .replace(/（.*?）/g, " ")
-    .replace(/\(.*?\)/g, " ")
-    .replace(/代表ご挨拶.*$/i, " ")
-    .replace(/ご挨拶.*$/i, " ")
-    .replace(/メッセージ.*$/i, " ")
-    .trim();
-
-  if (!normalized) return null;
-
-  const matched = normalized.match(
-    /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|代表)(?!から)/i
-  );
-
-  return matched ? normalizeSpace(matched[1]) : null;
-}
-
-function looksLikeRepresentativeNoise(value: string) {
-  const normalized = normalizeSpace(value);
-  if (!normalized) return true;
-
-  return (
-    REPRESENTATIVE_BAD_VALUE_REGEX.test(normalized) ||
-    /^(?:会社情報|会社概要(?:・沿革)?|会社沿革|企業情報|会社案内|ご挨拶|社長挨拶|代表挨拶|役員一覧|一覧|大切にしていること|経営理念|経営方針|補償制度|道路工事|地域活動|協賛募集|募集要項|福利厚生|会社紹介動画|工場紹介|企業を知る|採用情報|社員紹介|社員インタビュー|インタビュー|ブログ|お知らせ|ニュース|株式会社|有限会社|合同会社|合資会社|合名会社)$/i.test(
-      normalized
-    )
-  );
-}
-
-const REPRESENTATIVE_TITLE_REGEX =
-  /代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー|CEO|COO|CFO|CTO|CMO/gu;
-
-const REPRESENTATIVE_STOPWORDS = [
-  "営業",
-  "採用",
-  "人事",
-  "総務",
-  "経理",
-  "広報",
-  "受付",
-  "窓口",
-  "担当者",
-  "責任者",
-  "事務局",
-  "センター",
-  "グループ",
-  "取締役",
-  "執行役員",
-  "監査役",
-  "理事長",
-  "院長",
-  "支店長",
-  "本部長",
-  "工場長",
-  "マネージャー",
-  "manager",
-  "mgr",
-  "ceo",
-  "coo",
-  "cfo",
-  "cto",
-] as const;
-
-const REPRESENTATIVE_NON_NAME_EXACT_VALUES = new Set([
-  "不明",
-  "ふめい",
-  "未定",
-  "なし",
-  "無し",
-  "該当なし",
-  "担当者不明",
-  "代表者不明",
-  "各位",
-  "御中",
-  "一同",
-]);
-
-const REPRESENTATIVE_AREA_NAME_TOKENS = new Set<string>([
-  ...PREFECTURE_NAMES,
-  "北海道",
-  "東北",
-  "関東",
-  "中部",
-  "近畿",
-  "関西",
-  "中国",
-  "四国",
-  "九州",
-  "沖縄",
-  "東海",
-  "札幌",
-  "仙台",
-  "東京",
-  "横浜",
-  "川崎",
-  "相模原",
-  "新潟",
-  "静岡",
-  "浜松",
-  "名古屋",
-  "京都",
-  "大阪",
-  "堺",
-  "神戸",
-  "岡山",
-  "広島",
-  "北九州",
-  "福岡",
-  "熊本",
-]);
-
-const REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS = new Set<string>([
-  "北海道",
-  "東北",
-  "関東",
-  "中部",
-  "近畿",
-  "関西",
-  "中国",
-  "四国",
-  "九州",
-  "沖縄",
-  "東海",
-  "名古屋",
-  "北名古屋",
-  "北九州",
-  "伊勢志摩",
-  "東近江",
-  "西三河",
-  "東三河",
-]);
-
-const REPRESENTATIVE_STRONG_NAME_TOKEN_REGEX =
-  /^(?:[\p{sc=Han}々ヶヵ]{1,5}|[\p{sc=Hiragana}]{2,8}|[\p{sc=Katakana}ー]{2,12}|[A-Za-z]{2,20})$/u;
-
-const REPRESENTATIVE_ORGANIZATION_LIKE_REGEX =
-  /(?:紙器|紙工|鋼材|電装|工業|工務|建設|住建|工機|工房|工藝|工芸|製材|製茶|製粉|製菓|製鋼|製作所|製作|機工|機器|器械|設備|電工|電設|電機|電子|通信|運輸|通運|産業|化学|化工|化成|鐵工|鉄工|織機|理化|光学|薬品|薬局|眼科|歯科|医院|病院|幼稚園|保育所|保育園|信用金庫|銀行|郵便局|研究所|研究機関|大学|短期大|学園|学校|高校|小学校|中学校|生協|協会|神宮|神社|茶屋|温泉|商店|家具|無線|木材|測量|登記|缶詰|道路|海運|建材|空調|鉄道|製本|看板|解体|葬祭|整体院|料理|酒房|生花|工作所|製麺|総業|乳業|産機)$/u;
-
-const REPRESENTATIVE_NON_NAME_PREFIX_REGEX =
-  /^(?:関係者各位|各位|御中|一同|不明|ふめい|未定|該当なし|お問い合わせ)$/u;
-
-const REPRESENTATIVE_NON_NAME_SUFFIX_REGEX =
-  /(?:会社|法人|組合|協会|事務局|センター|会館|病院|医院|クリニック|学校|学園|大学|高校|中学|小学校|幼稚園|保育園|施設|寮|館|ホール|ビル|タワー|本社|支社|支店|営業所|工場|研究所|製作所|製麺所|商店|店舗|ホテル|旅館|神社|寺院|農場|牧場|倉庫|公園|市場|駅|空港|港|団地|マンション|ハイツ|コーポ|号室|事務所|部署|部門|売場|園|店|会)$/u;
-
-const REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX =
-  /^(?:[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{4,}(?:市|区|町|村)|[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]{2,}市立[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+)$/u;
-
-const REPRESENTATIVE_NON_NAME_CONTENT_REGEX = new RegExp(
-  [
-    "規約",
-    "概要",
-    "案内",
-    "情報",
-    "紹介",
-    "募集",
-    "理念",
-    "方針",
-    "住宅",
-    "新着",
-    "連絡先",
-    "仕事内容",
-    "保証",
-    "解析",
-    "購入",
-    "教室",
-    "開発",
-    "販売",
-    "支援",
-    "金融",
-    "運行",
-    "事業",
-    "店舗",
-    "製品",
-    "商品",
-    "商品名",
-    "注文",
-    "対象者",
-    "取引先",
-    "取引銀行",
-    "問題",
-    "品質",
-    "利便性",
-    "維持",
-    "施工",
-    "設計",
-    "製作",
-    "制作",
-    "製缶",
-    "板金",
-    "鈑金",
-    "塗装",
-    "修理",
-    "整備",
-    "工事",
-    "加工",
-    "精密加工",
-    "機械加工",
-    "大型機械加工",
-    "大型精密機械加工",
-    "生産",
-    "一貫生産体制",
-    "流体",
-    "計測",
-    "測定",
-    "測定機",
-    "分析",
-    "診断",
-    "診断装置",
-    "試作",
-    "量産",
-    "量産対応",
-    "包装",
-    "梱包",
-    "発送",
-    "印刷",
-    "輪転機",
-    "設備",
-    "省力化設備",
-    "機械",
-    "電子機器",
-    "電機",
-    "電装",
-    "電気設備工事",
-    "電気工事",
-    "電気制御",
-    "自動制御",
-    "材料",
-    "素材",
-    "部材",
-    "衝撃吸収材",
-    "制振遮音技術",
-    "治具",
-    "工具",
-    "重量",
-    "燃料電池",
-    "防水",
-    "断熱",
-    "気密",
-    "特殊鋼",
-    "特殊印刷",
-    "熱処理",
-    "表面処理",
-    "真空技術",
-    "不動産",
-    "建設",
-    "建築",
-    "建設工業",
-    "工務店",
-    "修繕",
-    "大規模修繕工事",
-    "分譲",
-    "分譲地",
-    "土地",
-    "賃貸",
-    "売却",
-    "売買",
-    "中古車",
-    "新車",
-    "輸入車",
-    "車検",
-    "車両",
-    "車輌",
-    "車専門物流",
-    "運輸",
-    "運送",
-    "輸送",
-    "配送",
-    "物流",
-    "産業用",
-    "産業廃棄物",
-    "保育",
-    "介護",
-    "看護",
-    "障害福祉",
-    "障害者共同生活",
-    "福祉用具",
-    "訪問介護",
-    "訪問看護",
-    "訪問入浴",
-    "介護事業",
-    "在宅診療",
-    "専門入院自然療法",
-    "診療所",
-    "病院",
-    "医院",
-    "診療",
-    "内科",
-    "外科",
-    "小児科",
-    "循環器内",
-    "呼吸器内",
-    "放射線科",
-    "腎臓内科",
-    "神経科",
-    "精神科",
-    "皮膚科",
-    "眼科",
-    "耳鼻科",
-    "鼻咽喉科",
-    "整形外科",
-    "接骨院",
-    "歯科",
-    "歯医者",
-    "矯正歯科",
-    "美容皮膚科",
-    "調剤薬局",
-    "薬局",
-    "医薬品",
-    "農業薬品",
-    "化粧品",
-    "司法書士",
-    "行政書士",
-    "税理士",
-    "会計士",
-    "認会計士",
-    "理事長",
-    "病院長",
-    "最高経営責任者",
-    "役員指名",
-    "役員報酬",
-    "取締役",
-    "代表取締",
-    "監査役",
-    "役員",
-    "理事",
-    "副会長",
-    "報酬",
-    "報酬規程",
-    "報酬支給基準",
-    "名簿",
-    "顧問名簿",
-    "組織図",
-    "組織概要",
-    "組織機構",
-    "職員",
-    "全従業員",
-    "全職員",
-    "顧問",
-    "氏名",
-    "名前",
-    "必須",
-    "入力",
-    "確認",
-    "送信",
-    "受信可能",
-    "事項",
-    "項目",
-    "編集",
-    "削除",
-    "権限",
-    "公式",
-    "最新",
-    "最近",
-    "履歴",
-    "流行",
-    "歴史",
-    "沿革",
-    "活動",
-    "活動内容",
-    "取組",
-    "体制",
-    "変更",
-    "業務改変",
-    "配色変更",
-    "余白設定追加",
-    "色変換",
-    "策定",
-    "実行",
-    "戦略",
-    "計画",
-    "創業",
-    "創業以来",
-    "設立",
-    "年月日",
-    "設立年月日",
-    "法人設立年月日",
-    "体験",
-    "参加同意",
-    "見学",
-    "公演",
-    "授業",
-    "受験対策",
-    "講座",
-    "作品",
-    "油彩",
-    "日本画",
-    "特産物",
-    "地産地消",
-    "洋菓子",
-    "生菓子",
-    "焼菓子",
-    "和菓子",
-    "味噌",
-    "料理",
-    "中華",
-    "泡盛",
-    "焼酎",
-    "着物",
-    "呉服",
-    "弁当",
-    "腕時計",
-    "時計",
-    "宝石",
-    "花火",
-    "園芸",
-    "野菜収穫",
-    "薬草",
-    "焼肉",
-    "研究会",
-    "研究",
-    "生涯学習",
-    "国立長寿医療研究",
-    "世界基準",
-    "世界情勢",
-    "世界最高水準",
-    "持続可能",
-    "創意工夫",
-    "付加価値",
-    "人材派遣",
-    "人材育成",
-    "進路",
-    "就職支援",
-    "新卒",
-    "中途採用",
-    "求人",
-    "求人情報",
-    "広告",
-    "広告代",
-    "映像",
-    "動画",
-    "動画付記事",
-    "解説動画",
-    "展示情報",
-    "展示会",
-    "展示車",
-    "試乗車",
-    "宿泊予約",
-    "会員登録",
-    "資料請求",
-    "商品検索",
-    "物件検索",
-    "導入事例",
-    "施工事例",
-    "施工事例集",
-    "施工実績",
-    "施工実例",
-    "制作事例",
-    "納入事例",
-    "対応事例",
-    "参考事例",
-    "紹介事例",
-    "事例",
-    "実績",
-    "受賞履歴",
-    "作業内容",
-    "作業工程",
-    "事前",
-    "作業所",
-    "事業所",
-    "事業場",
-    "店舗情報",
-    "情報公開",
-    "情報提供",
-    "提案",
-    "企画",
-    "受注生産",
-    "地図検索",
-    "周辺情報",
-    "利用案内",
-    "利用方法",
-    "利用時間",
-    "利用料金",
-    "最低価格",
-    "午後最速",
-    "無料貸出",
-    "送料無料",
-    "全画面表示",
-    "表示拡大",
-    "言語切替",
-    "今準備中",
-    "年末年始休業",
-    "冬季休業",
-    "定休日",
-    "受付時間",
-    "参加同意",
-    "保存",
-    "更新",
-    "同意管理",
-    "目的",
-    "役割",
-    "税務行政",
-    "多国語展開",
-    "中国料理",
-    "中文",
-    "简体",
-    "繁體",
-    "中文簡体",
-    "中文简体字",
-    "全球",
-    "网络",
-    "網絡",
-    "集团",
-    "举报",
-    "站点",
-    "浏览",
-    "关于我们",
-    "关于征途国际数码",
-    "您的域名已过期",
-    "参观公司张澜文献"
-  ].join("|"),
-  "u"
-);
-
-const REPRESENTATIVE_ADDRESS_LIKE_REGEX =
-  /(?:[0-9０-９]|丁目|番地|番|号|都道府県|市.+区|県.+市|市.+町|市.+村|区.+町|区.+村)/u;
-
-const REPRESENTATIVE_PREFIX_TITLE_TRIM_REGEX =
-  /^(?:代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|代表|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー)+/u;
-
-const REPRESENTATIVE_SUFFIX_TITLE_TRIM_REGEX =
-  /(?:代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|代表|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー|様|さん|氏)+$/u;
-
-const REPRESENTATIVE_NOISE_TOKEN_REGEX =
-  /^(?:男性|女性|男|女|担当|担当者|責任者|窓口|受付|御中|様|さん|氏|代表|社長|会長)$/u;
-
-function normalizeRepresentativeComparisonValue(value: string) {
-  return value
-    .normalize("NFKC")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-  
-function trimRepresentativeAffixes(value: string) {
-  let text = value.normalize("NFKC").trim();
-  let previous = "";
-
-  while (text !== previous) {
-    previous = text;
-    text = text
-      .replace(REPRESENTATIVE_PREFIX_TITLE_TRIM_REGEX, "")
-      .replace(REPRESENTATIVE_SUFFIX_TITLE_TRIM_REGEX, "")
-      .trim();
-  }
-
-  return text;
-}
-
-function normalizeRepresentativeSource(value: string) {
-  return value
-    .normalize("NFKC")
-    .replace(/[（(][^）)]*[）)]/g, " ")
-    .replace(/[【】\[\]「」『』<>〈〉《》〔〕]/g, " ")
-    .replace(/[\/／|｜,，、・｡。!！?？:：;；"'`´]/g, " ")
-    .replace(/[^\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}A-Za-z\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeRepresentativeToken(token: string) {
-  const normalized = token
-    .normalize("NFKC")
-    .replace(
-      /^[A-Za-z]+(?=[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}])/gu,
-      " "
-    )
-    .replace(/[【】\[\]「」『』<>〈〉《》〔〕]/g, " ")
-    .replace(/[\/／|｜,，、・｡。!！?？:：;；"'`´]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return trimRepresentativeAffixes(
-    normalized
-      .replace(
-        /^[^A-Za-z\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+/gu,
-        ""
-      )
-      .replace(
-        /[^A-Za-z\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}]+$/gu,
-        ""
-      )
-      .trim()
-  );
-}
-
-function containsRepresentativeStopword(value: string) {
-  const lower = value.toLowerCase();
-
-  return REPRESENTATIVE_STOPWORDS.some((word) => {
-    const target = word.toLowerCase();
-    return (
-      lower === target ||
-      lower.startsWith(target) ||
-      lower.endsWith(target)
-    );
-  });
-}
-
-function isRepresentativeAreaToken(value: string) {
-  return REPRESENTATIVE_AREA_NAME_TOKENS.has(value.normalize("NFKC"));
-}
-
-function isLikelyPersonalNameEndingWithShi(value: string) {
-  const text = trimRepresentativeAffixes(value.trim()).normalize("NFKC");
-
-  if (!/^[\p{sc=Han}々ヶヵ]{3,5}市$/u.test(text)) return false;
-  if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(text)) return false;
-  if (isRepresentativeAreaToken(text)) return false;
-  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return false;
-  if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return false;
-
-  return true;
-}
-
-function looksLikeProtectedRepresentativeName(value: string) {
-  const text = trimRepresentativeAffixes(value.trim());
-
-  if (!text) return false;
-  if (/[0-9０-９]/.test(text)) return false;
-  if (/株式会社|有限会社|合同会社|御中|様/.test(text)) return false;
-  if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return false;
-
-  const parts = text.split(/\s+/).filter((part) => part !== "");
-
-  if (parts.length === 0 || parts.length > 2) return false;
-
-  return parts.every((part) => {
-    const normalized = part.normalize("NFKC");
-
-    if (!REPRESENTATIVE_STRONG_NAME_TOKEN_REGEX.test(part)) return false;
-    if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(normalized)) return false;
-    
-    if (
-      REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(part) &&
-      !isLikelyPersonalNameEndingWithShi(part)
-    ) {
-      return false;
-    }
-
-    if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(part)) return false;
-    if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(part)) return false;
-
-    return true;
-  });
-}
-
-function looksLikeNonNameToken(value: string) {
-  const text = trimRepresentativeAffixes(value.trim());
-  if (!text) return true;
-
-  if (looksLikeProtectedRepresentativeName(text)) return false;
-  if (REPRESENTATIVE_NON_NAME_EXACT_VALUES.has(text)) return true;
-  if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(text.normalize("NFKC"))) {
-    return true;
-  }
-  if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
-  if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
-  
-  if (
-    REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text) &&
-    !isLikelyPersonalNameEndingWithShi(text)
-  ) {
-    return true;
-  }
-
-  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return true;
-  if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return true;
-  if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return true;
-  if (/株式会社|有限会社|合同会社|御中|様/.test(text)) return true;
-  if (containsRepresentativeStopword(text)) return true;
-
-  return false;
-}
-
-function looksLikeRepresentativeNameToken(value: string) {
-  const text = trimRepresentativeAffixes(value.trim());
-
-  if (!text) return false;
-  if (/[0-9０-９]/.test(text)) return false;
-  if (looksLikeNonNameToken(text)) return false;
-
-  if (/^[\p{sc=Han}々ヶヵ\p{sc=Hiragana}\p{sc=Katakana}ー]{1,10}$/u.test(text)) {
-    return true;
-  }
-
-  if (/^[A-Za-z]{2,20}$/u.test(text)) {
-    return true;
-  }
-
-  return false;
-}
-
-function looksLikeRepresentativeName(value: string) {
-  const text = trimRepresentativeAffixes(value.trim());
-
-  if (!text) return false;
-  if (looksLikeProtectedRepresentativeName(text)) return true;
-  if (/[0-9０-９]/.test(text)) return false;
-  if (/株式会社|有限会社|合同会社|御中|様/.test(text)) return false;
-  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return false;
-  if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return false;
-  if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return false;
-
-  const parts = text.split(/\s+/).filter((part) => part !== "");
-
-  if (parts.length === 0 || parts.length > 2) return false;
-  if (parts.some((part) => looksLikeNonNameToken(part))) return false;
-
-  if (
-    parts.length === 1 &&
-    REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(parts[0].normalize("NFKC"))
-  ) {
-    return false;
-  }
-
-  if (
-    parts.length === 2 &&
-    parts.every(
-      (part) =>
-        isRepresentativeAreaToken(part) ||
-        REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(part.normalize("NFKC"))
-    )
-  ) {
-    return false;
-  }
-
-  return parts.every((part) => looksLikeRepresentativeNameToken(part));
-}
-
-function getRepresentativeTokenVariants(token: string) {
-  const normalized = normalizeRepresentativeToken(token);
-  const variants = new Set<string>();
-
-  if (!normalized) return [];
-
-  variants.add(normalized);
-
-  const leadingJapanese =
-    normalized.match(/^[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}ー]{1,12}/u)?.[0];
-  if (leadingJapanese) {
-    variants.add(leadingJapanese);
-  }
-
-  const trailingJapanese =
-    normalized.match(/[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}ー]{1,12}$/u)?.[0];
-  if (trailingJapanese) {
-    variants.add(trailingJapanese);
-  }
-
-  const japaneseChunks = Array.from(
-    normalized.matchAll(/[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}ー]{1,12}/gu)
-  ).map((match) => match[0]);
-
-  japaneseChunks.forEach((chunk) => variants.add(chunk));
-
-  const leadingAscii = normalized.match(/^[A-Za-z]{2,20}/u)?.[0];
-  if (leadingAscii) {
-    variants.add(leadingAscii);
-  }
-
-  const trailingAscii = normalized.match(/[A-Za-z]{2,20}$/u)?.[0];
-  if (trailingAscii) {
-    variants.add(trailingAscii);
-  }
-
-  return Array.from(variants).filter(
-    (variant) =>
-      variant !== "" &&
-      !REPRESENTATIVE_NOISE_TOKEN_REGEX.test(variant) &&
-      !looksLikeNonNameToken(variant)
-  );
-}
-
-function extractRepresentativeName(value: string) {
-  const normalized = normalizeRepresentativeSource(value);
-  if (!normalized) return null;
-
-  const withoutTitles = trimRepresentativeAffixes(
-    normalized
-      .replace(REPRESENTATIVE_TITLE_REGEX, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-  );
-
-  if (!withoutTitles) return null;
-
-  const tokens = withoutTitles
-    .split(" ")
-    .map((token) => normalizeRepresentativeToken(token))
-    .filter(
-      (token) => token !== "" && !REPRESENTATIVE_NOISE_TOKEN_REGEX.test(token)
-    );
-
-  for (let i = tokens.length - 2; i >= 0; i--) {
-    const firstVariants = getRepresentativeTokenVariants(tokens[i]);
-    const secondVariants = getRepresentativeTokenVariants(tokens[i + 1]);
-
-    for (const first of firstVariants) {
-      for (const second of secondVariants) {
-        const candidate = `${first} ${second}`.replace(/\s+/g, " ").trim();
-
-        if (looksLikeRepresentativeName(candidate)) {
-          return candidate;
-        }
-      }
-    }
-  }
-
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    const variants = getRepresentativeTokenVariants(tokens[i]);
-
-    for (const variant of variants) {
-      if (looksLikeRepresentativeName(variant)) {
-        return variant;
-      }
-    }
-  }
-
-  const compactMatches = Array.from(
-    withoutTitles.matchAll(
-      /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}ーA-Za-z]{1,20}/gu
-    )
-  ).map((match) => normalizeRepresentativeToken(match[0]));
-
-  for (let i = compactMatches.length - 1; i >= 0; i--) {
-    if (looksLikeRepresentativeName(compactMatches[i])) {
-      return compactMatches[i];
-    }
-  }
-
-  return null;
-}
-
-function inspectRepresentativeNameValue(value: string | null) {
-  const original = typeof value === "string" ? value.trim() : "";
-
-  if (original === "") {
-    return {
-      cleanedValue: null as string | null,
-      shouldUpdate: false,
-      shouldDelete: false,
-      shouldReview: false,
-      reason: "",
-    };
-  }
-
-  const extractedName = extractRepresentativeName(original);
-
-  if (extractedName) {
-    const normalizedOriginal = normalizeRepresentativeComparisonValue(original);
-    const normalizedExtracted =
-      normalizeRepresentativeComparisonValue(extractedName);
-
-    if (normalizedOriginal !== normalizedExtracted) {
-      return {
-        cleanedValue: extractedName,
-        shouldUpdate: true,
-        shouldDelete: false,
-        shouldReview: false,
-        reason: "氏名を抽出できたため更新候補",
-      };
-    }
-
-    return {
-      cleanedValue: extractedName,
-      shouldUpdate: false,
-      shouldDelete: false,
-      shouldReview: false,
-      reason: "",
-    };
-  }
-
-  const normalizedSource = trimRepresentativeAffixes(
-    normalizeRepresentativeSource(original)
-  );
-
-  if (!normalizedSource || looksLikeNonNameToken(normalizedSource)) {
-    return {
-      cleanedValue: null as string | null,
-      shouldUpdate: false,
-      shouldDelete: true,
-      shouldReview: false,
-      reason: "氏名ではない可能性が高いため削除候補",
-    };
-  }
-
-  return {
-    cleanedValue: null as string | null,
-    shouldUpdate: false,
-    shouldDelete: false,
-    shouldReview: true,
-    reason: "氏名か断定できないため要確認",
-  };
-}
-
-function isStrictRepresentativeNameValue(
-  value: string | null,
-  options?: { allowCompactSingleToken?: boolean }
-) {
-  const allowCompactSingleToken =
-    options?.allowCompactSingleToken === true;
-
-  const text = trimRepresentativeAffixes(normalizeSpace(value ?? ""));
-
-  if (!text) return false;
-  if (looksLikeNonNameToken(text)) return false;
-  if (/^[A-Za-z]+$/u.test(text)) return false;
-
-  const parts = text.split(/\s+/).filter((part) => part !== "");
-
-  if (parts.length === 2) {
-    return parts.every(
-      (part) =>
-        /^[\p{sc=Han}々ヶヵ]{1,5}$/u.test(part) ||
-        /^[\p{sc=Katakana}ー]{2,12}$/u.test(part) ||
-        /^[\p{sc=Hiragana}]{2,8}$/u.test(part)
-    );
-  }
-
-  if (parts.length === 1 && allowCompactSingleToken) {
-    return /^[\p{sc=Han}々ヶヵ]{3,8}$/u.test(parts[0]);
-  }
-
-  return false;
-}
-
-function normalizeRepresentativeName(
-  value: string,
-  options?: { allowCompactSingleToken?: boolean }
-) {
-  const result = inspectRepresentativeNameValue(value);
-
-  if (result.shouldDelete || result.shouldReview || !result.cleanedValue) {
-    return null;
-  }
-
-  return isStrictRepresentativeNameValue(result.cleanedValue, options)
-    ? result.cleanedValue
-    : null;
-}
-
-function extractRepresentativeNameFromText(text: string) {
-  const singleLineCandidate = extractRepresentativeSingleLineValue(text);
-  if (singleLineCandidate) return singleLineCandidate;
-
-  const lines = text
-    .split("\n")
-    .map((line) => normalizeSpace(line))
-    .filter((line) => line !== "")
-    .slice(0, 120);
-
-  const skipPattern =
-    /(代表ご挨拶|ご挨拶|代表メッセージ|メッセージ|スタッフ紹介|役員一覧|役員紹介|マネジメント|management|staff|member|members|profile|blog|voice|story|success|diary|interview|ひとりごと|卒業生|在校生|コーチ|先生|人事|採用|新卒|店舗|shop|campus)/i;
-
-  const titlePattern =
-    /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)(?!から)/i;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (skipPattern.test(line)) continue;
-
-    const labeledSameLine = line.match(
-      /(?:代表者名?|代表者|理事長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i
-    );
-    if (labeledSameLine?.[1]) {
-      const name = normalizeRepresentativeName(labeledSameLine[1], {
-        allowCompactSingleToken: true,
-      });
-      if (name) return name;
-    }
-
-    const sameLineAfterTitle = line.match(
-      /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)(?!から)\s*[:：/／]?\s*(.+)$/i
-    );
-    if (sameLineAfterTitle?.[2]) {
-      const name = normalizeRepresentativeName(sameLineAfterTitle[2], {
-        allowCompactSingleToken: true,
-      });
-      if (name) return name;
-    }
-
-    const sameLineBeforeTitle = line.match(
-      /^(.+?)\s+(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長)$/u
-    );
-    if (sameLineBeforeTitle?.[1]) {
-      const name = normalizeRepresentativeName(sameLineBeforeTitle[1], {
-        allowCompactSingleToken: true,
-      });
-      if (name) return name;
-    }
-
-    if (
-      /^(?:代表者(?:名)?|理事長|所長|センター長|学院長|校長|学長|施設長|室長)$/.test(
-        line
-      )
-    ) {
-      const nextLine = lines[i + 1] ?? "";
-      const nextName = normalizeRepresentativeName(nextLine, {
-        allowCompactSingleToken: true,
-      });
-      if (nextName) return nextName;
-    }
-
-    if (titlePattern.test(line)) {
-      const nextLine = lines[i + 1] ?? "";
-      if (!skipPattern.test(nextLine)) {
-        const nextName = normalizeRepresentativeName(nextLine, {
-          allowCompactSingleToken: true,
-        });
-        if (nextName) return nextName;
-      }
-    }
-  }
-
-  return null;
-}
-
-function extractRepresentativeTitleFromText(text: string) {
-  const lines = text
-    .split("\n")
-    .map((line) => normalizeSpace(line))
-    .filter((line) => line !== "");
-
-  for (const line of lines) {
-    if (/代表ご挨拶|ご挨拶|メッセージ/i.test(line)) continue;
-
-    const title = normalizeRepresentativeTitle(line);
-    if (title) return title;
-
-    const sameLine = line.match(
-      /代表者\s*[:：]?\s*(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長|CEO|COO|CFO|代表)(?!から)/i
-    );
-    if (sameLine?.[1]) {
-      return normalizeSpace(sameLine[1]);
-    }
-  }
-
-  return null;
 }
 
 function normalizeCapital(value: string) {
@@ -2798,6 +1918,36 @@ function normalizeEmployeeCount(value: string) {
     return formatCount(standaloneCount);
   }
 
+    const exactLabelNumberOnlyMatch = text.match(
+    new RegExp(
+      `^(?:${buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS)})\\s*[:：]?\\s*([0-9][0-9,]*)$`,
+      "i"
+    )
+  );
+  const exactLabelNumberOnlyCount = toCount(exactLabelNumberOnlyMatch?.[1]);
+  if (exactLabelNumberOnlyCount != null) {
+    return formatCount(exactLabelNumberOnlyCount);
+  }
+
+  const standalonePersonOnlyMatch = text.match(
+    new RegExp(`^([0-9][0-9,]*)\\s*(?:名|人)$`, "i")
+  );
+  const standalonePersonOnlyCount = toCount(standalonePersonOnlyMatch?.[1]);
+  if (standalonePersonOnlyCount != null) {
+    return formatCount(standalonePersonOnlyCount);
+  }
+
+  const hasContext = hasEmployeeCountContext(text);
+
+  if (!hasContext) {
+    const pureNumber = text.match(/^[0-9][0-9,]*$/);
+    if (pureNumber?.[0]) {
+      const count = toCount(pureNumber[0]);
+      return formatCount(count);
+    }
+    return null;
+  }
+
   const personMatches = [
     ...text.matchAll(
       new RegExp(`([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`, "g")
@@ -2908,10 +2058,13 @@ function extractPairs(html: string) {
   const result: Array<{ label: string; value: string }> = [];
 
   const patterns = [
-    /<tr[^>]*>\s*<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>\s*<td[^>]*>([\s\S]*?)<\/td>[\s\S]*?<\/tr>/gi,
+    /<tr[^>]*>\s*<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>\s*<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>[\s\S]*?<\/tr>/gi,
     /<dt[^>]*>([\s\S]*?)<\/dt>\s*<dd[^>]*>([\s\S]*?)<\/dd>/gi,
-    /<(?:li|p|div)[^>]*>\s*([^<:：]{1,40})\s*[:：]\s*([\s\S]*?)<\/(?:li|p|div)>/gi,
-    /<(?:div|p|li)[^>]*>\s*<(?:span|strong|b)[^>]*>([\s\S]{1,40}?)<\/(?:span|strong|b)>\s*[:：]?\s*<(?:span|em|strong|b)[^>]*>([\s\S]*?)<\/(?:span|em|strong|b)>\s*<\/(?:div|p|li)>/gi,
+    /<(?:li|p|div|section)[^>]*>\s*([^<:：]{1,60})\s*[:：]\s*([\s\S]*?)<\/(?:li|p|div|section)>/gi,
+    /<(?:div|p|li|section)[^>]*>\s*<(?:span|strong|b|div|dt|th)[^>]*>([\s\S]{1,60}?)<\/(?:span|strong|b|div|dt|th)>\s*[:：]?\s*<(?:span|em|strong|b|div|dd|td|p|li)[^>]*>([\s\S]*?)<\/(?:span|em|strong|b|div|dd|td|p|li)>/gi,
+    /<(?:span|div|strong|b)[^>]+(?:class|id)=["'][^"']*(?:label|title|name|head|term|key)[^"']*["'][^>]*>([\s\S]{1,60}?)<\/(?:span|div|strong|b)>\s*<(?:span|div|p|dd|td)[^>]+(?:class|id)=["'][^"']*(?:value|data|body|desc|detail)[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|div|p|dd|td)>/gi,
+    /<(?:div|li|section|article)[^>]*>\s*<(?:div|p|span|strong|b)[^>]*>\s*([^<:：]{1,60})\s*<\/(?:div|p|span|strong|b)>\s*<(?:div|p|span|strong|b)[^>]*>\s*([\s\S]{1,240}?)\s*<\/(?:div|p|span|strong|b)>\s*<\/(?:div|li|section|article)>/gi,
+    /<(?:div|section|article)[^>]*>\s*<(?:h2|h3|h4|p|div|span|strong|b)[^>]*>\s*([^<:：]{1,60})\s*<\/(?:h2|h3|h4|p|div|span|strong|b)>\s*(?:<a[^>]*>)?([\s\S]{1,240}?)(?:<\/a>)?\s*<\/(?:div|section|article)>/gi,
   ];
 
   for (const pattern of patterns) {
@@ -2940,6 +2093,23 @@ function pickPairValue(
   return null;
 }
 
+function pickRepresentativePairValue(
+  pairs: Array<{ label: string; value: string }>
+) {
+  for (const pair of pairs) {
+    if (!REPRESENTATIVE_NAME_LABELS.some((regex) => regex.test(pair.label))) {
+      continue;
+    }
+
+    const candidate = normalizeRepresentativeCandidateForBest(pair.value);
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function addBest(
   best: Partial<Record<keyof CrawlExtractedFields, BestValue>>,
   key: keyof CrawlExtractedFields,
@@ -2951,6 +2121,169 @@ function addBest(
   const current = best[key];
   if (!current || score > current.score) {
     best[key] = { value, score };
+  }
+}
+
+function buildPageData(
+  requestedUrl: string,
+  finalUrl: string,
+  html: string
+): PageData {
+  return {
+    requestedUrl,
+    finalUrl,
+    html,
+    text: stripHtml(html),
+    structuredText: stripHtmlKeepLineBreaks(html),
+    title: extractTitle(html),
+    h1: extractH1(html),
+    links: extractLinks(html, finalUrl),
+  };
+}
+
+function shouldUseBrowserRenderedHtml(html: string, finalUrl = "") {
+  const structuredText = stripHtmlKeepLineBreaks(html);
+
+  const target = decodeURIComponent(
+    `${finalUrl} ${structuredText.slice(0, 2000)} ${html.slice(0, 4000)}`
+  );
+
+  const hasClientRenderedSignals =
+    /id=["']__next["']|id=["']root["']|id=["']app["']|data-reactroot|__NEXT_DATA__|_buildManifest|webpack|vite|nuxt/i.test(
+      html
+    );
+
+  const hasTooLittleReadableText = structuredText.length < 200;
+
+  const hasImportantPageHint =
+    /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|outline|profile|company|about|corporate|information|従業員数|従業員|社員数|職員数|スタッフ数|employee|staff|member)/i.test(
+      target
+    );
+
+  const hasThinImportantHtml =
+    hasImportantPageHint && structuredText.length < 350;
+
+  const hasBlockedOrPlaceholderHint =
+    /(enable javascript|javascriptを有効|access denied|forbidden|cloudflare|security check|bot check|please wait|just a moment)/i.test(
+      target
+    ) && structuredText.length < 500;
+
+  return (
+    (hasClientRenderedSignals &&
+      (hasTooLittleReadableText || hasThinImportantHtml)) ||
+    hasThinImportantHtml ||
+    hasBlockedOrPlaceholderHint
+  );
+}
+
+type BrowserPageLike = {
+  setDefaultNavigationTimeout(timeout: number): void;
+  setDefaultTimeout(timeout: number): void;
+  goto(
+    url: string,
+    options: { waitUntil: "domcontentloaded"; timeout: number }
+  ): Promise<unknown>;
+  waitForLoadState(
+    state: "networkidle",
+    options: { timeout: number }
+  ): Promise<unknown>;
+  waitForTimeout(ms: number): Promise<unknown>;
+  content(): Promise<string>;
+  textContent(selector: string): Promise<string | null>;
+  url(): string;
+};
+
+type BrowserLike = {
+  newPage(options: {
+    userAgent: string;
+    locale: string;
+  }): Promise<BrowserPageLike>;
+  close(): Promise<void>;
+};
+
+type ChromiumLike = {
+  launch(options: { headless: boolean }): Promise<BrowserLike>;
+};
+
+async function fetchPageWithBrowser(
+  url: string,
+  timeoutMs = 10000,
+  runtimeOptions?: CrawlRuntimeOptions
+): Promise<PageData | null> {
+  throwIfCrawlShouldStop(runtimeOptions);
+
+  let browser: BrowserLike | null = null;
+
+  try {
+    const imported = await (
+      new Function("return import('playwright')")() as Promise<{
+        chromium?: ChromiumLike;
+      }>
+    ).catch(() => null);
+
+    const chromium = imported?.chromium;
+    if (!chromium) return null;
+
+    browser = await chromium.launch({ headless: true });
+
+    const page = await browser.newPage({
+      userAgent: "Mozilla/5.0 (compatible; MasterDataCrawler/1.0)",
+      locale: "ja-JP",
+    });
+
+    page.setDefaultNavigationTimeout(timeoutMs);
+    page.setDefaultTimeout(timeoutMs);
+
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs,
+    });
+
+    await page
+      .waitForLoadState("networkidle", {
+        timeout: Math.min(timeoutMs, 4000),
+      })
+      .catch(() => {});
+
+    await page.waitForTimeout(1500);
+
+    throwIfCrawlShouldStop(runtimeOptions);
+
+    const html = await page.content();
+    const finalUrl = page.url() || url;
+
+    const bodyText =
+      (await page.textContent("body").catch(() => null)) ?? "";
+
+    const normalizedBodyText = bodyText
+      .split(/\r?\n/)
+      .map((line) => normalizeSpace(line))
+      .filter((line) => line !== "")
+      .join("\n");
+
+    if (PDF_PAGE_REGEX.test(finalUrl) && normalizedBodyText !== "") {
+      return buildPdfPageData(url, finalUrl, normalizedBodyText);
+    }
+
+    return buildPageData(url, finalUrl, html);
+  } catch (error) {
+    if (runtimeOptions?.shouldStop?.()) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+
+    if (
+      error instanceof Error &&
+      error.name === "AbortError" &&
+      runtimeOptions?.shouldStop?.()
+    ) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+
+    return null;
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
   }
 }
 
@@ -2988,25 +2321,51 @@ async function fetchPage(
 
     throwIfCrawlShouldStop(runtimeOptions);
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      return await fetchPageWithBrowser(url, timeoutMs, runtimeOptions);
+    }
 
+    const finalUrl = response.url || url;
     const contentType = response.headers.get("content-type") || "";
+
+    if (
+      contentType.toLowerCase().includes("application/pdf") ||
+      PDF_PAGE_REGEX.test(finalUrl)
+    ) {
+      const pdfBuffer = await response.arrayBuffer();
+
+      throwIfCrawlShouldStop(runtimeOptions);
+
+      const pdfText = await extractPdfTextFromArrayBuffer(pdfBuffer);
+
+      if (pdfText) {
+        return buildPdfPageData(url, finalUrl, pdfText);
+      }
+
+      return await fetchPageWithBrowser(finalUrl, timeoutMs, runtimeOptions);
+    }
+
     if (!contentType.toLowerCase().includes("text/html")) return null;
 
     const html = await response.text();
 
     throwIfCrawlShouldStop(runtimeOptions);
 
-    return {
-      requestedUrl: url,
-      finalUrl: response.url || url,
-      html,
-      text: stripHtml(html),
-      structuredText: stripHtmlKeepLineBreaks(html),
-      title: extractTitle(html),
-      h1: extractH1(html),
-      links: extractLinks(html, response.url || url),
-    };
+    const rawPageData = buildPageData(url, finalUrl, html);
+
+    if (shouldUseBrowserRenderedHtml(html)) {
+      const browserPageData = await fetchPageWithBrowser(
+        finalUrl,
+        timeoutMs,
+        runtimeOptions
+      );
+
+      if (browserPageData) {
+        return browserPageData;
+      }
+    }
+
+    return rawPageData;
   } catch (error) {
     if (runtimeOptions?.shouldStop?.()) {
       throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
@@ -3020,7 +2379,7 @@ async function fetchPage(
       throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
     }
 
-    return null;
+    return await fetchPageWithBrowser(url, timeoutMs, runtimeOptions);
   } finally {
     clearTimeout(timeoutId);
     clearInterval(stopCheckId);
@@ -3037,15 +2396,19 @@ async function fetchTopPage(
   const normalized = normalizeSeedUrl(seedUrl);
   if (!normalized) return null;
 
-  const first = await fetchPage(normalized, timeoutMs, runtimeOptions);
-  if (first) return first;
+  const candidates = Array.from(
+    new Set(
+      /^https:\/\//i.test(normalized)
+        ? [normalized, normalized.replace(/^https:\/\//i, "http://")]
+        : /^http:\/\//i.test(normalized)
+        ? [normalized, normalized.replace(/^http:\/\//i, "https://")]
+        : [normalized]
+    )
+  );
 
-  if (/^https:\/\//i.test(normalized)) {
-    return await fetchPage(
-      normalized.replace(/^https:\/\//i, "http://"),
-      timeoutMs,
-      runtimeOptions
-    );
+  for (const candidate of candidates) {
+    const page = await fetchPage(candidate, timeoutMs, runtimeOptions);
+    if (page) return page;
   }
 
   return null;
@@ -3115,9 +2478,7 @@ function getCandidateLinkScore(
 
   if (
     needsEmployeeCountPages &&
-    /(従業員数|社員数|職員数|スタッフ数|人数|人員|会社データ|数字で見る|data|numbers|ir|profile|outline)/i.test(
-      target
-    )
+    EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS.test(target)
   ) {
     score += 260;
   }
@@ -3194,9 +2555,23 @@ function getCandidateLinkScore(
     }
   }
 
+  if (
+    /(?:当社|弊社|私たち|わたしたち|会社|企業|法人|事務所|株式会社[^\s　/]{0,30}|有限会社[^\s　/]{0,30}|合同会社[^\s　/]{0,30})について/i.test(
+      target
+    )
+  ) {
+    score += 300;
+  }
+
   if (NEWS_BLOG_KEYWORDS.test(target)) score -= 120;
   if (RECRUIT_KEYWORDS.test(target)) score -= 80;
-  if (/\.pdf(?:$|\?)/i.test(link.url)) score -= 40;
+  if (PDF_PAGE_REGEX.test(link.url)) {
+  if (needsEmployeeCountPages && EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) {
+      score += 140;
+    } else {
+      score -= 40;
+    }
+  }
 
   return score;
 }
@@ -3223,6 +2598,42 @@ function pickCandidatePageUrls(
     }
   };
 
+  if (hasSelectedCrawlField(selectedFieldSet, "employee_count")) {
+    const strongEmployeePaths = [
+      "/company/",
+      "/company",
+      "/company/index.html",
+      "/company.html",
+      "/about/",
+      "/about.html",
+      "/profile/",
+      "/profile.html",
+      "/outline.html",
+      "/overview.html",
+    ];
+
+    for (const path of strongEmployeePaths) {
+      try {
+        pushIfValid(new URL(path, base).toString());
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  const sortedLinks = [...topPage.links]
+    .map((link) => ({
+      url: link.url,
+      score: getCandidateLinkScore(link, selectedFieldSet),
+    }))
+    .filter((item) =>
+      hasSelectedCrawlField(selectedFieldSet, "representative_name") ||
+      hasSelectedCrawlField(selectedFieldSet, "employee_count")
+        ? item.score > -220
+        : item.score > -20
+    )
+    .sort((a, b) => b.score - a.score);
+
   const scoredCommonPaths = COMMON_CANDIDATE_PATHS.map((path) => {
     try {
       const url = new URL(path, base).toString();
@@ -3244,24 +2655,25 @@ function pickCandidatePageUrls(
     .filter((item): item is { url: string; score: number } => item !== null)
     .sort((a, b) => b.score - a.score);
 
-  for (const item of scoredCommonPaths) {
-    pushIfValid(item.url);
-  }
+  const shouldPreferActualLinks =
+    hasSelectedCrawlField(selectedFieldSet, "employee_count");
 
-  const sortedLinks = [...topPage.links]
-    .map((link) => ({
-      url: link.url,
-      score: getCandidateLinkScore(link, selectedFieldSet),
-    }))
-    .filter((item) =>
-      hasSelectedCrawlField(selectedFieldSet, "representative_name")
-        ? item.score > -120
-        : item.score > 0
-    )
-    .sort((a, b) => b.score - a.score);
+  if (shouldPreferActualLinks) {
+    for (const item of sortedLinks) {
+      pushIfValid(item.url);
+    }
 
-  for (const item of sortedLinks) {
-    pushIfValid(item.url);
+    for (const item of scoredCommonPaths) {
+      pushIfValid(item.url);
+    }
+  } else {
+    for (const item of scoredCommonPaths) {
+      pushIfValid(item.url);
+    }
+
+    for (const item of sortedLinks) {
+      pushIfValid(item.url);
+    }
   }
 
   return urls.slice(0, getCandidatePageLimit(selectedFieldSet));
@@ -3280,63 +2692,60 @@ function hasSelectedOfficeFields(
 }
 
 function isRepresentativeOnlyMode(
-  selectedFieldSet: Set<CrawlSelectableFieldKey>
+  _selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
-  return (
-    selectedFieldSet.size === 1 &&
-    hasSelectedCrawlField(selectedFieldSet, "representative_name")
-  );
+  return false;
 }
 
 function getRepresentativeEnoughScore(
-  selectedFieldSet: Set<CrawlSelectableFieldKey>
+  _selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
-  return isRepresentativeOnlyMode(selectedFieldSet) ? 300 : 340;
+  return 980;
 }
 
 function getCandidatePageLimit(
   selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
+  const needsRepresentative = hasSelectedCrawlField(
+    selectedFieldSet,
+    "representative_name"
+  );
   const needsEmployeeCount = hasSelectedCrawlField(
     selectedFieldSet,
     "employee_count"
   );
   const needsPermit = hasSelectedPermitFields(selectedFieldSet);
 
-  if (isRepresentativeOnlyMode(selectedFieldSet)) {
-    return 18;
-  }
-
   if (selectedFieldSet.size === 1) {
-    if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 5;
-    if (needsPermit) return 12;
-    if (hasSelectedOfficeFields(selectedFieldSet)) {
-      return needsEmployeeCount ? 12 : 8;
-    }
-    if (needsEmployeeCount) return 16;
-    return 6;
+    if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 12;
+    if (needsRepresentative) return 100;
+    if (needsEmployeeCount) return 140;
+    if (needsPermit) return 24;
+    if (hasSelectedOfficeFields(selectedFieldSet)) return 20;
+    return 16;
   }
 
-  if (
-    selectedFieldSet.size <= 3 &&
-    hasSelectedCrawlField(selectedFieldSet, "representative_name")
-  ) {
-    return needsEmployeeCount || needsPermit ? 18 : 12;
+  if (needsRepresentative && needsEmployeeCount) {
+    return 160;
   }
 
-  if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
-    return needsEmployeeCount || needsPermit ? 18 : 8;
+  if (needsRepresentative) {
+    return 100;
   }
 
   if (needsEmployeeCount) {
-    return 30;
+    return 140;
   }
 
   if (needsPermit) {
+    return 32;
+  }
+
+  if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
     return 24;
   }
 
-  return 20;
+  return 30;
 }
 
 function hasHighConfidenceEmployeeCount(
@@ -3356,24 +2765,20 @@ function canStopFetchingAdditionalPages(
     return false;
   }
 
-  const representativeEnoughScore =
-    getRepresentativeEnoughScore(selectedFieldSet);
+  if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+    return false;
+  }
+
+  if (hasSelectedCrawlField(selectedFieldSet, "employee_count")) {
+    return false;
+  }
 
   return Array.from(selectedFieldSet).every((field) => {
     if (field === "company") return !!best.company?.value;
     if (field === "website_url") return !!best.website_url?.value;
     if (field === "form_url") return !!best.form_url?.value;
     if (field === "established_date") return !!best.established_date?.value;
-
-    if (field === "representative_name") {
-      return (
-        !!best.representative_name?.value &&
-        (best.representative_name?.score ?? 0) >= representativeEnoughScore
-      );
-    }
-
     if (field === "capital") return !!best.capital?.value;
-    if (field === "employee_count") return hasHighConfidenceEmployeeCount(best);
     if (field === "business_content") return !!best.business_content?.value;
 
     if (
@@ -3400,9 +2805,10 @@ function pickNestedCandidatePageUrls(
       score: getCandidateLinkScore(link, selectedFieldSet),
     }))
     .filter((item) =>
-      hasSelectedCrawlField(selectedFieldSet, "representative_name")
-        ? item.score > -120
-        : item.score > 0
+      hasSelectedCrawlField(selectedFieldSet, "representative_name") ||
+      hasSelectedCrawlField(selectedFieldSet, "employee_count")
+        ? item.score > -220
+        : item.score > -20
     )
     .sort((a, b) => b.score - a.score);
 
@@ -3542,65 +2948,18 @@ function processPage(
     );
   }
 
-if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
-  const representativeNamePairValue =
-    pickPairValue(pairs, REPRESENTATIVE_NAME_LABELS) ?? "";
-  const representativeNameTextValue =
-    extractRepresentativeSingleLineValue(page.structuredText) ?? "";
+  if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+    const representativeCandidates = collectRepresentativeCandidates(page);
 
-  const representativePairName = normalizeRepresentativeName(
-    representativeNamePairValue,
-    { allowCompactSingleToken: true }
-  );
-  const representativeTextName = normalizeRepresentativeName(
-    representativeNameTextValue,
-    { allowCompactSingleToken: true }
-  );
-  const representativeNameFromText =
-    representativePairName || representativeTextName
-      ? null
-      : extractRepresentativeNameFromText(page.structuredText);
-
-  const representativeSourceTarget = decodeURIComponent(
-    `${page.finalUrl} ${page.title} ${page.h1}`
-  );
-
-  const representativeScoreAdjustment =
-    (/(会社概要|会社概要・沿革|会社案内|企業情報|法人概要|about|company|corporate|outline|who\.html|gaiyou|data|profile|officer|executive|役員一覧)/i.test(
-      representativeSourceTarget
-    )
-      ? 120
-      : 0) +
-    (/(office\/greeting|社長挨拶|代表挨拶|理事長挨拶|所長挨拶|ご挨拶|greeting|message)/i.test(
-      representativeSourceTarget
-    )
-      ? 90
-      : 0) -
-    (/(recruit|career|job|jobs|entry|新卒|中途|採用|shop|shopinfo|campus|店舗|商品|製品|service|blog|news|topics|column|interview|voice|story|success|diary|staff|member|members|社員紹介|社員インタビュー)/i.test(
-      representativeSourceTarget
-    )
-      ? 320
-      : 0);
-
-  addBest(
-    best,
-    "representative_name",
-    representativePairName,
-    300 + boost + representativeScoreAdjustment
-  );
-  addBest(
-    best,
-    "representative_name",
-    representativeTextName,
-    320 + boost + representativeScoreAdjustment
-  );
-  addBest(
-    best,
-    "representative_name",
-    representativeNameFromText,
-    240 + boost + representativeScoreAdjustment
-  );
-}
+    for (const candidate of representativeCandidates) {
+      addBest(
+        best,
+        "representative_name",
+        candidate.value,
+        candidate.score + boost
+      );
+    }
+  }
 
   if (hasSelectedCrawlField(selectedFieldSet, "capital")) {
     const capitalPairValue = pickPairValue(pairs, CAPITAL_LABELS) ?? "";
@@ -3668,39 +3027,8 @@ if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
       [page.structuredText, page.text, page.title, page.h1].join("\n")
     );
 
-    addBest(
-      best,
-      "permit_number",
-      permitCategory,
-      230 + boost
-    );
+    addBest(best, "permit_number", permitCategory, 230 + boost);
   }
-}
-
-function findRejectedRepresentativeValue(pages: PageData[]) {
-  for (const page of pages) {
-    const rawValue =
-      extractSingleLineLabeledValue(
-        page.structuredText,
-        REPRESENTATIVE_NAME_LABELS
-      ) ?? null;
-
-    if (!rawValue) continue;
-
-    const inspected = inspectRepresentativeNameValue(rawValue);
-
-    if (inspected.shouldDelete || inspected.shouldReview) {
-      return {
-        raw: normalizeSpace(rawValue),
-        reason: inspected.reason,
-      };
-    }
-  }
-
-  return {
-    raw: null as string | null,
-    reason: null as string | null,
-  };
 }
 
 export async function crawlCompanyWebsite(
@@ -3797,7 +3125,31 @@ export async function crawlCompanyWebsite(
     : [];
   const queuedUrlSet = new Set<string>(rawCandidateUrls);
 
-    const fetchCandidatePages = async (urls: string[]) => {
+  const fetchRepresentativeOverviewPages = async (urls: string[]) => {
+    for (const candidateUrl of urls) {
+      throwIfCrawlShouldStop(runtimeOptions);
+
+      const page = await fetchPage(
+        candidateUrl,
+        pageFetchTimeoutMs,
+        runtimeOptions
+      );
+      if (!page) continue;
+      if (fetchedUrlSet.has(page.finalUrl)) continue;
+
+      const pageTarget = decodeURIComponent(
+        `${page.finalUrl} ${page.title} ${page.h1}`
+      );
+
+      if (!isRepresentativeOverviewPageTarget(pageTarget)) continue;
+
+      fetchedUrlSet.add(page.finalUrl);
+      collectedPages.push(page);
+      processPage(page, best, selectedFieldSet, sourceContext);
+    }
+  };
+
+  const fetchCandidatePages = async (urls: string[]) => {
     for (const candidateUrl of urls) {
       throwIfCrawlShouldStop(runtimeOptions);
 
@@ -3819,12 +3171,14 @@ export async function crawlCompanyWebsite(
 
       throwIfCrawlShouldStop(runtimeOptions);
 
-      const shouldCollectNestedRepresentativePages =
-        hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
-        (!best.representative_name?.value ||
-          (best.representative_name?.score ?? 0) < representativeEnoughScore);
+      const shouldCollectNestedCandidatePages =
+        (hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
+          (!best.representative_name?.value ||
+            (best.representative_name?.score ?? 0) < representativeEnoughScore)) ||
+        (hasSelectedCrawlField(selectedFieldSet, "employee_count") &&
+          !hasHighConfidenceEmployeeCount(best));
 
-      if (shouldCollectNestedRepresentativePages) {
+      if (shouldCollectNestedCandidatePages) {
         const nestedUrls = pickNestedCandidatePageUrls(page, selectedFieldSet);
         for (const nestedUrl of nestedUrls) {
           if (queuedUrlSet.has(nestedUrl)) continue;
@@ -3835,7 +3189,9 @@ export async function crawlCompanyWebsite(
     }
   };
 
-  if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+  if (representativeOnlyMode) {
+    await fetchRepresentativeOverviewPages(overviewCandidateUrls);
+  } else if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
     if (!canStopFetchingAdditionalPages(best, selectedFieldSet)) {
       await fetchCandidatePages(overviewCandidateUrls);
     }
@@ -3851,13 +3207,23 @@ export async function crawlCompanyWebsite(
     await fetchCandidatePages(rawCandidateUrls);
   }
 
-  const shouldFetchNestedRepresentativePages =
-    hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
-    (!best.representative_name?.value ||
-      (best.representative_name?.score ?? 0) < representativeEnoughScore);
+  const shouldFetchNestedCandidatePages =
+    !representativeOnlyMode &&
+    (
+      (hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
+        (!best.representative_name?.value ||
+          (best.representative_name?.score ?? 0) < representativeEnoughScore)) ||
+      (hasSelectedCrawlField(selectedFieldSet, "employee_count") &&
+        !hasHighConfidenceEmployeeCount(best))
+    );
 
-  if (shouldFetchNestedRepresentativePages) {
-    const nestedLimit = representativeOnlyMode ? 20 : 40;
+  if (shouldFetchNestedCandidatePages) {
+    const nestedLimit =
+      representativeOnlyMode
+        ? 20
+        : hasSelectedCrawlField(selectedFieldSet, "employee_count")
+        ? 100
+        : 40;
 
     for (const nestedUrl of nestedCandidateUrls.slice(0, nestedLimit)) {
       throwIfCrawlShouldStop(runtimeOptions);
@@ -3897,11 +3263,12 @@ export async function crawlCompanyWebsite(
       })
     : [];
 
-  const rejectedRepresentative =
-    hasSelectedCrawlField(selectedFieldSet, "representative_name") &&
-    !best.representative_name?.value
-      ? findRejectedRepresentativeValue(collectedPages)
-      : { raw: null as string | null, reason: null as string | null };
+  const representativeRawValue = hasSelectedCrawlField(
+    selectedFieldSet,
+    "representative_name"
+  )
+    ? best.representative_name?.value ?? null
+    : null;
 
   return {
     company: hasSelectedCrawlField(selectedFieldSet, "company")
@@ -3937,18 +3304,8 @@ export async function crawlCompanyWebsite(
     )
       ? best.representative_name?.value ?? null
       : null,
-    representative_name_raw: hasSelectedCrawlField(
-      selectedFieldSet,
-      "representative_name"
-    )
-      ? rejectedRepresentative.raw
-      : null,
-    representative_name_reason: hasSelectedCrawlField(
-      selectedFieldSet,
-      "representative_name"
-    )
-      ? rejectedRepresentative.reason
-      : null,
+    representative_name_raw: representativeRawValue,
+    representative_name_reason: null,
     representative_title: null,
     capital: hasSelectedCrawlField(selectedFieldSet, "capital")
       ? best.capital?.value ?? null

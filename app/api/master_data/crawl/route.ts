@@ -904,34 +904,36 @@ function buildCrawlPayloadBundles(
         ? `${officeCompanyBase} ${officeName}`
         : officeCompanyBase;
 
+    const payload: CrawlPayload = {
+      company: company && isLikelyCompanyName(company) ? company : fallbackCompany,
+      website_url: normalizeNullableText(extracted.website_url),
+      form_url: normalizeNullableText(extracted.form_url),
+      phone: normalizeNullableText(extracted.phone),
+      fax: normalizeNullableText(extracted.fax),
+      email: normalizeNullableText(extracted.email),
+      zipcode: normalizeNullableText(extracted.zipcode),
+      address: normalizeNullableText(extracted.address),
+      established_date: normalizeNullableText(extracted.established_date),
+      representative_name: normalizeNullableText(
+        extracted.representative_name
+      ),
+      representative_name_raw: normalizeNullableText(
+        extracted.representative_name_raw
+      ),
+      representative_name_reason: normalizeNullableText(
+        extracted.representative_name_reason
+      ),
+      representative_title: normalizeNullableText(
+        extracted.representative_title
+      ),
+      capital: normalizeNullableText(extracted.capital),
+      employee_count: normalizeNullableText(extracted.employee_count),
+      business_content: normalizeNullableText(extracted.business_content),
+      permit_number: normalizeNullableText(extracted.permit_number),
+    };
+
     return {
-      payload: {
-        company: company && isLikelyCompanyName(company) ? company : fallbackCompany,
-        website_url: normalizeNullableText(extracted.website_url),
-        form_url: normalizeNullableText(extracted.form_url),
-        phone: normalizeNullableText(extracted.phone),
-        fax: normalizeNullableText(extracted.fax),
-        email: normalizeNullableText(extracted.email),
-        zipcode: normalizeNullableText(extracted.zipcode),
-        address: normalizeNullableText(extracted.address),
-        established_date: normalizeNullableText(extracted.established_date),
-        representative_name: normalizeNullableText(
-          extracted.representative_name
-        ),
-        representative_name_raw: normalizeNullableText(
-          extracted.representative_name_raw
-        ),
-        representative_name_reason: normalizeNullableText(
-          extracted.representative_name_reason
-        ),
-        representative_title: normalizeNullableText(
-          extracted.representative_title
-        ),
-        capital: normalizeNullableText(extracted.capital),
-        employee_count: normalizeNullableText(extracted.employee_count),
-        business_content: normalizeNullableText(extracted.business_content),
-        permit_number: normalizeNullableText(extracted.permit_number),
-      },
+      payload,
       candidates: {
         phone: uniqueTextValues(office.phone_candidates),
         fax: uniqueTextValues(office.fax_candidates),
@@ -978,9 +980,29 @@ function buildPreviewChanges(
     }
 
     const before = normalizeNullableText(row[field.key]);
+    const extractedAfter = normalizeNullableText(bundle.payload[field.key]);
     const after = getResolvedValue(row[field.key], bundle.payload[field.key]);
 
-    if (before === after) continue;
+    const shouldKeepSameRepresentativePreview =
+      field.key === "representative_name" &&
+      extractedAfter != null &&
+      before != null &&
+      before === extractedAfter;
+
+    const shouldKeepSameEmployeeCountPreview =
+      field.key === "employee_count" &&
+      extractedAfter != null &&
+      before != null &&
+      before === extractedAfter;
+
+    if (
+      before === after &&
+      !shouldKeepSameRepresentativePreview &&
+      !shouldKeepSameEmployeeCountPreview
+    ) {
+      continue;
+    }
+
     if (after == null) continue;
 
     changes.push({
@@ -1568,38 +1590,6 @@ async function runCrawlJob(jobId: string) {
                 );
 
                 if (changes.length === 0) {
-                  const rejectedRepresentativeValue =
-                    selectedFieldSet.has("representative_name") &&
-                    bundle.payload.representative_name == null &&
-                    bundle.payload.representative_name_raw
-                      ? normalizeNullableText(
-                          bundle.payload.representative_name_raw
-                        )
-                      : null;
-
-                  if (rejectedRepresentativeValue) {
-                    job.excludedPreviewRows.push({
-                      row_id: String(row.row_id ?? ""),
-                      preview_row_id: `${String(row.row_id ?? "")}__excluded__${officeIndex}`,
-                      company:
-                        bundle.payload.company ??
-                        normalizeNullableText(row.company),
-                      website_url: normalizeNullableText(row.website_url),
-                      source_row: buildPreviewSourceRow(
-                        row as Record<string, unknown>
-                      ),
-                      changes: [
-                        {
-                          key: "representative_name",
-                          label: "代表者名",
-                          before: normalizeNullableText(row.representative_name),
-                          after: null,
-                          candidates: [rejectedRepresentativeValue],
-                        },
-                      ],
-                    });
-                  }
-
                   return;
                 }
 
