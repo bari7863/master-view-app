@@ -1586,6 +1586,21 @@ function looksLikeNonNameToken(value: string) {
   return false;
 }
 
+function shouldAutoDeleteRepresentativeName(value: string) {
+  const normalizedSource = trimRepresentativeAffixes(
+    normalizeRepresentativeSource(value)
+  );
+
+  if (!normalizedSource) {
+    return true;
+  }
+
+  return (
+    REPRESENTATIVE_NON_NAME_EXACT_VALUES.has(normalizedSource) ||
+    REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(normalizedSource)
+  );
+}
+
 function looksLikeRepresentativeNameToken(value: string) {
   const text = trimRepresentativeAffixes(value.trim());
 
@@ -1788,13 +1803,33 @@ function inspectRepresentativeNameValue(value: string | null) {
     normalizeRepresentativeSource(original)
   );
 
-  if (!normalizedSource || looksLikeNonNameToken(normalizedSource)) {
+  if (!normalizedSource) {
     return {
       cleanedValue: null as string | null,
       shouldUpdate: false,
       shouldDelete: true,
       shouldReview: false,
-      reason: "氏名ではない可能性が高いため削除候補",
+      reason: "空欄相当のため削除候補",
+    };
+  }
+
+  if (shouldAutoDeleteRepresentativeName(original)) {
+    return {
+      cleanedValue: null as string | null,
+      shouldUpdate: false,
+      shouldDelete: true,
+      shouldReview: false,
+      reason: "氏名ではないことが明確なため削除候補",
+    };
+  }
+
+  if (looksLikeNonNameToken(normalizedSource)) {
+    return {
+      cleanedValue: null as string | null,
+      shouldUpdate: false,
+      shouldDelete: false,
+      shouldReview: true,
+      reason: "氏名ではない可能性はあるが自動削除は危険なため要確認",
     };
   }
 
@@ -2005,24 +2040,26 @@ async function handleRepresentativeNameInspectionDelete(
     let deletedCount = 0;
 
     for (const change of changes) {
-      if (change.action === "update") {
-        const nextValue = (change.afterValue ?? "").trim();
+      const currentRes = await client.query(
+        `
+          SELECT "代表者名" AS representative_name
+          FROM public.master_data
+          WHERE id = $1::bigint
+          LIMIT 1
+        `,
+        [change.rowId]
+      );
 
-        if (nextValue === "") {
-          continue;
-        }
+      const currentRepresentativeName =
+        typeof currentRes.rows[0]?.representative_name === "string"
+          ? currentRes.rows[0].representative_name
+          : null;
 
-        await client.query(
-          `
-            UPDATE public.master_data
-            SET "代表者名" = $1
-            WHERE id = $2::bigint
-          `,
-          [nextValue, change.rowId]
-        );
+      const currentResult = inspectRepresentativeNameValue(
+        currentRepresentativeName
+      );
 
-        applied += 1;
-        updatedCount += 1;
+      if (!currentResult.shouldDelete) {
         continue;
       }
 

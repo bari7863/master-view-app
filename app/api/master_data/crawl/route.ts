@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import type { PoolClient } from "pg";
+import { promises as fs } from "fs";
+import path from "path";
 import { crawlCompanyWebsite } from "@/lib/master-data-crawler";
 
 const FILTER_COLUMN_MAP = {
@@ -1027,12 +1029,14 @@ function getDefaultSelectedValue(change: CrawlPreviewChange) {
 
 function buildEffectiveSelectedMap(
   item: CrawlJobPreviewItem,
-  selectedChanges: SelectedCrawlChanges | undefined
+  selectedChanges: SelectedCrawlChanges | undefined,
+  selectedFields: CrawlSelectableFieldKey[]
 ) {
   const selected = selectedChanges?.[item.preview_row_id] ?? {};
   const result: Partial<Record<CrawlPreviewSelectableKey, string>> = {};
+  const changes = buildPreviewChangesFromItem(item, selectedFields);
 
-  for (const change of item.changes) {
+  for (const change of changes) {
     const hasExplicitValue = Object.prototype.hasOwnProperty.call(
       selected,
       change.key
@@ -1058,9 +1062,14 @@ function buildEffectiveSelectedMap(
 function buildSelectedPayload(
   bundle: CrawlPayloadBundle,
   item: CrawlJobPreviewItem,
-  selectedChanges: SelectedCrawlChanges | undefined
+  selectedChanges: SelectedCrawlChanges | undefined,
+  selectedFields: CrawlSelectableFieldKey[]
 ): CrawlPayload {
-  const selected = buildEffectiveSelectedMap(item, selectedChanges);
+  const selected = buildEffectiveSelectedMap(
+    item,
+    selectedChanges,
+    selectedFields
+  );
 
   return {
     ...bundle.payload,
@@ -1088,18 +1097,20 @@ function buildSelectedPayload(
 
 function getSelectedChangeKeys(
   item: CrawlJobPreviewItem,
-  selectedChanges: SelectedCrawlChanges | undefined
+  selectedChanges: SelectedCrawlChanges | undefined,
+  selectedFields: CrawlSelectableFieldKey[]
 ) {
   return Object.keys(
-    buildEffectiveSelectedMap(item, selectedChanges)
+    buildEffectiveSelectedMap(item, selectedChanges, selectedFields)
   ) as CrawlPreviewSelectableKey[];
 }
 
 function hasAnySelectedCandidate(
   item: CrawlJobPreviewItem,
-  selectedChanges: SelectedCrawlChanges | undefined
+  selectedChanges: SelectedCrawlChanges | undefined,
+  selectedFields: CrawlSelectableFieldKey[]
 ) {
-  return getSelectedChangeKeys(item, selectedChanges).length > 0;
+  return getSelectedChangeKeys(item, selectedChanges, selectedFields).length > 0;
 }
 
 function buildInsertRow(
@@ -1202,6 +1213,52 @@ async function fetchSourceRowForInsert(
     : null;
 }
 
+async function fetchSourceRowForPreview(
+  client: DbClient,
+  rowId: string
+): Promise<Record<string, unknown> | null> {
+  const res = await client.query(
+    `
+      SELECT
+        md.id::text AS row_id,
+        md."企業名" AS company,
+        md."郵便番号" AS zipcode,
+        md."住所" AS address,
+        md."大業種名" AS big_industry,
+        md."小業種名" AS small_industry,
+        md."企業名（かな）" AS company_kana,
+        md."企業概要" AS summary,
+        md."企業サイトURL" AS website_url,
+        md."問い合わせフォームURL" AS form_url,
+        md."電話番号" AS phone,
+        md."FAX番号" AS fax,
+        md."メールアドレス" AS email,
+        md."設立年月" AS established_date,
+        md."代表者名" AS representative_name,
+        md."代表者役職" AS representative_title,
+        md."資本金" AS capital,
+        md."従業員数" AS employee_count,
+        md."従業員数年度" AS employee_count_year,
+        md."前年売上高" AS previous_sales,
+        md."直近売上高" AS latest_sales,
+        md."決算月" AS closing_month,
+        md."事業所数" AS office_count,
+        md."新規登録タグ" AS tag,
+        md."業種" AS business_type,
+        md."事業内容" AS business_content,
+        md."業界" AS industry_category,
+        md."許可番号" AS permit_number,
+        md."メモ" AS memo
+      FROM public.master_data AS md
+      WHERE md.id = $1::bigint
+      LIMIT 1
+    `,
+    [rowId]
+  );
+
+  return (res.rows[0] as Record<string, unknown> | undefined) ?? null;
+}
+
 type CrawlJobPreviewItem = {
   row_id: string;
   preview_row_id: string;
@@ -1210,8 +1267,22 @@ type CrawlJobPreviewItem = {
   website_url: string | null;
   source_row: PreviewSourceRow | null;
   bundle: CrawlPayloadBundle;
-  changes: CrawlPreviewChange[];
 };
+
+function buildPreviewChangesFromItem(
+  item: CrawlJobPreviewItem,
+  selectedFields: CrawlSelectableFieldKey[]
+) {
+  if (!item.source_row) {
+    return [] as CrawlPreviewChange[];
+  }
+
+  return buildPreviewChanges(
+    item.source_row as unknown as Record<string, unknown>,
+    item.bundle,
+    new Set(selectedFields)
+  );
+}
 
 type CrawlJobState = {
   jobId: string;
@@ -1269,6 +1340,170 @@ if (!globalForCrawlJobs.__masterDataCrawlJobs) {
 }
 
 const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
+
+type SerializedCrawlJobState = Omit<CrawlJobState, "savedPreviewRowIds"> & {
+  savedPreviewRowIds: string[];
+};
+
+const CRAWL_JOB_STATE_DIR = path.join(process.cwd(), ".crawl-job-state");
+
+function compactProcessedTargetRow(row: Record<string, unknown>) {
+  return {
+    row_id: String(row.row_id ?? ""),
+    company: normalizeNullableText(row.company),
+    website_url: normalizeNullableText(row.website_url),
+  } as Record<string, unknown>;
+}
+
+async function ensureCrawlJobStateDir() {
+  try {
+    await fs.mkdir(CRAWL_JOB_STATE_DIR, { recursive: true });
+  } catch {}
+}
+
+function getCrawlJobStatePath(jobId: string) {
+  return path.join(CRAWL_JOB_STATE_DIR, `${jobId}.json`);
+}
+
+function serializeCrawlJobState(job: CrawlJobState): SerializedCrawlJobState {
+  return {
+    ...job,
+    savedPreviewRowIds: Array.from(job.savedPreviewRowIds),
+  };
+}
+
+function revivePersistedCrawlJobState(job: CrawlJobState): CrawlJobState {
+  if (job.completed || job.error) {
+    return job;
+  }
+
+  return {
+    ...job,
+    running: false,
+    paused: true,
+    pauseRequested: false,
+    currentCompany: null,
+    currentWebsiteUrl: null,
+  };
+}
+
+function deserializeCrawlJobState(rawText: string) {
+  try {
+    const parsed = JSON.parse(rawText) as SerializedCrawlJobState;
+
+    if (!parsed || typeof parsed.jobId !== "string" || parsed.jobId === "") {
+      return null;
+    }
+
+    return revivePersistedCrawlJobState({
+      ...parsed,
+      savedPreviewRowIds: new Set(
+        Array.isArray(parsed.savedPreviewRowIds)
+          ? parsed.savedPreviewRowIds.map((value) => String(value))
+          : []
+      ),
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function persistCrawlJobState(job: CrawlJobState) {
+  try {
+    await ensureCrawlJobStateDir();
+    await fs.writeFile(
+      getCrawlJobStatePath(job.jobId),
+      JSON.stringify(serializeCrawlJobState(job)),
+      "utf-8"
+    );
+  } catch {}
+}
+
+async function deletePersistedCrawlJobState(jobId: string) {
+  try {
+    await fs.unlink(getCrawlJobStatePath(jobId));
+  } catch {}
+}
+
+async function loadPersistedCrawlJobState(jobId: string) {
+  const existing = crawlJobs.get(jobId);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    const rawText = await fs.readFile(getCrawlJobStatePath(jobId), "utf-8");
+    const job = deserializeCrawlJobState(rawText);
+
+    if (!job) {
+      return null;
+    }
+
+    crawlJobs.set(job.jobId, job);
+    return job;
+  } catch {
+    return null;
+  }
+}
+
+async function loadLatestPersistedCrawlJobState() {
+  try {
+    await ensureCrawlJobStateDir();
+
+    const fileNames = (await fs.readdir(CRAWL_JOB_STATE_DIR)).filter((fileName) =>
+      fileName.endsWith(".json")
+    );
+
+    if (fileNames.length === 0) {
+      return null;
+    }
+
+    const ranked = await Promise.all(
+      fileNames.map(async (fileName) => {
+        const fullPath = path.join(CRAWL_JOB_STATE_DIR, fileName);
+        const stat = await fs.stat(fullPath);
+
+        return {
+          fileName,
+          updatedAt: stat.mtimeMs,
+        };
+      })
+    );
+
+    ranked.sort((a, b) => b.updatedAt - a.updatedAt);
+
+    for (const item of ranked) {
+      const jobId = item.fileName.replace(/\.json$/, "");
+      const job = await loadPersistedCrawlJobState(jobId);
+
+      if (!job) {
+        continue;
+      }
+
+      if (
+        job.completed &&
+        job.previewItems.length === 0 &&
+        job.nextIndex >= job.total
+      ) {
+        continue;
+      }
+
+      return job;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function getCrawlJobFromMemoryOrFile(jobId?: string | null) {
+  if (jobId) {
+    return await loadPersistedCrawlJobState(jobId);
+  }
+
+  return await loadLatestPersistedCrawlJobState();
+}
 
 function isCrawlPausedError(error: unknown) {
   return (
@@ -1330,7 +1565,7 @@ function buildPublicPreviewRows(
         company: item.company,
         website_url: item.website_url,
         source_row: item.source_row,
-        changes: item.changes,
+        changes: buildPreviewChangesFromItem(item, job.selectedFields),
       }));
 
     return {
@@ -1480,33 +1715,8 @@ async function fetchCrawlTargets(
     SELECT
       md.id::text AS row_id,
       md."企業名" AS company,
-      md."郵便番号" AS zipcode,
       md."住所" AS address,
-      md."大業種名" AS big_industry,
-      md."小業種名" AS small_industry,
-      md."企業名（かな）" AS company_kana,
-      md."企業概要" AS summary,
-      md."企業サイトURL" AS website_url,
-      md."問い合わせフォームURL" AS form_url,
-      md."電話番号" AS phone,
-      md."FAX番号" AS fax,
-      md."メールアドレス" AS email,
-      md."設立年月" AS established_date,
-      md."代表者名" AS representative_name,
-      md."代表者役職" AS representative_title,
-      md."資本金" AS capital,
-      md."従業員数" AS employee_count,
-      md."従業員数年度" AS employee_count_year,
-      md."前年売上高" AS previous_sales,
-      md."直近売上高" AS latest_sales,
-      md."決算月" AS closing_month,
-      md."事業所数" AS office_count,
-      md."新規登録タグ" AS tag,
-      md."業種" AS business_type,
-      md."事業内容" AS business_content,
-      md."業界" AS industry_category,
-      md."許可番号" AS permit_number,
-      md."メモ" AS memo
+      md."企業サイトURL" AS website_url
     FROM public.master_data AS md
     ${targetWhereSql}
     ${buildOrderBy(body.sortKey, body.sortDirection)}
@@ -1525,12 +1735,18 @@ async function runCrawlJob(jobId: string) {
   firstJob.pauseRequested = false;
   firstJob.error = null;
 
+  await persistCrawlJobState(firstJob);
+
   const shouldStop = () => {
     const currentJob = crawlJobs.get(jobId);
     return !currentJob || currentJob.pauseRequested;
   };
 
+  let client: DbClient | null = null;
+
   try {
+    client = await pool.connect();
+
     for (
       let index = firstJob.nextIndex;
       index < firstJob.targets.length;
@@ -1541,6 +1757,7 @@ async function runCrawlJob(jobId: string) {
 
       if (job.pauseRequested) {
         markCrawlJobPaused(job);
+        await persistCrawlJobState(job);
         return;
       }
 
@@ -1557,64 +1774,71 @@ async function runCrawlJob(jobId: string) {
         if (!websiteUrl) {
           job.skipped += 1;
         } else {
-          const extracted = await crawlCompanyWebsite(
-            websiteUrl,
-            Array.from(selectedFieldSet),
-            {
-              company: normalizeNullableText(row.company),
-              address: normalizeNullableText(row.address),
-            },
-            {
-              shouldStop,
-            }
+          const currentRowData = await fetchSourceRowForPreview(
+            client,
+            String(row.row_id ?? "")
           );
 
-          if (shouldStop()) {
-            pauseTriggered = true;
+          if (!currentRowData) {
+            job.failed += 1;
           } else {
-            const bundles = buildCrawlPayloadBundles(
-              extracted,
-              normalizeNullableText(row.company)
+            const extracted = await crawlCompanyWebsite(
+              websiteUrl,
+              Array.from(selectedFieldSet),
+              {
+                company: normalizeNullableText(row.company),
+                address: normalizeNullableText(row.address),
+              },
+              {
+                shouldStop,
+              }
             );
 
-            if (bundles.length === 0) {
-              job.skipped += 1;
+            if (shouldStop()) {
+              pauseTriggered = true;
             } else {
-              let previewAdded = 0;
+              const bundles = buildCrawlPayloadBundles(
+                extracted,
+                normalizeNullableText(row.company)
+              );
 
-              bundles.forEach((bundle, officeIndex) => {
-                const changes = buildPreviewChanges(
-                  row as Record<string, unknown>,
-                  bundle,
-                  selectedFieldSet
-                );
+              if (bundles.length === 0) {
+                job.skipped += 1;
+              } else {
+                let previewAdded = 0;
+                const previewSourceRow = buildPreviewSourceRow(currentRowData);
 
-                if (changes.length === 0) {
-                  return;
-                }
+                bundles.forEach((bundle, officeIndex) => {
+                  const changes = buildPreviewChanges(
+                    previewSourceRow as unknown as Record<string, unknown>,
+                    bundle,
+                    selectedFieldSet
+                  );
 
-                job.previewItems.push({
-                  row_id: String(row.row_id ?? ""),
-                  preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
-                  officeIndex,
-                  company:
-                    bundle.payload.company ??
-                    normalizeNullableText(row.company),
-                  website_url: normalizeNullableText(row.website_url),
-                  source_row: buildPreviewSourceRow(
-                    row as Record<string, unknown>
-                  ),
-                  bundle,
-                  changes,
+                  if (changes.length === 0) {
+                    return;
+                  }
+
+                  job.previewItems.push({
+                    row_id: String(row.row_id ?? ""),
+                    preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
+                    officeIndex,
+                    company:
+                      bundle.payload.company ??
+                      normalizeNullableText(row.company),
+                    website_url: normalizeNullableText(row.website_url),
+                    source_row: previewSourceRow,
+                    bundle,
+                  });
+
+                  previewAdded += 1;
                 });
 
-                previewAdded += 1;
-              });
-
-              if (previewAdded > 0) {
-                job.updated += previewAdded;
-              } else {
-                job.skipped += 1;
+                if (previewAdded > 0) {
+                  job.updated += previewAdded;
+                } else {
+                  job.skipped += 1;
+                }
               }
             }
           }
@@ -1629,13 +1853,17 @@ async function runCrawlJob(jobId: string) {
         if (!pauseTriggered) {
           job.processed += 1;
           job.nextIndex = index + 1;
+          job.targets[index] = compactProcessedTargetRow(row);
+          await persistCrawlJobState(job);
         }
       }
 
       if (pauseTriggered) {
         const currentJob = crawlJobs.get(jobId);
         if (!currentJob) return;
+
         markCrawlJobPaused(currentJob);
+        await persistCrawlJobState(currentJob);
         return;
       }
     }
@@ -1649,6 +1877,8 @@ async function runCrawlJob(jobId: string) {
     job.pauseRequested = false;
     job.currentCompany = null;
     job.currentWebsiteUrl = null;
+
+    await persistCrawlJobState(job);
   } catch (error) {
     const job = crawlJobs.get(jobId);
     if (!job) return;
@@ -1667,6 +1897,9 @@ async function runCrawlJob(jobId: string) {
       error instanceof Error
         ? error.message
         : "クローリング中にエラーが発生しました";
+    await persistCrawlJobState(job);
+  } finally {
+    client?.release();
   }
 }
 
@@ -1698,20 +1931,21 @@ const sourceRowCache = new Map<string, Record<string, unknown> | null>();
     }
 
     try {
-      if (!hasAnySelectedCandidate(item, selectedChanges)) {
+      if (!hasAnySelectedCandidate(item, selectedChanges, job.selectedFields)) {
         job.savedPreviewRowIds.add(item.preview_row_id);
         skipped += 1;
         continue;
       }
 
       const selectedKeys = new Set(
-        getSelectedChangeKeys(item, selectedChanges)
+        getSelectedChangeKeys(item, selectedChanges, job.selectedFields)
       );
 
       const payload = buildSelectedPayload(
         item.bundle,
         item,
-        selectedChanges
+        selectedChanges,
+        job.selectedFields
       );
 
       if (item.officeIndex === 0) {
@@ -1834,7 +2068,7 @@ export async function POST(req: NextRequest) {
     const action = body.action;
 
     if (action === "get_job_status") {
-      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
 
       if (!job) {
         return NextResponse.json(
@@ -1857,7 +2091,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "cancel_job") {
-      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
 
       if (!job) {
         return NextResponse.json(
@@ -1877,6 +2111,7 @@ export async function POST(req: NextRequest) {
       job.savedPreviewRowIds = new Set<string>();
 
       crawlJobs.delete(job.jobId);
+      await deletePersistedCrawlJobState(job.jobId);
 
       return NextResponse.json({
         ok: true,
@@ -1885,7 +2120,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "pause_job") {
-      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
 
       if (!job) {
         return NextResponse.json(
@@ -1896,6 +2131,8 @@ export async function POST(req: NextRequest) {
 
       job.pauseRequested = true;
 
+      await persistCrawlJobState(job);
+
       return NextResponse.json({
         ...buildJobResponse(job),
         message: "中断指示を受け付けました",
@@ -1903,7 +2140,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "resume_job") {
-      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
 
       if (!job) {
         return NextResponse.json(
@@ -1923,6 +2160,8 @@ export async function POST(req: NextRequest) {
       job.paused = false;
       job.error = null;
 
+      await persistCrawlJobState(job);
+
       void runCrawlJob(job.jobId);
 
       return NextResponse.json({
@@ -1933,7 +2172,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "save_partial") {
-      const job = body.jobId ? crawlJobs.get(body.jobId) : null;
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
 
       if (!job) {
         return NextResponse.json(
@@ -1964,6 +2203,9 @@ export async function POST(req: NextRequest) {
 
       if (remainingCount === 0 && job.previewItems.length === 0) {
         crawlJobs.delete(job.jobId);
+        await deletePersistedCrawlJobState(job.jobId);
+      } else {
+        await persistCrawlJobState(job);
       }
 
       return NextResponse.json({
@@ -2027,6 +2269,8 @@ export async function POST(req: NextRequest) {
       };
 
       crawlJobs.set(jobId, job);
+      
+      await persistCrawlJobState(job);
 
       void runCrawlJob(jobId);
 
