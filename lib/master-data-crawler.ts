@@ -99,6 +99,8 @@ type CrawlRuntimeOptions = {
 
 const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
 
+const COMPANY_CRAWL_TIME_LIMIT_MS = 90_000;
+
 const FETCH_RETRY_DELAYS_MS = [0, 2000, 5000] as const;
 
 const FETCH_RETRYABLE_STATUS_SET = new Set([
@@ -3998,11 +4000,46 @@ export async function crawlCompanyWebsite(
     getRepresentativeEnoughScore(selectedFieldSet);
   const pageFetchTimeoutMs = 10000;
 
+  const crawlStartedAt = Date.now();
+  const crawlDeadlineAt = crawlStartedAt + COMPANY_CRAWL_TIME_LIMIT_MS;
+
+  const hasCompanyCrawlTimedOut = () => Date.now() >= crawlDeadlineAt;
+
+  const getRemainingCompanyCrawlMs = () => crawlDeadlineAt - Date.now();
+
+  const getPageFetchTimeoutMs = () =>
+    Math.max(1000, Math.min(pageFetchTimeoutMs, getRemainingCompanyCrawlMs()));
+
   throwIfCrawlShouldStop(runtimeOptions);
+
+  if (hasCompanyCrawlTimedOut()) {
+    return {
+      company: null,
+      website_url: hasSelectedCrawlField(selectedFieldSet, "website_url")
+        ? normalizeSeedUrl(websiteUrl)
+        : null,
+      form_url: null,
+      phone: null,
+      fax: null,
+      email: null,
+      zipcode: null,
+      address: null,
+      established_date: null,
+      representative_name: null,
+      representative_name_raw: null,
+      representative_name_reason: null,
+      representative_title: null,
+      capital: null,
+      employee_count: null,
+      business_content: null,
+      permit_number: null,
+      offices: [],
+    };
+  }
 
   const topPage = await fetchTopPage(
     websiteUrl,
-    pageFetchTimeoutMs,
+    getPageFetchTimeoutMs(),
     runtimeOptions
   );
 
@@ -4051,14 +4088,25 @@ export async function crawlCompanyWebsite(
     for (const candidateUrl of urls) {
       throwIfCrawlShouldStop(runtimeOptions);
 
-      if ((!ignoreInitialStop || fetchedOnePage) &&
-          canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+      if (hasCompanyCrawlTimedOut()) {
+        break;
+      }
+
+      if (
+        (!ignoreInitialStop || fetchedOnePage) &&
+        canStopFetchingAdditionalPages(best, selectedFieldSet, focus)
+      ) {
+        break;
+      }
+
+      const remainingMs = getRemainingCompanyCrawlMs();
+      if (remainingMs <= 0) {
         break;
       }
 
       const page = await fetchPage(
         candidateUrl,
-        pageFetchTimeoutMs,
+        getPageFetchTimeoutMs(),
         runtimeOptions
       );
 
@@ -4076,6 +4124,10 @@ export async function crawlCompanyWebsite(
 
       throwIfCrawlShouldStop(runtimeOptions);
 
+      if (hasCompanyCrawlTimedOut()) {
+        break;
+      }
+
       if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
         const nestedUrls = pickNestedCandidatePageUrls(
           page,
@@ -4092,6 +4144,10 @@ export async function crawlCompanyWebsite(
   };
 
   for (const focus of focusList) {
+    if (hasCompanyCrawlTimedOut()) {
+      break;
+    }
+
     const fetchedUrlSet = new Set<string>([topPage.finalUrl]);
     const nestedCandidateUrls: string[] = [];
     const rawCandidateUrls = pickCandidatePageUrls(
@@ -4111,13 +4167,22 @@ export async function crawlCompanyWebsite(
       for (const candidateUrl of overviewCandidateUrls) {
         throwIfCrawlShouldStop(runtimeOptions);
 
+        if (hasCompanyCrawlTimedOut()) {
+          break;
+        }
+
         if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+          break;
+        }
+
+        const remainingMs = getRemainingCompanyCrawlMs();
+        if (remainingMs <= 0) {
           break;
         }
 
         const page = await fetchPage(
           candidateUrl,
-          pageFetchTimeoutMs,
+          getPageFetchTimeoutMs(),
           runtimeOptions
         );
 
@@ -4131,6 +4196,10 @@ export async function crawlCompanyWebsite(
         processPage(page, best, selectedFieldSet, sourceContext, focus);
 
         throwIfCrawlShouldStop(runtimeOptions);
+
+        if (hasCompanyCrawlTimedOut()) {
+          break;
+        }
 
         if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
           const nestedUrls = pickNestedCandidatePageUrls(
@@ -4150,17 +4219,29 @@ export async function crawlCompanyWebsite(
         !best.representative_name?.value ||
         (best.representative_name?.score ?? 0) < representativeEnoughScore;
 
-      if (shouldFetchFallbackRepresentativePages) {
+      if (
+        shouldFetchFallbackRepresentativePages &&
+        !hasCompanyCrawlTimedOut()
+      ) {
         for (const candidateUrl of fallbackCandidateUrls) {
           throwIfCrawlShouldStop(runtimeOptions);
+
+          if (hasCompanyCrawlTimedOut()) {
+            break;
+          }
 
           if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
             break;
           }
 
+          const remainingMs = getRemainingCompanyCrawlMs();
+          if (remainingMs <= 0) {
+            break;
+          }
+
           const page = await fetchPage(
             candidateUrl,
-            pageFetchTimeoutMs,
+            getPageFetchTimeoutMs(),
             runtimeOptions
           );
 
@@ -4174,6 +4255,10 @@ export async function crawlCompanyWebsite(
           processPage(page, best, selectedFieldSet, sourceContext, focus);
 
           throwIfCrawlShouldStop(runtimeOptions);
+
+          if (hasCompanyCrawlTimedOut()) {
+            break;
+          }
 
           if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
             const nestedUrls = pickNestedCandidatePageUrls(
@@ -4198,20 +4283,32 @@ export async function crawlCompanyWebsite(
       );
     }
 
-    if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+    if (
+      !hasCompanyCrawlTimedOut() &&
+      !canStopFetchingAdditionalPages(best, selectedFieldSet, focus)
+    ) {
       for (const nestedUrl of nestedCandidateUrls.slice(
         0,
         getFocusNestedCandidateLimit(focus)
       )) {
         throwIfCrawlShouldStop(runtimeOptions);
 
+        if (hasCompanyCrawlTimedOut()) {
+          break;
+        }
+
         if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+          break;
+        }
+
+        const remainingMs = getRemainingCompanyCrawlMs();
+        if (remainingMs <= 0) {
           break;
         }
 
         const nestedPage = await fetchPage(
           nestedUrl,
-          pageFetchTimeoutMs,
+          getPageFetchTimeoutMs(),
           runtimeOptions
         );
 
