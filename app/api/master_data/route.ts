@@ -565,24 +565,20 @@ function toNumberOrNull(value: unknown) {
 }
 
 function buildInClause(
-  params: (string | number)[],
+  params: unknown[],
   expression: string,
   values: string[]
 ) {
   const normalized = toStringArray(values);
   if (normalized.length === 0) return "";
 
-  const placeholders = normalized.map((value) => {
-    params.push(value);
-    return `$${params.length}`;
-  });
-
-  return `${expression} IN (${placeholders.join(", ")})`;
+  params.push(normalized);
+  return `${expression} = ANY($${params.length}::text[])`;
 }
 
 function addNumericRangeClause(
   where: string[],
-  params: (string | number)[],
+  params: unknown[],
   expression: string,
   range?: AdvancedRangeFilters
 ) {
@@ -610,7 +606,7 @@ function getPrefecturesFromRegions(regions: string[]) {
 
 function addAdvancedFilterClauses(
   where: string[],
-  params: (string | number)[],
+  params: unknown[],
   filters: AdvancedFilters
 ) {
   const companyKeyword = String(filters.companyName?.keyword ?? "").trim();
@@ -703,20 +699,14 @@ function addAdvancedFilterClauses(
     const tagConditions: string[] = [];
 
     if (selectedTags.length > 0) {
-      const placeholders = selectedTags.map((value) => {
-        params.push(value);
-        return `$${params.length}`;
-      });
-      tagConditions.push(`BTRIM(tag_value) IN (${placeholders.join(", ")})`);
+      params.push(selectedTags);
+      tagConditions.push(`BTRIM(tag_value) = ANY($${params.length}::text[])`);
     }
 
     if (selectedTagParents.length > 0) {
-      const placeholders = selectedTagParents.map((value) => {
-        params.push(value);
-        return `$${params.length}`;
-      });
+      params.push(selectedTagParents);
       tagConditions.push(
-        `${TAG_PARENT_CASE_FROM_SPLIT} IN (${placeholders.join(", ")})`
+        `${TAG_PARENT_CASE_FROM_SPLIT} = ANY($${params.length}::text[])`
       );
     }
 
@@ -739,7 +729,7 @@ function buildNotBlankCheckClause(column: string) {
 
 function addConditionClause(
   where: string[],
-  params: (string | number)[],
+  params: unknown[],
   column: string,
   model?: FilterModel
 ) {
@@ -845,7 +835,7 @@ function buildWhereClause(
   const filterModels = parseFilterModels(searchParams);
   const advancedFilters = parseAdvancedFilters(searchParams);
   const where: string[] = [];
-  const params: (string | number)[] = [];
+  const params: unknown[] = [];
 
   (Object.entries(FILTER_COLUMN_MAP) as [FilterKey, string][]).forEach(
     ([key, column]) => {

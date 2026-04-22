@@ -425,7 +425,7 @@ function loadActiveCrawlJobId() {
 
 const GRID_TEMPLATE = `
   minmax(220px,2fr)
-  minmax(110px,0.8fr)
+  minmax(140px,0.8fr)
   minmax(320px,2.4fr)
   minmax(150px,1.1fr)
   minmax(150px,1.1fr)
@@ -441,11 +441,11 @@ const GRID_TEMPLATE = `
   minmax(160px,1.1fr)
   minmax(140px,1fr)
   minmax(140px,1fr)
-  minmax(140px,1fr)
+  minmax(170px,1fr)
   minmax(160px,1.1fr)
   minmax(160px,1.1fr)
   minmax(120px,0.9fr)
-  minmax(120px,0.9fr)
+  minmax(140px,0.9fr)
   minmax(140px,1fr)
   minmax(140px,1fr)
   minmax(320px,2.2fr)
@@ -1311,7 +1311,7 @@ function HeaderCell({
           active ? "bg-sky-500/10 text-sky-100" : "text-slate-100"
         }`}
       >
-        <span className="block min-w-0 truncate text-center">
+        <span className="block w-full whitespace-nowrap text-center">
           {label}
         </span>
 
@@ -4264,23 +4264,16 @@ const handleExport = async (shouldDeduplicate: boolean) => {
       ],
     });
 
-    const params = new URLSearchParams();
-    params.set("exportScope", exportMode);
-    params.set("dedupeByCompany", shouldDeduplicate ? "1" : "0");
+    const body: Record<string, unknown> = {
+      exportScope: exportMode,
+      dedupeByCompany: shouldDeduplicate ? "1" : "0",
+    };
 
     if (exportMode === "filtered") {
-      params.set(
-        "filterModels",
-        JSON.stringify(buildRequestFilterModels(appliedColumnStates))
-      );
-      params.set(
-        "advancedFilters",
-        JSON.stringify(
-          buildRequestAdvancedFilters(
-            appliedAdvancedFilters,
-            advancedValueOptions
-          )
-        )
+      body.filterModels = buildRequestFilterModels(appliedColumnStates);
+      body.advancedFilters = buildRequestAdvancedFilters(
+        appliedAdvancedFilters,
+        advancedValueOptions
       );
 
       const sortColumn = COLUMN_DEFS.find(
@@ -4288,15 +4281,18 @@ const handleExport = async (shouldDeduplicate: boolean) => {
       );
 
       if (sortColumn) {
-        params.set("sortKey", sortColumn.key);
-        params.set(
-          "sortDirection",
-          appliedColumnStates[sortColumn.key].sortDirection
-        );
+        body.sortKey = sortColumn.key;
+        body.sortDirection =
+          appliedColumnStates[sortColumn.key].sortDirection;
       }
     }
 
-    const res = await fetch(`/api/master_data/export?${params.toString()}`, {
+    const res = await fetch("/api/master_data/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
       cache: "no-store",
     });
 
@@ -6450,20 +6446,25 @@ const handlePreviewCsvExport = async () => {
       className="h-[100dvh] overflow-hidden bg-transparent text-slate-100"
     >
       <div
-        className={`mx-auto flex h-full max-w-[1880px] flex-col pr-6 py-6 transition-all duration-300 ${
-          sidebarOpen ? "pl-[276px]" : "pl-[148px]"
+        className={`mx-auto flex h-full max-w-[1880px] flex-col pr-2 py-3 transition-all duration-300 ${
+          sidebarOpen ? "pl-[248px]" : "pl-[120px]"
         }`}
       >
 
         <aside
-          className={`fixed left-6 top-6 z-40 transition-all duration-300 ${
+          className={`fixed left-6 top-0 z-40 transition-all duration-300 ${
             sidebarOpen ? "w-[220px]" : "w-[92px]"
           }`}
         >
+          <div className="mb-0 flex justify-center">
+            <MasterDataBrandLogo className="h-auto w-[280px] shrink-0 md:w-[340px]" />
+          </div>
+
           <div className="rounded-[28px] border border-white/10 bg-[#08101d]/90 p-2 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
             <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/85 p-3">
+
               <div
-                className={`mb-3 flex items-center ${
+                className={`mb-2 flex items-center ${
                   sidebarOpen ? "justify-between" : "justify-center"
                 }`}
               >
@@ -6538,41 +6539,39 @@ const handlePreviewCsvExport = async () => {
 
         <div
           ref={topPanelRef}
-          className="sticky top-0 z-30 mb-6 rounded-[28px] border border-white/10 bg-[#08101d]/80 p-2 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
+          className="sticky top-0 z-30 mb-4 rounded-[28px] border border-white/10 bg-[#08101d]/80 p-1.5 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
         >
-          <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/85 p-6">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex items-center gap-6">
-                <MasterDataBrandLogo className="h-auto w-[280px] shrink-0 md:w-[340px]" />
-
-                <h1 className="master-data-brand-title text-[40px] leading-none md:text-[54px]">
+          <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/85 p-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex justify-start pl-20 xl:flex-1 xl:pl-24">
+                <h1 className="master-data-brand-title text-left text-[30px] leading-none md:text-[42px]">
                   マスタデータ
                 </h1>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-                <div className="flex min-h-[96px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-center">
+              <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
                   <div className="text-xs text-slate-400">総件数</div>
-                  <div className="mt-2 text-xl font-semibold text-white">
+                  <div className="mt-1 text-lg font-semibold text-white md:text-xl">
                     {total.toLocaleString()}件
                   </div>
                 </div>
 
-                <div className="flex min-h-[96px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-center">
+                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
                   <div className="text-xs text-slate-400">現在ページ</div>
-                  <div className="mt-2 text-xl font-semibold text-white">
+                  <div className="mt-1 text-lg font-semibold text-white md:text-xl">
                     {page}
                   </div>
                 </div>
 
-                <div className="flex min-h-[96px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-center">
+                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
                   <div className="text-xs text-slate-400">総ページ数</div>
-                  <div className="mt-2 text-xl font-semibold text-white">
+                  <div className="mt-1 text-lg font-semibold text-white md:text-xl">
                     {totalPages}
                   </div>
                 </div>
 
-                <div className="flex min-h-[96px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-center">
+                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
                   <div className="text-xs text-slate-400">表示件数</div>
                   <div className="mt-2">
                     <select
@@ -6581,7 +6580,7 @@ const handlePreviewCsvExport = async () => {
                         setLimit(e.target.value);
                         setPage(1);
                       }}
-                      className="h-10 w-full rounded-xl border border-white/10 bg-[#0f172a] px-3 text-center text-sm outline-none focus:border-sky-500"
+                      className="h-9 w-full rounded-xl border border-white/10 bg-[#0f172a] px-3 text-center text-sm outline-none focus:border-sky-500"
                     >
                       {pageSizeOptions.map((opt) => (
                         <option key={opt.value} value={opt.value}>

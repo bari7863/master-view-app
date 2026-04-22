@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const runtime = "nodejs";
 import { dbReady, pool } from "@/lib/db";
 
 const FILTER_COLUMN_MAP = {
@@ -94,6 +97,31 @@ type AdvancedFilters = {
   employeeCount?: AdvancedRangeFilters;
   tags?: AdvancedTagFilters;
 };
+
+async function ensureMasterDataIdColumn(
+  client: { query: (sql: string) => Promise<unknown> }
+) {
+  await client.query(`
+    ALTER TABLE public.master_data
+    ADD COLUMN IF NOT EXISTS id BIGSERIAL
+  `);
+
+  await client.query(`
+    ALTER TABLE public.master_data
+    ADD COLUMN IF NOT EXISTS "許可番号" text
+  `);
+
+  await client.query(`
+    UPDATE public.master_data
+    SET id = DEFAULT
+    WHERE id IS NULL
+  `);
+
+  await client.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS master_data_id_idx
+    ON public.master_data (id)
+  `);
+}
 
 const CSV_COLUMNS = [
   "企業名",
@@ -248,13 +276,31 @@ function createCapitalNumericExpression(textColumn: string) {
 
 function createEmployeeNumericExpression(textColumn: string) {
   const noComma = `regexp_replace(${textColumn}, '[,，]', '', 'g')`;
-  const firstNumber = `NULLIF(substring(${noComma} from '([0-9]+)'), '')`;
+
+  const consolidatedBefore = `NULLIF((regexp_match(${noComma}, '(?:連結|consolidated|CONSOLIDATED)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)'))[1], '')`;
+  const consolidatedAfter = `NULLIF((regexp_match(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)[^0-9]{0,12}(?:連結|consolidated|CONSOLIDATED)'))[1], '')`;
+
+  const standaloneBefore = `NULLIF((regexp_match(${noComma}, '(?:単体|単独|個別|individual|INDIVIDUAL|non-consolidated|NON-CONSOLIDATED|nonconsolidated|NONCONSOLIDATED)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)'))[1], '')`;
+  const standaloneAfter = `NULLIF((regexp_match(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)[^0-9]{0,12}(?:単体|単独|個別|individual|INDIVIDUAL|non-consolidated|NON-CONSOLIDATED|nonconsolidated|NONCONSOLIDATED)'))[1], '')`;
+
+  const employmentRegex = `(?:正社員|正職員|社員|職員|パート|アルバイト|契約社員|契約職員|派遣社員|派遣スタッフ|嘱託|嘱託社員|臨時社員|臨時職員|常勤|非常勤|フルタイム|短時間|再雇用|有期雇用|無期雇用|役員)[^0-9]{0,12}([0-9]+)[[:space:]]*(?:名|人)`;
+
+  const employmentCount = `(SELECT COUNT(*) FROM regexp_matches(${noComma}, '${employmentRegex}', 'g') AS m)`;
+  const employmentSum = `(SELECT SUM((m)[1]::numeric) FROM regexp_matches(${noComma}, '${employmentRegex}', 'g') AS m)`;
+
+  const personMax = `(SELECT MAX((m)[1]::numeric) FROM regexp_matches(${noComma}, '([0-9]+)[[:space:]]*(?:名|人)', 'g') AS m)`;
+
+  const pureDigits = `CASE WHEN ${noComma} ~ '^[0-9]+$' THEN ${noComma}::numeric ELSE NULL END`;
 
   return `CASE
     WHEN NULLIF(BTRIM(${textColumn}), '') IS NULL THEN NULL
-    WHEN ${firstNumber} IS NOT NULL
-      THEN ${firstNumber}::numeric
-    ELSE NULL
+    WHEN ${consolidatedBefore} IS NOT NULL THEN ${consolidatedBefore}::numeric
+    WHEN ${consolidatedAfter} IS NOT NULL THEN ${consolidatedAfter}::numeric
+    WHEN ${employmentCount} >= 2 THEN ${employmentSum}
+    WHEN ${standaloneBefore} IS NOT NULL THEN ${standaloneBefore}::numeric
+    WHEN ${standaloneAfter} IS NOT NULL THEN ${standaloneAfter}::numeric
+    WHEN ${personMax} IS NOT NULL THEN ${personMax}
+    ELSE ${pureDigits}
   END`;
 }
 
@@ -315,24 +361,20 @@ function toNumberOrNull(value: unknown) {
 }
 
 function buildInClause(
-  params: (string | number)[],
+  params: unknown[],
   expression: string,
   values: string[]
 ) {
   const normalized = toStringArray(values);
   if (normalized.length === 0) return "";
 
-  const placeholders = normalized.map((value) => {
-    params.push(value);
-    return `$${params.length}`;
-  });
-
-  return `${expression} IN (${placeholders.join(", ")})`;
+  params.push(normalized);
+  return `${expression} = ANY($${params.length}::text[])`;
 }
 
 function addNumericRangeClause(
   where: string[],
-  params: (string | number)[],
+  params: unknown[],
   expression: string,
   range?: AdvancedRangeFilters
 ) {
@@ -360,15 +402,15 @@ function getPrefecturesFromRegions(regions: string[]) {
 
 function addAdvancedFilterClauses(
   where: string[],
-  params: (string | number)[],
+  params: unknown[],
   filters: AdvancedFilters
 ) {
   const companyKeyword = String(filters.companyName?.keyword ?? "").trim();
-  if(companyKeyword !== "") {
+  if (companyKeyword !== "") {
     params.push(`%${companyKeyword}%`);
     where.push(`COALESCE("企業名"::text, '') ILIKE $${params.length}`);
   }
-  
+
   const locationPieces = [
     buildInClause(
       params,
@@ -453,20 +495,14 @@ function addAdvancedFilterClauses(
     const tagConditions: string[] = [];
 
     if (selectedTags.length > 0) {
-      const placeholders = selectedTags.map((value) => {
-        params.push(value);
-        return `$${params.length}`;
-      });
-      tagConditions.push(`BTRIM(tag_value) IN (${placeholders.join(", ")})`);
+      params.push(selectedTags);
+      tagConditions.push(`BTRIM(tag_value) = ANY($${params.length}::text[])`);
     }
 
     if (selectedTagParents.length > 0) {
-      const placeholders = selectedTagParents.map((value) => {
-        params.push(value);
-        return `$${params.length}`;
-      });
+      params.push(selectedTagParents);
       tagConditions.push(
-        `${TAG_PARENT_CASE_FROM_SPLIT} IN (${placeholders.join(", ")})`
+        `${TAG_PARENT_CASE_FROM_SPLIT} = ANY($${params.length}::text[])`
       );
     }
 
@@ -479,9 +515,17 @@ function addAdvancedFilterClauses(
   }
 }
 
+function buildBlankCheckClause(column: string) {
+  return `NULLIF(regexp_replace(COALESCE(${column}::text, ''), '[\\s　]+', '', 'g'), '') IS NULL`;
+}
+
+function buildNotBlankCheckClause(column: string) {
+  return `NULLIF(regexp_replace(COALESCE(${column}::text, ''), '[\\s　]+', '', 'g'), '') IS NOT NULL`;
+}
+
 function addConditionClause(
   where: string[],
-  params: (string | number)[],
+  params: unknown[],
   column: string,
   model?: FilterModel
 ) {
@@ -489,16 +533,17 @@ function addConditionClause(
 
   const type = model.conditionType || "";
   const value = (model.conditionValue || "").trim();
+  const textColumn = `COALESCE(${column}::text, '')`;
 
   if (type === "") return;
 
   if (type === "is_empty") {
-    where.push(`NULLIF(BTRIM(COALESCE(${column}, '')), '') IS NULL`);
+    where.push(buildBlankCheckClause(column));
     return;
   }
 
   if (type === "is_not_empty") {
-    where.push(`NULLIF(BTRIM(COALESCE(${column}, '')), '') IS NOT NULL`);
+    where.push(buildNotBlankCheckClause(column));
     return;
   }
 
@@ -506,50 +551,50 @@ function addConditionClause(
 
   if (type === "contains") {
     params.push(`%${value}%`);
-    where.push(`${column} ILIKE $${params.length}`);
+    where.push(`${textColumn} ILIKE $${params.length}`);
     return;
   }
 
   if (type === "not_contains") {
     params.push(`%${value}%`);
-    where.push(`(${column} IS NULL OR ${column} NOT ILIKE $${params.length})`);
+    where.push(`${textColumn} NOT ILIKE $${params.length}`);
     return;
   }
 
   if (type === "equals") {
     params.push(value);
-    where.push(`COALESCE(${column}, '') = $${params.length}`);
+    where.push(`${textColumn} = $${params.length}`);
     return;
   }
 
   if (type === "not_equals") {
     params.push(value);
-    where.push(`COALESCE(${column}, '') <> $${params.length}`);
+    where.push(`${textColumn} <> $${params.length}`);
     return;
   }
 
   if (type === "starts_with") {
     params.push(`${value}%`);
-    where.push(`${column} ILIKE $${params.length}`);
+    where.push(`${textColumn} ILIKE $${params.length}`);
     return;
   }
 
   if (type === "ends_with") {
     params.push(`%${value}`);
-    where.push(`${column} ILIKE $${params.length}`);
+    where.push(`${textColumn} ILIKE $${params.length}`);
   }
 }
 
 function addValueFilterClause(
   where: string[],
-  params: (string | number)[],
+  params: unknown[],
   column: string,
   model?: FilterModel
 ) {
   if (!model?.valueFilterEnabled) return;
 
   const selectedValues = Array.isArray(model.selectedValues)
-    ? model.selectedValues
+    ? model.selectedValues.map((value) => String(value ?? ""))
     : [];
 
   if (selectedValues.length === 0) {
@@ -557,21 +602,21 @@ function addValueFilterClause(
     return;
   }
 
-  const normalValues = selectedValues.filter((value) => value !== "");
+  const textColumn = `COALESCE(${column}::text, '')`;
+  const normalValues = Array.from(
+    new Set(selectedValues.filter((value) => value !== ""))
+  );
   const includeEmpty = selectedValues.includes("");
 
   const pieces: string[] = [];
 
   if (normalValues.length > 0) {
-    const placeholders = normalValues.map((value) => {
-      params.push(value);
-      return `$${params.length}`;
-    });
-    pieces.push(`COALESCE(${column}, '') IN (${placeholders.join(", ")})`);
+    params.push(normalValues);
+    pieces.push(`${textColumn} = ANY($${params.length}::text[])`);
   }
 
   if (includeEmpty) {
-    pieces.push(`NULLIF(BTRIM(COALESCE(${column}, '')), '') IS NULL`);
+    pieces.push(buildBlankCheckClause(column));
   }
 
   if (pieces.length > 0) {
@@ -583,7 +628,7 @@ function buildWhereClause(searchParams: URLSearchParams) {
   const filterModels = parseFilterModels(searchParams);
   const advancedFilters = parseAdvancedFilters(searchParams);
   const where: string[] = [];
-  const params: (string | number)[] = [];
+  const params: unknown[] = [];
 
   (Object.entries(FILTER_COLUMN_MAP) as [FilterKey, string][]).forEach(
     ([key, column]) => {
@@ -611,27 +656,193 @@ function buildOrderBy(searchParams: URLSearchParams) {
     FILTER_COLUMN_MAP[sortKey] &&
     (sortDirection === "asc" || sortDirection === "desc")
   ) {
-    return `ORDER BY COALESCE(${FILTER_COLUMN_MAP[sortKey]}, '') ${sortDirection.toUpperCase()}, COALESCE("企業名", ''), COALESCE("住所", '')`;
+    const sortColumnText = `COALESCE(${FILTER_COLUMN_MAP[sortKey]}::text, '')`;
+    return `ORDER BY ${sortColumnText} ${sortDirection.toUpperCase()}, COALESCE("企業名"::text, ''), COALESCE("住所"::text, '')`;
   }
 
-  return `ORDER BY COALESCE("企業名", ''), COALESCE("住所", '')`;
+  return `ORDER BY COALESCE("企業名"::text, ''), COALESCE("住所"::text, '')`;
 }
+
+const EXPORT_BATCH_SIZE = 1000;
 
 function escapeCsvValue(value: unknown) {
   const text = value == null ? "" : String(value);
   return `"${text.replace(/"/g, `""`)}"`;
 }
 
-function createCsvDownloadBody(lines: string[]) {
-  const csvText = lines.join("\r\n");
-  const csvBytes = new TextEncoder().encode(csvText);
-  const bomBytes = new Uint8Array([0xef, 0xbb, 0xbf]);
+function createCsvDownloadStream(options: {
+  baseSql: string;
+  baseParams: unknown[];
+  dedupeByCompany: boolean;
+}) {
+  const { baseSql, baseParams, dedupeByCompany } = options;
+  const encoder = new TextEncoder();
 
-  const body = new Uint8Array(bomBytes.length + csvBytes.length);
-  body.set(bomBytes, 0);
-  body.set(csvBytes, bomBytes.length);
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const client = await pool.connect();
+      const seenCompanies = new Set<string>();
+      let offset = 0;
 
-  return body;
+      try {
+        controller.enqueue(new Uint8Array([0xef, 0xbb, 0xbf]));
+        controller.enqueue(
+          encoder.encode(
+            `${CSV_COLUMNS.map((col) => escapeCsvValue(col)).join(",")}\r\n`
+          )
+        );
+
+        while (true) {
+          const queryParams = [...baseParams, EXPORT_BATCH_SIZE, offset];
+          const chunkSql = `
+            ${baseSql}
+            LIMIT $${queryParams.length - 1}
+            OFFSET $${queryParams.length}
+          `;
+
+          const result = await client.query(chunkSql, queryParams);
+          const rows = result.rows as Array<Record<string, unknown>>;
+
+          if (rows.length === 0) {
+            break;
+          }
+
+          for (const row of rows) {
+            if (dedupeByCompany) {
+              const company = String(row["企業名"] ?? "").trim();
+
+              if (company !== "") {
+                if (seenCompanies.has(company)) {
+                  continue;
+                }
+                seenCompanies.add(company);
+              }
+            }
+
+            const line = CSV_COLUMNS.map((col) =>
+              escapeCsvValue(row[col])
+            ).join(",");
+            controller.enqueue(encoder.encode(`${line}\r\n`));
+          }
+
+          offset += rows.length;
+
+          if (rows.length < EXPORT_BATCH_SIZE) {
+            break;
+          }
+        }
+
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      } finally {
+        client.release();
+      }
+    },
+  });
+}
+
+function buildSearchParamsFromExportPayload(payload: Record<string, unknown>) {
+  const searchParams = new URLSearchParams();
+
+  const simpleKeys = [
+    "sortKey",
+    "sortDirection",
+    "exportScope",
+  ] as const;
+
+  simpleKeys.forEach((key) => {
+    const value = payload[key];
+    if (value !== undefined && value !== null && value !== "") {
+      searchParams.set(key, String(value));
+    }
+  });
+
+  if (payload.dedupeByCompany === true || payload.dedupeByCompany === "1") {
+    searchParams.set("dedupeByCompany", "1");
+  }
+
+  if ("filterModels" in payload) {
+    searchParams.set(
+      "filterModels",
+      JSON.stringify(payload.filterModels ?? {})
+    );
+  }
+
+  if ("advancedFilters" in payload) {
+    searchParams.set(
+      "advancedFilters",
+      JSON.stringify(payload.advancedFilters ?? {})
+    );
+  }
+
+  return searchParams;
+}
+
+async function handleExportRequest(searchParams: URLSearchParams) {
+  await dbReady;
+  await ensureMasterDataIdColumn(pool);
+
+  const exportScope = searchParams.get("exportScope") || "filtered";
+  const dedupeByCompany = searchParams.get("dedupeByCompany") === "1";
+
+  const { whereSql, params } =
+    exportScope === "all"
+      ? { whereSql: "", params: [] as unknown[] }
+      : buildWhereClause(searchParams);
+
+  const baseSql = `
+    SELECT
+      "企業名" AS "企業名",
+      "郵便番号" AS "郵便番号",
+      "住所" AS "住所",
+      "大業種名" AS "大業種",
+      "小業種名" AS "小業種",
+      "企業名（かな）" AS "企業名（かな）",
+      "企業概要" AS "企業概要",
+      "企業サイトURL" AS "企業URL",
+      "問い合わせフォームURL" AS "お問い合わせフォームURL",
+      "電話番号" AS "電話番号",
+      "FAX番号" AS "FAX番号",
+      "メールアドレス" AS "メールアドレス",
+      "設立年月" AS "設立年月",
+      "代表者名" AS "代表者名",
+      "代表者役職" AS "代表者役職",
+      "資本金" AS "資本金",
+      "従業員数" AS "従業員数",
+      "従業員数年度" AS "従業員数年度",
+      "前年売上高" AS "前年売上高",
+      "直近売上高" AS "直近売上高",
+      "決算月" AS "決算月",
+      "事業所数" AS "事業所数",
+      "新規登録タグ" AS "タグ",
+      "業種" AS "業種",
+      "事業内容" AS "事業内容",
+      "業界" AS "業界",
+      "許可番号" AS "許可番号",
+      "メモ" AS "メモ"
+    FROM public.master_data
+    ${whereSql}
+    ${buildOrderBy(searchParams)}
+  `;
+
+  const csvStream = createCsvDownloadStream({
+    baseSql,
+    baseParams: params,
+    dedupeByCompany,
+  });
+
+  const fileName = createFileName();
+
+  return new NextResponse(csvStream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 }
 
 function createFileName() {
@@ -647,94 +858,24 @@ function createFileName() {
 
 export async function GET(req: NextRequest) {
   try {
-    await dbReady;
     const { searchParams } = new URL(req.url);
-    const exportScope = searchParams.get("exportScope") || "filtered";
-    const dedupeByCompany = searchParams.get("dedupeByCompany") === "1";
-
-    const { whereSql, params } =
-      exportScope === "all"
-        ? { whereSql: "", params: [] as (string | number)[] }
-        : buildWhereClause(searchParams);
-
-    const sql = `
-      SELECT
-        "企業名" AS "企業名",
-        "郵便番号" AS "郵便番号",
-        "住所" AS "住所",
-        "大業種名" AS "大業種",
-        "小業種名" AS "小業種",
-        "企業名（かな）" AS "企業名（かな）",
-        "企業概要" AS "企業概要",
-        "企業サイトURL" AS "企業URL",
-        "問い合わせフォームURL" AS "お問い合わせフォームURL",
-        "電話番号" AS "電話番号",
-        "FAX番号" AS "FAX番号",
-        "メールアドレス" AS "メールアドレス",
-        "設立年月" AS "設立年月",
-        "代表者名" AS "代表者名",
-        "代表者役職" AS "代表者役職",
-        "資本金" AS "資本金",
-        "従業員数" AS "従業員数",
-        "従業員数年度" AS "従業員数年度",
-        "前年売上高" AS "前年売上高",
-        "直近売上高" AS "直近売上高",
-        "決算月" AS "決算月",
-        "事業所数" AS "事業所数",
-        "新規登録タグ" AS "タグ",
-        "業種" AS "業種",
-        "事業内容" AS "事業内容",
-        "業界" AS "業界",
-        "許可番号" AS "許可番号",
-        "メモ" AS "メモ"
-      FROM public.master_data
-      ${whereSql}
-      ${buildOrderBy(searchParams)}
-    `;
-
-    const result = await pool.query(sql, params);
-
-    const exportRows = dedupeByCompany
-      ? (() => {
-          const seenCompanies = new Set<string>();
-
-          return result.rows.filter((row) => {
-            const company = String(row["企業名"] ?? "").trim();
-
-            if (company === "") {
-              return true;
-            }
-
-            if (seenCompanies.has(company)) {
-              return false;
-            }
-
-            seenCompanies.add(company);
-            return true;
-          });
-        })()
-      : result.rows;
-
-    const lines = [
-      CSV_COLUMNS.map((col) => escapeCsvValue(col)).join(","),
-      ...exportRows.map((row) =>
-        CSV_COLUMNS.map((col) => escapeCsvValue(row[col])).join(",")
-      ),
-    ];
-
-    const csvBody = createCsvDownloadBody(lines);
-    const fileName = createFileName();
-
-    return new NextResponse(csvBody, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-        "Cache-Control": "no-store",
-        "Content-Length": String(csvBody.byteLength),
-        "X-Content-Type-Options": "nosniff",
+    return await handleExportRequest(searchParams);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: error instanceof Error ? error.message : "CSV抽出でエラーが発生しました",
       },
-    });
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const payload = (await req.json()) as Record<string, unknown>;
+    const searchParams = buildSearchParamsFromExportPayload(payload);
+    return await handleExportRequest(searchParams);
   } catch (error) {
     return NextResponse.json(
       {
