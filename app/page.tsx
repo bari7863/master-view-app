@@ -180,9 +180,13 @@ function createEmptyCrawlFieldSelections(): Record<CrawlFieldKey, boolean> {
 function getSelectedCrawlFields(
   selections: Record<CrawlFieldKey, boolean>
 ): CrawlFieldKey[] {
-  return CRAWL_CONFIRM_FIELD_OPTIONS.filter(
+  const selectedFields = CRAWL_CONFIRM_FIELD_OPTIONS.filter(
     (field) => selections[field.key]
   ).map((field) => field.key);
+
+  return selectedFields.length > 0
+    ? selectedFields
+    : CRAWL_CONFIRM_FIELD_OPTIONS.map((field) => field.key);
 }
 
 type CrawlPreviewChange = {
@@ -1745,6 +1749,17 @@ export default function Home() {
   const [crawlCurrentFields, setCrawlCurrentFields] = useState<string[]>([]);
   const [crawlRemainingCount, setCrawlRemainingCount] = useState(0);
   const crawlStatusTimerRef = useRef<number | null>(null);
+
+  const crawlRecoveringRef = useRef(false);
+  const crawlStatusErrorCountRef = useRef(0);
+  const crawlRestoreTimerRef = useRef<number | null>(null);
+
+  const clearCrawlRestoreTimer = () => {
+    if (crawlRestoreTimerRef.current !== null) {
+      window.clearTimeout(crawlRestoreTimerRef.current);
+      crawlRestoreTimerRef.current = null;
+    }
+  };
 
   const [crawlElapsedMs, setCrawlElapsedMs] = useState(0);
   const crawlStartedAtRef = useRef<number | null>(null);
@@ -5112,6 +5127,129 @@ const handlePreviewCsvExport = async () => {
     }
   };
 
+  const tryRestoreCrawlJob = async (targetJobId?: string | null) => {
+  const restoreJobId = targetJobId ?? crawlJobId ?? loadActiveCrawlJobId();
+  if (!restoreJobId || crawlRecoveringRef.current) return false;
+
+  crawlRecoveringRef.current = true;
+
+  try {
+    const res = await fetch("/api/master_data/crawl", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "get_job_status",
+        jobId: restoreJobId,
+        previewPage: 1,
+        previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
+      }),
+      cache: "no-store",
+    });
+
+    const data = await readApiResponse(res);
+
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || "保存済みクローリング状態の復元に失敗しました");
+    }
+
+    setCrawlJobId(restoreJobId);
+    saveActiveCrawlJobId(restoreJobId);
+    applyCrawlStatus(data);
+    setCrawlSelectedChanges({});
+    setCrawlMessage("");
+    setCrawlError("");
+
+    const previewRows = data.previewRows || [];
+    const previewTotal = data.previewTotal ?? 0;
+    const remainingCount = data.remainingCount ?? 0;
+
+    if (data.jobStatus === "running") {
+      setCrawling(true);
+      setCrawlProgressOpen(true);
+      setCrawlPreviewOpen(false);
+      setCrawlResumeConfirmOpen(false);
+      setCrawlPreviewRows([]);
+      setCrawlPreviewTotalCount(0);
+      setCrawlPreviewPage(1);
+      startCrawlElapsedTracking(false);
+      startCrawlStatusPolling(restoreJobId);
+      crawlStatusErrorCountRef.current = 0;
+      return true;
+    }
+
+    stopCrawlElapsedTracking();
+    clearCrawlStatusPolling();
+    setCrawling(false);
+    setCrawlProgressOpen(false);
+
+    setCrawlPreviewRows(previewRows);
+    setCrawlPreviewTotalCount(previewTotal);
+    setCrawlPreviewPage(data.previewPage ?? 1);
+    setCrawlPreviewOpen(previewTotal > 0);
+    setCrawlResumeConfirmOpen(
+      data.jobStatus === "paused" && previewTotal === 0 && remainingCount > 0
+    );
+
+    if (data.jobStatus === "error") {
+      setCrawlError(data.error || "クローリング中にエラーが発生しました");
+    }
+
+    if (data.jobStatus === "completed" && previewTotal === 0 && remainingCount === 0) {
+      setCrawlJobId(null);
+      saveActiveCrawlJobId(null);
+    }
+
+    crawlStatusErrorCountRef.current = 0;
+    return true;
+  } catch (e) {
+    const message =
+      e instanceof Error ? e.message : "保存済みクローリング状態の復元に失敗しました";
+
+    if (message.includes("クローリングジョブが見つかりません")) {
+      setCrawlJobId(null);
+      saveActiveCrawlJobId(null);
+    }
+
+    return false;
+  } finally {
+    crawlRecoveringRef.current = false;
+  }
+};
+
+const scheduleCrawlRecovery = (targetJobId?: string | null) => {
+  const restoreJobId = targetJobId ?? crawlJobId ?? loadActiveCrawlJobId();
+  if (!restoreJobId) return;
+
+  clearCrawlStatusPolling();
+  clearCrawlRestoreTimer();
+  stopCrawlElapsedTracking();
+
+  setCrawling(false);
+  setCrawlProgressOpen(true);
+  setCrawlMessage("接続が切れました。復旧を確認しています...");
+  setCrawlError("");
+
+  crawlRestoreTimerRef.current = window.setTimeout(async () => {
+    const restored = await tryRestoreCrawlJob(restoreJobId);
+
+    if (restored) return;
+
+    crawlStatusErrorCountRef.current += 1;
+
+    if (crawlStatusErrorCountRef.current < 10) {
+      scheduleCrawlRecovery(restoreJobId);
+      return;
+    }
+
+    setCrawlProgressOpen(false);
+    setCrawlError(
+      "接続エラーが続いています。アプリ再起動後も jobId は保持しているので、再表示時に復元を試します。"
+    );
+  }, 1500);
+};
+
   const applyCrawlStatus = (data: ApiResponse) => {
     setCrawlJobStatus((data.jobStatus as CrawlJobStatus) ?? "idle");
     setCrawlTotalTargets(data.totalTargets ?? 0);
@@ -5201,27 +5339,36 @@ const handlePreviewCsvExport = async () => {
         }
 
         if (data.jobStatus === "error") {
+          const previewRows = data.previewRows || [];
+          const previewTotal = data.previewTotal ?? 0;
+          const remainingCount = data.remainingCount ?? 0;
+
           stopCrawlElapsedTracking();
           clearCrawlStatusPolling();
           setCrawling(false);
           setCrawlProgressOpen(false);
+          setCrawlPreviewRows(previewRows);
+          setCrawlPreviewTotalCount(previewTotal);
+          setCrawlPreviewPage(data.previewPage ?? 1);
+          setCrawlPreviewOpen(previewTotal > 0);
+          setCrawlResumeConfirmOpen(previewTotal === 0 && remainingCount > 0);
           setCrawlError(data.error || "クローリング中にエラーが発生しました");
+          saveActiveCrawlJobId(jobId);
+          return;
         }
       } catch (e) {
-        stopCrawlElapsedTracking();
-        clearCrawlStatusPolling();
-        setCrawling(false);
-        setCrawlProgressOpen(false);
-
         const message =
           e instanceof Error ? e.message : "クローリング進捗取得でエラーが発生しました";
 
         if (message.includes("クローリングジョブが見つかりません")) {
           setCrawlJobId(null);
           saveActiveCrawlJobId(null);
+          setCrawlProgressOpen(false);
+          setCrawlError(message);
+          return;
         }
 
-        setCrawlError(message);
+        scheduleCrawlRecovery(jobId);
       }
     };
 
@@ -5235,75 +5382,42 @@ const handlePreviewCsvExport = async () => {
     const storedJobId = loadActiveCrawlJobId();
     if (!storedJobId) return;
 
-    try {
-      const res = await fetch("/api/master_data/crawl", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "get_job_status",
-          jobId: storedJobId,
-          previewPage: 1,
-          previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
-        }),
-      });
-
-      const data = await readApiResponse(res);
-
-      if (!res.ok || !data.ok) {
-        throw new Error(data.error || "保存済みクローリング状態の復元に失敗しました");
-      }
-
-      setCrawlJobId(storedJobId);
-      applyCrawlStatus(data);
-      setCrawlMessage("");
-      setCrawlError("");
-      setCrawlSelectedChanges({});
-
-      const previewRows = data.previewRows || [];
-      const previewTotal = data.previewTotal ?? 0;
-      const remainingCount = data.remainingCount ?? 0;
-
-      if (data.jobStatus === "running") {
-        setCrawling(true);
-        setCrawlProgressOpen(true);
-        setCrawlPreviewOpen(false);
-        setCrawlResumeConfirmOpen(false);
-        setCrawlPreviewRows([]);
-        setCrawlPreviewTotalCount(0);
-        setCrawlPreviewPage(1);
-        startCrawlElapsedTracking(true);
-        startCrawlStatusPolling(storedJobId);
-        return;
-      }
-
-      stopCrawlElapsedTracking();
-      clearCrawlStatusPolling();
-      setCrawling(false);
-      setCrawlProgressOpen(false);
-
-      setCrawlPreviewRows(previewRows);
-      setCrawlPreviewTotalCount(previewTotal);
-      setCrawlPreviewPage(data.previewPage ?? 1);
-      setCrawlPreviewOpen(previewTotal > 0);
-      setCrawlResumeConfirmOpen(
-        data.jobStatus === "paused" && previewTotal === 0 && remainingCount > 0
-      );
-
-      if (data.jobStatus === "completed" && previewTotal === 0 && remainingCount === 0) {
-        setCrawlJobId(null);
-        saveActiveCrawlJobId(null);
-      }
-    } catch {
-      setCrawlJobId(null);
-      saveActiveCrawlJobId(null);
-    }
+    await tryRestoreCrawlJob(storedJobId);
   };
 
   useEffect(() => {
     void restoreSavedCrawlJob();
   }, []);
+
+  useEffect(() => {
+    const handleRecover = () => {
+      const storedJobId = loadActiveCrawlJobId();
+      if (!storedJobId) return;
+
+      if (document.visibilityState && document.visibilityState !== "visible") {
+        return;
+      }
+
+      void tryRestoreCrawlJob(storedJobId);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleRecover();
+      }
+    };
+
+    window.addEventListener("focus", handleRecover);
+    window.addEventListener("online", handleRecover);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", handleRecover);
+      window.removeEventListener("online", handleRecover);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearCrawlRestoreTimer();
+    };
+  }, [crawlJobId]);
 
   useEffect(() => {
     return () => {
@@ -5393,6 +5507,8 @@ const handlePreviewCsvExport = async () => {
   const handleResumeCrawl = async () => {
     if (!crawlJobId) return;
 
+    stopCrawlElapsedTracking();
+    clearCrawlStatusPolling();
     setCrawlResumeConfirmOpen(false);
     setCrawlPreviewOpen(false);
     setCrawlPreviewRows([]);
@@ -5437,6 +5553,8 @@ const handlePreviewCsvExport = async () => {
   const handleCrawl = async () => {
     if (!crawlTargetScope) return;
 
+    stopCrawlElapsedTracking();
+    clearCrawlStatusPolling();
     setCrawling(true);
     setCrawlConfirmOpen(false);
     setCrawlPreviewOpen(false);

@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const runtime = "nodejs";
 import { pool } from "@/lib/db";
 import type { PoolClient } from "pg";
 import { promises as fs } from "fs";
@@ -805,11 +808,12 @@ function normalizeSelectedFields(selectedFields?: CrawlSelectableFieldKey[]) {
     ? selectedFields.filter((field): field is CrawlSelectableFieldKey =>
         CRAWL_SELECTABLE_FIELDS.includes(field)
       )
-    : null;
+    : [];
 
-  return new Set<CrawlSelectableFieldKey>(
-    requested === null ? CRAWL_SELECTABLE_FIELDS : requested
-  );
+  const normalizedFields =
+    requested.length > 0 ? requested : CRAWL_SELECTABLE_FIELDS;
+
+  return new Set<CrawlSelectableFieldKey>(normalizedFields);
 }
 
 type CrawlPayloadBundle = {
@@ -1336,6 +1340,303 @@ type SerializedCrawlJobState = Omit<CrawlJobState, "savedPreviewRowIds"> & {
 
 const CRAWL_JOB_STATE_DIR = path.join(process.cwd(), ".crawl-job-state");
 
+type SerializedCrawlJobPreviewItem = {
+  row_id: string;
+  preview_row_id: string;
+  officeIndex: number;
+  company: string | null;
+  website_url: string | null;
+  source_row: PreviewSourceRow | null;
+  bundle: CrawlPayloadBundle;
+};
+
+type CrawlPersistCheckpoint = {
+  lastPersistedProcessed: number;
+  lastPersistedAt: number;
+};
+
+const CRAWL_JOB_PROGRESS_SAVE_EVERY = 10;
+const CRAWL_JOB_PROGRESS_SAVE_INTERVAL_MS = 2000;
+
+async function ensureCrawlPreviewTable(client: DbClient) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS public.master_data_crawl_preview (
+      job_id text NOT NULL,
+      preview_row_id text NOT NULL,
+      row_id bigint NOT NULL,
+      office_index integer NOT NULL,
+      company text,
+      website_url text,
+      source_row jsonb,
+      bundle jsonb NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (job_id, preview_row_id)
+    )
+  `);
+
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS master_data_crawl_preview_job_idx
+    ON public.master_data_crawl_preview (job_id, row_id, office_index)
+  `);
+}
+
+function serializeCrawlPreviewItem(
+  item: CrawlJobPreviewItem
+): SerializedCrawlJobPreviewItem {
+  return {
+    row_id: item.row_id,
+    preview_row_id: item.preview_row_id,
+    officeIndex: item.officeIndex,
+    company: item.company,
+    website_url: item.website_url,
+    source_row: item.source_row,
+    bundle: item.bundle,
+  };
+}
+
+function deserializeCrawlPreviewItem(row: {
+  row_id: string;
+  preview_row_id: string;
+  office_index: number;
+  company: string | null;
+  website_url: string | null;
+  source_row: unknown;
+  bundle: unknown;
+}): CrawlJobPreviewItem {
+  const sourceRow =
+    typeof row.source_row === "string"
+      ? (JSON.parse(row.source_row) as PreviewSourceRow | null)
+      : ((row.source_row ?? null) as PreviewSourceRow | null);
+
+  const bundle =
+    typeof row.bundle === "string"
+      ? (JSON.parse(row.bundle) as CrawlPayloadBundle)
+      : (row.bundle as CrawlPayloadBundle);
+
+  return {
+    row_id: String(row.row_id ?? ""),
+    preview_row_id: String(row.preview_row_id ?? ""),
+    officeIndex: Number(row.office_index ?? 0),
+    company: normalizeNullableText(row.company),
+    website_url: normalizeNullableText(row.website_url),
+    source_row: sourceRow,
+    bundle,
+  };
+}
+
+async function insertCrawlPreviewItems(
+  client: DbClient,
+  jobId: string,
+  items: CrawlJobPreviewItem[]
+) {
+  if (items.length === 0) return;
+
+  await ensureCrawlPreviewTable(client);
+
+  for (const item of items) {
+    const serialized = serializeCrawlPreviewItem(item);
+
+    await client.query(
+      `
+        INSERT INTO public.master_data_crawl_preview (
+          job_id,
+          preview_row_id,
+          row_id,
+          office_index,
+          company,
+          website_url,
+          source_row,
+          bundle
+        )
+        VALUES ($1, $2, $3::bigint, $4::integer, $5, $6, $7::jsonb, $8::jsonb)
+        ON CONFLICT (job_id, preview_row_id)
+        DO UPDATE SET
+          company = EXCLUDED.company,
+          website_url = EXCLUDED.website_url,
+          source_row = EXCLUDED.source_row,
+          bundle = EXCLUDED.bundle
+      `,
+      [
+        jobId,
+        serialized.preview_row_id,
+        serialized.row_id,
+        serialized.officeIndex,
+        serialized.company,
+        serialized.website_url,
+        JSON.stringify(serialized.source_row),
+        JSON.stringify(serialized.bundle),
+      ]
+    );
+  }
+}
+
+async function fetchPagedCrawlPreviewItems(
+  client: DbClient,
+  jobId: string,
+  page: number,
+  pageSize: number
+) {
+  await ensureCrawlPreviewTable(client);
+
+  const totalRes = await client.query(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM public.master_data_crawl_preview
+      WHERE job_id = $1
+    `,
+    [jobId]
+  );
+
+  const total = Number(totalRes.rows[0]?.total ?? 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const offset = (safePage - 1) * pageSize;
+
+  const rowsRes = await client.query(
+    `
+      SELECT
+        preview_row_id,
+        row_id::text,
+        office_index,
+        company,
+        website_url,
+        source_row,
+        bundle
+      FROM public.master_data_crawl_preview
+      WHERE job_id = $1
+      ORDER BY row_id::bigint ASC, office_index ASC
+      LIMIT $2 OFFSET $3
+    `,
+    [jobId, pageSize, offset]
+  );
+
+  return {
+    items: rowsRes.rows.map((row) =>
+      deserializeCrawlPreviewItem(row as {
+        row_id: string;
+        preview_row_id: string;
+        office_index: number;
+        company: string | null;
+        website_url: string | null;
+        source_row: unknown;
+        bundle: unknown;
+      })
+    ),
+    total,
+    page: safePage,
+    pageSize,
+  };
+}
+
+async function fetchAllCrawlPreviewItems(client: DbClient, jobId: string) {
+  await ensureCrawlPreviewTable(client);
+
+  const rowsRes = await client.query(
+    `
+      SELECT
+        preview_row_id,
+        row_id::text,
+        office_index,
+        company,
+        website_url,
+        source_row,
+        bundle
+      FROM public.master_data_crawl_preview
+      WHERE job_id = $1
+      ORDER BY row_id::bigint ASC, office_index ASC
+    `,
+    [jobId]
+  );
+
+  return rowsRes.rows.map((row) =>
+    deserializeCrawlPreviewItem(row as {
+      row_id: string;
+      preview_row_id: string;
+      office_index: number;
+      company: string | null;
+      website_url: string | null;
+      source_row: unknown;
+      bundle: unknown;
+    })
+  );
+}
+
+async function fetchCrawlPreviewRowIdSet(client: DbClient, jobId: string) {
+  await ensureCrawlPreviewTable(client);
+
+  const res = await client.query(
+    `
+      SELECT DISTINCT row_id::text AS row_id
+      FROM public.master_data_crawl_preview
+      WHERE job_id = $1
+    `,
+    [jobId]
+  );
+
+  return new Set(res.rows.map((row) => String(row.row_id ?? "")));
+}
+
+async function deleteCrawlPreviewItemsByIds(
+  client: DbClient,
+  jobId: string,
+  previewRowIds: string[]
+) {
+  if (previewRowIds.length === 0) return;
+
+  await ensureCrawlPreviewTable(client);
+
+  await client.query(
+    `
+      DELETE FROM public.master_data_crawl_preview
+      WHERE job_id = $1
+        AND preview_row_id = ANY($2::text[])
+    `,
+    [jobId, previewRowIds]
+  );
+}
+
+async function deleteAllCrawlPreviewItems(client: DbClient, jobId: string) {
+  await ensureCrawlPreviewTable(client);
+
+  await client.query(
+    `
+      DELETE FROM public.master_data_crawl_preview
+      WHERE job_id = $1
+    `,
+    [jobId]
+  );
+}
+
+function createCrawlPersistCheckpoint(job: CrawlJobState): CrawlPersistCheckpoint {
+  return {
+    lastPersistedProcessed: job.processed,
+    lastPersistedAt: Date.now(),
+  };
+}
+
+async function persistCrawlJobStateIfNeeded(
+  job: CrawlJobState,
+  checkpoint: CrawlPersistCheckpoint,
+  force = false
+) {
+  const now = Date.now();
+  const processedDiff = job.processed - checkpoint.lastPersistedProcessed;
+  const elapsedMs = now - checkpoint.lastPersistedAt;
+
+  if (
+    !force &&
+    processedDiff < CRAWL_JOB_PROGRESS_SAVE_EVERY &&
+    elapsedMs < CRAWL_JOB_PROGRESS_SAVE_INTERVAL_MS
+  ) {
+    return;
+  }
+
+  await persistCrawlJobState(job);
+
+  checkpoint.lastPersistedProcessed = job.processed;
+  checkpoint.lastPersistedAt = now;
+}
+
 function compactProcessedTargetRow(row: Record<string, unknown>) {
   return {
     row_id: String(row.row_id ?? ""),
@@ -1362,12 +1663,22 @@ function serializeCrawlJobState(job: CrawlJobState): SerializedCrawlJobState {
 }
 
 function revivePersistedCrawlJobState(job: CrawlJobState): CrawlJobState {
-  if (job.completed || job.error) {
-    return job;
+  const normalizedSelectedFields = Array.from(
+    normalizeSelectedFields(job.selectedFields)
+  );
+
+  const normalizedJob: CrawlJobState = {
+    ...job,
+    selectedFields: normalizedSelectedFields,
+    selectedFieldLabels: buildSelectedFieldLabels(normalizedSelectedFields),
+  };
+
+  if (normalizedJob.completed || normalizedJob.error) {
+    return normalizedJob;
   }
 
   return {
-    ...job,
+    ...normalizedJob,
     running: false,
     paused: true,
     pauseRequested: false,
@@ -1530,62 +1841,47 @@ function normalizePreviewPageSize(value: unknown) {
   return Math.min(Math.floor(num), MAX_CRAWL_PREVIEW_PAGE_SIZE);
 }
 
-function buildPublicPreviewRows(
+async function buildPublicPreviewRows(
+  client: DbClient,
   job: CrawlJobState,
   page: number,
   pageSize: number,
   previewTab: "candidate" | "excluded" = "candidate"
 ) {
-  const unsavedItems = job.previewItems.filter(
-    (item) => !job.savedPreviewRowIds.has(item.preview_row_id)
-  );
+  const previewPage = normalizePreviewPage(page);
+  const previewPageSize = normalizePreviewPageSize(pageSize);
 
   if (previewTab === "candidate") {
-    const total = unsavedItems.length;
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const safePage = Math.min(Math.max(page, 1), totalPages);
-    const start = (safePage - 1) * pageSize;
+    const previewResult = await fetchPagedCrawlPreviewItems(
+      client,
+      job.jobId,
+      previewPage,
+      previewPageSize
+    );
 
-    const rows = unsavedItems
-      .slice(start, start + pageSize)
-      .map((item) => ({
-        row_id: item.row_id,
-        preview_row_id: item.preview_row_id,
-        company: item.company,
-        website_url: item.website_url,
-        source_row: item.source_row,
-        changes: buildPreviewChangesFromItem(item, job.selectedFields),
-      }));
+    const rows = previewResult.items.map((item) => ({
+      row_id: item.row_id,
+      preview_row_id: item.preview_row_id,
+      company: item.company,
+      website_url: item.website_url,
+      source_row: item.source_row,
+      changes: buildPreviewChangesFromItem(item, job.selectedFields),
+    }));
 
     return {
       rows,
-      total,
-      page: safePage,
-      pageSize,
+      total: previewResult.total,
+      page: previewResult.page,
+      pageSize: previewResult.pageSize,
     };
   }
+
+  const candidateRowIdSet = await fetchCrawlPreviewRowIdSet(client, job.jobId);
 
   const completedTargets = job.targets.slice(
     0,
     Math.max(job.nextIndex, job.processed)
   );
-
-  const candidateRowIdSet = new Set(unsavedItems.map((item) => item.row_id));
-
-  const explicitExcludedRowMap = new Map<string, CrawlPreviewRow>();
-  for (const item of job.excludedPreviewRows) {
-    if (job.savedPreviewRowIds.has(item.preview_row_id)) {
-      continue;
-    }
-
-    if (candidateRowIdSet.has(item.row_id)) {
-      continue;
-    }
-
-    if (!explicitExcludedRowMap.has(item.row_id)) {
-      explicitExcludedRowMap.set(item.row_id, item);
-    }
-  }
 
   const excludedBaseRows = completedTargets.filter((row) => {
     const rowId = String(row.row_id ?? "");
@@ -1593,70 +1889,35 @@ function buildPublicPreviewRows(
   });
 
   const total = excludedBaseRows.length;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(Math.max(page, 1), totalPages);
-  const start = (safePage - 1) * pageSize;
-  const end = start + pageSize;
+  const totalPages = Math.max(1, Math.ceil(total / previewPageSize));
+  const safePage = Math.min(Math.max(previewPage, 1), totalPages);
+  const start = (safePage - 1) * previewPageSize;
+  const end = start + previewPageSize;
 
-  const rows: CrawlPreviewRow[] = [];
-  let excludedIndex = 0;
+  const rows: CrawlPreviewRow[] = excludedBaseRows
+    .slice(start, end)
+    .map((row) => {
+      const rowId = String(row.row_id ?? "");
 
-  for (const row of excludedBaseRows) {
-    const rowId = String(row.row_id ?? "");
-
-    if (excludedIndex >= start && excludedIndex < end) {
-      const explicitRow = explicitExcludedRowMap.get(rowId);
-
-      rows.push(
-        explicitRow ?? {
-          row_id: rowId,
-          preview_row_id: `${rowId}__excluded`,
-          company: typeof row.company === "string" ? row.company : null,
-          website_url:
-            typeof row.website_url === "string" ? row.website_url : null,
-          source_row: buildPreviewSourceRow(row as Record<string, unknown>),
-          changes: [],
-        }
-      );
-    }
-
-    excludedIndex += 1;
-
-    if (excludedIndex >= end) {
-      break;
-    }
-  }
+      return {
+        row_id: rowId,
+        preview_row_id: `${rowId}__excluded`,
+        company: typeof row.company === "string" ? row.company : null,
+        website_url: typeof row.website_url === "string" ? row.website_url : null,
+        source_row: buildPreviewSourceRow(row as Record<string, unknown>),
+        changes: [],
+      };
+    });
 
   return {
     rows,
     total,
     page: safePage,
-    pageSize,
+    pageSize: previewPageSize,
   };
 }
 
-function buildJobResponse(
-  job: CrawlJobState,
-  options: {
-    includePreviewRows?: boolean;
-    previewPage?: number;
-    previewPageSize?: number;
-    previewTab?: "candidate" | "excluded";
-  } = {}
-) {
-  const previewPage = normalizePreviewPage(options.previewPage);
-  const previewPageSize = normalizePreviewPageSize(options.previewPageSize);
-  const previewTab = options.previewTab ?? "candidate";
-
-  const previewResult = options.includePreviewRows
-    ? buildPublicPreviewRows(job, previewPage, previewPageSize, previewTab)
-    : {
-        rows: undefined,
-        total: 0,
-        page: previewPage,
-        pageSize: previewPageSize,
-      };
-
+function buildJobResponse(job: CrawlJobState) {
   return {
     ok: true,
     jobId: job.jobId,
@@ -1677,10 +1938,10 @@ function buildJobResponse(
     currentFields: job.selectedFieldLabels,
     progressPercent:
       job.total === 0 ? 0 : Math.round((job.processed / job.total) * 100),
-    previewRows: previewResult.rows,
-    previewTotal: previewResult.total,
-    previewPage: previewResult.page,
-    previewPageSize: previewResult.pageSize,
+    previewRows: undefined,
+    previewTotal: 0,
+    previewPage: 1,
+    previewPageSize: DEFAULT_CRAWL_PREVIEW_PAGE_SIZE,
     remainingCount: Math.max(job.total - job.nextIndex, 0),
     paused: job.paused,
     completed: job.completed,
@@ -1725,6 +1986,7 @@ async function runCrawlJob(jobId: string) {
   firstJob.error = null;
 
   await persistCrawlJobState(firstJob);
+  const persistCheckpoint = createCrawlPersistCheckpoint(firstJob);
 
   const shouldStop = () => {
     const currentJob = crawlJobs.get(jobId);
@@ -1735,6 +1997,7 @@ async function runCrawlJob(jobId: string) {
 
   try {
     client = await pool.connect();
+    await ensureCrawlPreviewTable(client);
 
     for (
       let index = firstJob.nextIndex;
@@ -1746,7 +2009,7 @@ async function runCrawlJob(jobId: string) {
 
       if (job.pauseRequested) {
         markCrawlJobPaused(job);
-        await persistCrawlJobState(job);
+        await persistCrawlJobStateIfNeeded(job, persistCheckpoint, true);
         return;
       }
 
@@ -1791,43 +2054,38 @@ async function runCrawlJob(jobId: string) {
                 normalizeNullableText(row.company)
               );
 
-              if (bundles.length === 0) {
-                job.skipped += 1;
-              } else {
-                let previewAdded = 0;
-                const previewSourceRow = buildPreviewSourceRow(currentRowData);
+              const previewSourceRow = buildPreviewSourceRow(currentRowData);
+              const rowPreviewItems: CrawlJobPreviewItem[] = [];
 
-                bundles.forEach((bundle, officeIndex) => {
-                  const changes = buildPreviewChanges(
-                    previewSourceRow as unknown as Record<string, unknown>,
-                    bundle,
-                    selectedFieldSet
-                  );
+              bundles.forEach((bundle, officeIndex) => {
+                const changes = buildPreviewChanges(
+                  previewSourceRow as unknown as Record<string, unknown>,
+                  bundle,
+                  selectedFieldSet
+                );
 
-                  if (changes.length === 0) {
-                    return;
-                  }
-
-                  job.previewItems.push({
-                    row_id: String(row.row_id ?? ""),
-                    preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
-                    officeIndex,
-                    company:
-                      bundle.payload.company ??
-                      normalizeNullableText(row.company),
-                    website_url: normalizeNullableText(row.website_url),
-                    source_row: previewSourceRow,
-                    bundle,
-                  });
-
-                  previewAdded += 1;
-                });
-
-                if (previewAdded > 0) {
-                  job.updated += previewAdded;
-                } else {
-                  job.skipped += 1;
+                if (changes.length === 0) {
+                  return;
                 }
+
+                rowPreviewItems.push({
+                  row_id: String(row.row_id ?? ""),
+                  preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
+                  officeIndex,
+                  company:
+                    bundle.payload.company ??
+                    normalizeNullableText(row.company),
+                  website_url: normalizeNullableText(row.website_url),
+                  source_row: previewSourceRow,
+                  bundle,
+                });
+              });
+
+              if (rowPreviewItems.length > 0) {
+                await insertCrawlPreviewItems(client, job.jobId, rowPreviewItems);
+                job.updated += rowPreviewItems.length;
+              } else {
+                job.skipped += 1;
               }
             }
           }
@@ -1843,7 +2101,7 @@ async function runCrawlJob(jobId: string) {
           job.processed += 1;
           job.nextIndex = index + 1;
           job.targets[index] = compactProcessedTargetRow(row);
-          await persistCrawlJobState(job);
+          await persistCrawlJobStateIfNeeded(job, persistCheckpoint, false);
         }
       }
 
@@ -1852,7 +2110,7 @@ async function runCrawlJob(jobId: string) {
         if (!currentJob) return;
 
         markCrawlJobPaused(currentJob);
-        await persistCrawlJobState(currentJob);
+        await persistCrawlJobStateIfNeeded(currentJob, persistCheckpoint, true);
         return;
       }
     }
@@ -1867,13 +2125,14 @@ async function runCrawlJob(jobId: string) {
     job.currentCompany = null;
     job.currentWebsiteUrl = null;
 
-    await persistCrawlJobState(job);
+    await persistCrawlJobStateIfNeeded(job, persistCheckpoint, true);
   } catch (error) {
     const job = crawlJobs.get(jobId);
     if (!job) return;
 
     if (isCrawlPausedError(error) || job.pauseRequested) {
       markCrawlJobPaused(job);
+      await persistCrawlJobState(job);
       return;
     }
 
@@ -1886,6 +2145,7 @@ async function runCrawlJob(jobId: string) {
       error instanceof Error
         ? error.message
         : "クローリング中にエラーが発生しました";
+
     await persistCrawlJobState(job);
   } finally {
     client?.release();
@@ -1898,18 +2158,18 @@ async function savePreviewItems(
   selectedChanges: SelectedCrawlChanges | undefined
 ) {
   await ensureMasterDataIdColumn(client);
+  await ensureCrawlPreviewTable(client);
+
   let processed = 0;
   let updated = 0;
   let skipped = 0;
   let failed = 0;
 
-const sourceRowCache = new Map<string, Record<string, unknown> | null>();
+  const sourceRowCache = new Map<string, Record<string, unknown> | null>();
+  const items = await fetchAllCrawlPreviewItems(client, job.jobId);
+  const processedPreviewRowIds: string[] = [];
 
-  for (const item of job.previewItems) {
-    if (job.savedPreviewRowIds.has(item.preview_row_id)) {
-      continue;
-    }
-
+  for (const item of items) {
     processed += 1;
 
     if (!sourceRowCache.has(item.row_id)) {
@@ -1921,7 +2181,7 @@ const sourceRowCache = new Map<string, Record<string, unknown> | null>();
 
     try {
       if (!hasAnySelectedCandidate(item, selectedChanges, job.selectedFields)) {
-        job.savedPreviewRowIds.add(item.preview_row_id);
+        processedPreviewRowIds.push(item.preview_row_id);
         skipped += 1;
         continue;
       }
@@ -1992,10 +2252,10 @@ const sourceRowCache = new Map<string, Record<string, unknown> | null>();
 
         if ((updateRes.rowCount ?? 0) > 0) {
           updated += 1;
-          job.savedPreviewRowIds.add(item.preview_row_id);
+          processedPreviewRowIds.push(item.preview_row_id);
         } else {
           skipped += 1;
-          job.savedPreviewRowIds.add(item.preview_row_id);
+          processedPreviewRowIds.push(item.preview_row_id);
         }
 
         continue;
@@ -2033,18 +2293,13 @@ const sourceRowCache = new Map<string, Record<string, unknown> | null>();
 
       await client.query(insertSql, insertValues);
       updated += 1;
-      job.savedPreviewRowIds.add(item.preview_row_id);
+      processedPreviewRowIds.push(item.preview_row_id);
     } catch {
       failed += 1;
     }
   }
 
-  if (job.savedPreviewRowIds.size > 0) {
-    job.previewItems = job.previewItems.filter(
-      (item) => !job.savedPreviewRowIds.has(item.preview_row_id)
-    );
-    job.savedPreviewRowIds = new Set<string>();
-  }
+  await deleteCrawlPreviewItemsByIds(client, job.jobId, processedPreviewRowIds);
 
   return { processed, updated, skipped, failed };
 }
@@ -2069,14 +2324,27 @@ export async function POST(req: NextRequest) {
       const includePreviewRows =
         job.paused || job.completed || !!job.error;
 
-      return NextResponse.json(
-        buildJobResponse(job, {
-          includePreviewRows,
-          previewPage: body.previewPage,
-          previewPageSize: body.previewPageSize,
-          previewTab: body.previewTab,
-        })
+      if (!includePreviewRows) {
+        return NextResponse.json(buildJobResponse(job));
+      }
+
+      client = await pool.connect();
+
+      const previewResult = await buildPublicPreviewRows(
+        client,
+        job,
+        body.previewPage ?? 1,
+        body.previewPageSize ?? DEFAULT_CRAWL_PREVIEW_PAGE_SIZE,
+        body.previewTab ?? "candidate"
       );
+
+      return NextResponse.json({
+        ...buildJobResponse(job),
+        previewRows: previewResult.rows,
+        previewTotal: previewResult.total,
+        previewPage: previewResult.page,
+        previewPageSize: previewResult.pageSize,
+      });
     }
 
     if (action === "cancel_job") {
@@ -2089,6 +2357,8 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      client = await pool.connect();
+
       job.pauseRequested = false;
       job.running = false;
       job.paused = false;
@@ -2098,6 +2368,8 @@ export async function POST(req: NextRequest) {
       job.currentWebsiteUrl = null;
       job.previewItems = [];
       job.savedPreviewRowIds = new Set<string>();
+
+      await deleteAllCrawlPreviewItems(client, job.jobId);
 
       crawlJobs.delete(job.jobId);
       await deletePersistedCrawlJobState(job.jobId);
@@ -2180,17 +2452,18 @@ export async function POST(req: NextRequest) {
       client = await pool.connect();
 
       const result = await savePreviewItems(client, job, body.selectedChanges);
-
       const remainingCount = Math.max(job.total - job.nextIndex, 0);
 
-      const previewResult = buildPublicPreviewRows(
+      const previewResult = await buildPublicPreviewRows(
+        client,
         job,
         1,
         DEFAULT_CRAWL_PREVIEW_PAGE_SIZE,
         body.previewTab ?? "candidate"
       );
 
-      if (remainingCount === 0 && job.previewItems.length === 0) {
+      if (remainingCount === 0 && previewResult.total === 0) {
+        await deleteAllCrawlPreviewItems(client, job.jobId);
         crawlJobs.delete(job.jobId);
         await deletePersistedCrawlJobState(job.jobId);
       } else {
@@ -2230,6 +2503,8 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      await ensureCrawlPreviewTable(client);
+
       const jobId = crypto.randomUUID();
 
       const job: CrawlJobState = {
@@ -2258,7 +2533,7 @@ export async function POST(req: NextRequest) {
       };
 
       crawlJobs.set(jobId, job);
-      
+
       await persistCrawlJobState(job);
 
       void runCrawlJob(jobId);

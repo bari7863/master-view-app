@@ -99,90 +99,6 @@ type CrawlRuntimeOptions = {
 
 const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
 
-const FETCH_RETRY_DELAYS_MS = [0, 2000, 5000] as const;
-
-const FETCH_RETRYABLE_STATUS_SET = new Set([
-  403, 408, 425, 429, 500, 502, 503, 504, 521, 522, 523, 524,
-]);
-
-const HOST_COOLDOWN_UNTIL_MAP = new Map<string, number>();
-const HOST_FAILURE_COUNT_MAP = new Map<string, number>();
-
-const TEMPORARY_BLOCK_PAGE_REGEX =
-  /(too many requests|temporarily unavailable|service unavailable|access denied|forbidden|just a moment|verify you are human|attention required|enable javascript and cookies|unusual traffic|automated queries|security check|request blocked|アクセスが集中|アクセスが拒否|アクセス制限|しばらくしてから|ご利用を制限)/i;
-
-function isRetryableFetchStatus(status: number) {
-  return FETCH_RETRYABLE_STATUS_SET.has(status);
-}
-
-function getUrlHost(url: string) {
-  try {
-    return new URL(url).host.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-async function sleepCrawl(ms: number, runtimeOptions?: CrawlRuntimeOptions) {
-  const endAt = Date.now() + Math.max(ms, 0);
-
-  while (Date.now() < endAt) {
-    throwIfCrawlShouldStop(runtimeOptions);
-
-    const remaining = endAt - Date.now();
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(remaining, 200))
-    );
-  }
-}
-
-async function waitForHostCooldown(
-  url: string,
-  runtimeOptions?: CrawlRuntimeOptions
-) {
-  const host = getUrlHost(url);
-  if (!host) return;
-
-  const cooldownUntil = HOST_COOLDOWN_UNTIL_MAP.get(host) ?? 0;
-  const waitMs = cooldownUntil - Date.now();
-
-  if (waitMs > 0) {
-    await sleepCrawl(waitMs, runtimeOptions);
-  }
-}
-
-function markHostTemporaryFailure(url: string, attemptIndex: number) {
-  const host = getUrlHost(url);
-  if (!host) return;
-
-  const failureCount = (HOST_FAILURE_COUNT_MAP.get(host) ?? 0) + 1;
-  HOST_FAILURE_COUNT_MAP.set(host, failureCount);
-
-  const cooldownMs = Math.min(
-    15000,
-    2000 * Math.max(failureCount, attemptIndex + 1)
-  );
-
-  const nextUntil = Date.now() + cooldownMs;
-  const currentUntil = HOST_COOLDOWN_UNTIL_MAP.get(host) ?? 0;
-
-  if (nextUntil > currentUntil) {
-    HOST_COOLDOWN_UNTIL_MAP.set(host, nextUntil);
-  }
-}
-
-function markHostFetchSuccess(url: string) {
-  const host = getUrlHost(url);
-  if (!host) return;
-
-  HOST_FAILURE_COUNT_MAP.delete(host);
-  HOST_COOLDOWN_UNTIL_MAP.delete(host);
-}
-
-function looksLikeTemporaryBlockPage(content: string) {
-  return TEMPORARY_BLOCK_PAGE_REGEX.test(normalizeSpace(content));
-}
-
 const WORKER_DISPATCH_LICENSE_REGEX =
   /派\s*[0-9０-９]{2}\s*[-－ー―]\s*[0-9０-９]{6}/i;
 
@@ -2754,6 +2670,7 @@ type BrowserPageLike = {
   content(): Promise<string>;
   textContent(selector: string): Promise<string | null>;
   url(): string;
+  close(): Promise<void>;
 };
 
 type BrowserLike = {
@@ -2768,6 +2685,82 @@ type ChromiumLike = {
   launch(options: { headless: boolean }): Promise<BrowserLike>;
 };
 
+type PlaywrightModuleLike = {
+  chromium?: ChromiumLike;
+};
+
+const globalForMasterDataCrawlerBrowser = globalThis as typeof globalThis & {
+  __masterDataCrawlerPlaywright?: PlaywrightModuleLike | null;
+  __masterDataCrawlerBrowserPromise?: Promise<BrowserLike> | null;
+  __masterDataCrawlerBrowserIdleTimer?: ReturnType<typeof setTimeout> | null;
+};
+
+async function loadPlaywrightModule() {
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright) {
+    return globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright;
+  }
+
+  const imported = await (
+    new Function("return import('playwright')")() as Promise<PlaywrightModuleLike>
+  ).catch(() => null);
+
+  globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright =
+    imported ?? null;
+
+  return globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright;
+}
+
+async function resetSharedBrowser() {
+  const currentPromise =
+    globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise;
+
+  globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise = null;
+
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer) {
+    clearTimeout(globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer);
+    globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer = null;
+  }
+
+  if (!currentPromise) return;
+
+  try {
+    const browser = await currentPromise;
+    await browser.close().catch(() => {});
+  } catch {}
+}
+
+async function getSharedBrowser() {
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer) {
+    clearTimeout(globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer);
+    globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer = null;
+  }
+
+  if (!globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise) {
+    globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise =
+      (async () => {
+        const imported = await loadPlaywrightModule();
+        const chromium = imported?.chromium;
+        if (!chromium) {
+          throw new Error("playwright chromium を読み込めませんでした");
+        }
+        return await chromium.launch({ headless: true });
+      })();
+  }
+
+  return await globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise;
+}
+
+function scheduleSharedBrowserClose() {
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer) {
+    clearTimeout(globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer);
+  }
+
+  globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer =
+    setTimeout(() => {
+      void resetSharedBrowser();
+    }, 30000);
+}
+
 async function fetchPageWithBrowser(
   url: string,
   timeoutMs = 10000,
@@ -2775,21 +2768,12 @@ async function fetchPageWithBrowser(
 ): Promise<PageData | null> {
   throwIfCrawlShouldStop(runtimeOptions);
 
-  let browser: BrowserLike | null = null;
+  let page: BrowserPageLike | null = null;
 
   try {
-    const imported = await (
-      new Function("return import('playwright')")() as Promise<{
-        chromium?: ChromiumLike;
-      }>
-    ).catch(() => null);
+    const browser = await getSharedBrowser();
 
-    const chromium = imported?.chromium;
-    if (!chromium) return null;
-
-    browser = await chromium.launch({ headless: true });
-
-    const page = await browser.newPage({
+    page = await browser.newPage({
       userAgent: "Mozilla/5.0 (compatible; MasterDataCrawler/1.0)",
       locale: "ja-JP",
     });
@@ -2808,7 +2792,7 @@ async function fetchPageWithBrowser(
       })
       .catch(() => {});
 
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(700);
 
     throwIfCrawlShouldStop(runtimeOptions);
 
@@ -2823,17 +2807,6 @@ async function fetchPageWithBrowser(
       .map((line) => normalizeSpace(line))
       .filter((line) => line !== "")
       .join("\n");
-
-    const blockCheckText = [
-      finalUrl,
-      extractTitle(html),
-      extractH1(html),
-      normalizedBodyText,
-    ].join("\n");
-
-    if (looksLikeTemporaryBlockPage(blockCheckText)) {
-      return null;
-    }
 
     if (PDF_PAGE_REGEX.test(finalUrl) && normalizedBodyText !== "") {
       return buildPdfPageData(url, finalUrl, normalizedBodyText);
@@ -2853,11 +2826,13 @@ async function fetchPageWithBrowser(
       throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
     }
 
+    await resetSharedBrowser();
     return null;
   } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
+    if (page) {
+      await page.close().catch(() => {});
     }
+    scheduleSharedBrowserClose();
   }
 }
 
@@ -2868,192 +2843,96 @@ async function fetchPage(
 ): Promise<PageData | null> {
   throwIfCrawlShouldStop(runtimeOptions);
 
-  for (let attemptIndex = 0; attemptIndex < FETCH_RETRY_DELAYS_MS.length; attemptIndex += 1) {
-    await waitForHostCooldown(url, runtimeOptions);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
 
-    const retryDelay = FETCH_RETRY_DELAYS_MS[attemptIndex];
-    if (retryDelay > 0) {
-      await sleepCrawl(retryDelay, runtimeOptions);
+  const stopCheckId = setInterval(() => {
+    if (runtimeOptions?.shouldStop?.()) {
+      controller.abort();
+    }
+  }, 150);
+
+  try {
+    const response = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; MasterDataCrawler/1.0)",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      cache: "no-store",
+    });
+
+    throwIfCrawlShouldStop(runtimeOptions);
+
+    if (!response.ok) {
+      return await fetchPageWithBrowser(url, timeoutMs, runtimeOptions);
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
+    const finalUrl = response.url || url;
+    const contentType = response.headers.get("content-type") || "";
 
-    const stopCheckId = setInterval(() => {
-      if (runtimeOptions?.shouldStop?.()) {
-        controller.abort();
-      }
-    }, 150);
-
-    try {
-      const response = await fetch(url, {
-        redirect: "follow",
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; MasterDataCrawler/1.0)",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-          "Cache-Control": "no-cache",
-          Pragma: "no-cache",
-        },
-        cache: "no-store",
-      });
+    if (
+      contentType.toLowerCase().includes("application/pdf") ||
+      PDF_PAGE_REGEX.test(finalUrl)
+    ) {
+      const pdfBuffer = await response.arrayBuffer();
 
       throwIfCrawlShouldStop(runtimeOptions);
 
-      if (!response.ok) {
-        const browserPageData = await fetchPageWithBrowser(
-          url,
-          timeoutMs,
-          runtimeOptions
-        );
+      const pdfText = await extractPdfTextFromArrayBuffer(pdfBuffer);
 
-        if (browserPageData) {
-          markHostFetchSuccess(browserPageData.finalUrl || url);
-          return browserPageData;
-        }
-
-        if (
-          isRetryableFetchStatus(response.status) &&
-          attemptIndex < FETCH_RETRY_DELAYS_MS.length - 1
-        ) {
-          markHostTemporaryFailure(url, attemptIndex);
-          continue;
-        }
-
-        return null;
+      if (pdfText) {
+        return buildPdfPageData(url, finalUrl, pdfText);
       }
 
-      const finalUrl = response.url || url;
-      const contentType = response.headers.get("content-type") || "";
+      return await fetchPageWithBrowser(finalUrl, timeoutMs, runtimeOptions);
+    }
 
-      if (
-        contentType.toLowerCase().includes("application/pdf") ||
-        PDF_PAGE_REGEX.test(finalUrl)
-      ) {
-        const pdfBuffer = await response.arrayBuffer();
+    if (!contentType.toLowerCase().includes("text/html")) return null;
 
-        throwIfCrawlShouldStop(runtimeOptions);
+    const html = await response.text();
 
-        const pdfText = await extractPdfTextFromArrayBuffer(pdfBuffer);
+    throwIfCrawlShouldStop(runtimeOptions);
 
-        if (pdfText) {
-          markHostFetchSuccess(finalUrl);
-          return buildPdfPageData(url, finalUrl, pdfText);
-        }
+    const rawPageData = buildPageData(url, finalUrl, html);
 
-        const browserPageData = await fetchPageWithBrowser(
-          finalUrl,
-          timeoutMs,
-          runtimeOptions
-        );
-
-        if (browserPageData) {
-          markHostFetchSuccess(browserPageData.finalUrl || finalUrl);
-          return browserPageData;
-        }
-
-        if (attemptIndex < FETCH_RETRY_DELAYS_MS.length - 1) {
-          markHostTemporaryFailure(finalUrl, attemptIndex);
-          continue;
-        }
-
-        return null;
-      }
-
-      if (!contentType.toLowerCase().includes("text/html")) {
-        markHostFetchSuccess(finalUrl);
-        return null;
-      }
-
-      const html = await response.text();
-
-      throwIfCrawlShouldStop(runtimeOptions);
-
-      const blockCheckText = [
-        finalUrl,
-        extractTitle(html),
-        extractH1(html),
-        stripHtmlKeepLineBreaks(html).slice(0, 2000),
-      ].join("\n");
-
-      if (looksLikeTemporaryBlockPage(blockCheckText)) {
-        const browserPageData = await fetchPageWithBrowser(
-          finalUrl,
-          timeoutMs,
-          runtimeOptions
-        );
-
-        if (browserPageData) {
-          markHostFetchSuccess(browserPageData.finalUrl || finalUrl);
-          return browserPageData;
-        }
-
-        if (attemptIndex < FETCH_RETRY_DELAYS_MS.length - 1) {
-          markHostTemporaryFailure(finalUrl, attemptIndex);
-          continue;
-        }
-
-        return null;
-      }
-
-      const rawPageData = buildPageData(url, finalUrl, html);
-
-      if (shouldUseBrowserRenderedHtml(html, finalUrl)) {
-        const browserPageData = await fetchPageWithBrowser(
-          finalUrl,
-          timeoutMs,
-          runtimeOptions
-        );
-
-        if (browserPageData) {
-          markHostFetchSuccess(browserPageData.finalUrl || finalUrl);
-          return browserPageData;
-        }
-      }
-
-      markHostFetchSuccess(finalUrl);
-      return rawPageData;
-    } catch (error) {
-      if (runtimeOptions?.shouldStop?.()) {
-        throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
-      }
-
-      if (
-        error instanceof Error &&
-        error.name === "AbortError" &&
-        runtimeOptions?.shouldStop?.()
-      ) {
-        throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
-      }
-
+    if (shouldUseBrowserRenderedHtml(html, finalUrl)) {
       const browserPageData = await fetchPageWithBrowser(
-        url,
+        finalUrl,
         timeoutMs,
         runtimeOptions
       );
 
       if (browserPageData) {
-        markHostFetchSuccess(browserPageData.finalUrl || url);
         return browserPageData;
       }
-
-      if (attemptIndex < FETCH_RETRY_DELAYS_MS.length - 1) {
-        markHostTemporaryFailure(url, attemptIndex);
-        continue;
-      }
-
-      return null;
-    } finally {
-      clearTimeout(timeoutId);
-      clearInterval(stopCheckId);
     }
-  }
 
-  return null;
+    return rawPageData;
+  } catch (error) {
+    if (runtimeOptions?.shouldStop?.()) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+
+    if (
+      error instanceof Error &&
+      error.name === "AbortError" &&
+      runtimeOptions?.shouldStop?.()
+    ) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+
+    return await fetchPageWithBrowser(url, timeoutMs, runtimeOptions);
+  } finally {
+    clearTimeout(timeoutId);
+    clearInterval(stopCheckId);
+  }
 }
 
 async function fetchTopPage(
@@ -3201,36 +3080,36 @@ function getFocusScoreThreshold(focus: CrawlPageFocus) {
 function getFocusCandidatePageLimit(focus: CrawlPageFocus) {
   switch (focus) {
     case "representative":
-      return 220;
+      return 140;
     case "employee_count":
-      return 260;
+      return 160;
     case "business_content":
-      return 40;
+      return 30;
     case "contact":
-      return 24;
+      return 18;
     case "permit":
-      return 80;
+      return 40;
     case "company_core":
     default:
-      return 24;
+      return 18;
   }
 }
 
 function getFocusNestedCandidateLimit(focus: CrawlPageFocus) {
   switch (focus) {
     case "representative":
-      return 120;
-    case "employee_count":
-      return 220;
-    case "business_content":
-      return 20;
-    case "contact":
-      return 16;
-    case "permit":
       return 80;
+    case "employee_count":
+      return 120;
+    case "business_content":
+      return 12;
+    case "contact":
+      return 10;
+    case "permit":
+      return 40;
     case "company_core":
     default:
-      return 16;
+      return 10;
   }
 }
 
