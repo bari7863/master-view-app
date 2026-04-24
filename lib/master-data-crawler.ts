@@ -710,11 +710,7 @@ const EMPLOYEE_COUNT_LABELS = [
   /^スタッフ数$/,
   /^スタッフ人数$/,
   /^在籍スタッフ数$/,
-  /^人数$/,
-  /^総人数$/,
-  /^在籍人数$/,
   /^人員構成$/,
-  /^人員$/,
   /^人員数$/,
   /^総人員$/,
   /^メンバー数$/,
@@ -744,12 +740,8 @@ const EMPLOYEE_COUNT_LABELS = [
   /スタッフ数/,
   /スタッフ人数/,
   /在籍スタッフ数/,
-  /人数/,
-  /総人数/,
-  /在籍人数/,
   /人員構成/,
   /人員数/,
-  /人員/,
   /総人員/,
   /メンバー数/,
   /就業人数/,
@@ -777,7 +769,7 @@ const EMPLOYEE_COUNT_CONTEXT_REGEX =
   /(従業員|社員|職員|スタッフ|人員|メンバー|就業人数|就業者数|連結|単体|単独|個別|グループ社員|正社員|正職員|パート|アルバイト|契約社員|契約職員|派遣社員|派遣スタッフ|嘱託|常勤|非常勤)/i;
 
 const EMPLOYEE_COUNT_DENY_REGEX =
-  /(採用人数|募集人数|募集人員|採用予定人数|定員|参加人数|来場者数|利用者数|会員数|登録者数|フォロワー数|閲覧数|PV|座席数|病床数|車両数|台数|戸数|件数|店舗数|拠点数|事業所数|学校数|顧客数|取引先数|掲載社数|導入社数)/i;
+  /(採用人数|募集人数|募集人員|採用予定人数|新卒採用|中途採用|採用実績|定員|参加人数|来場者数|利用者数|入居者数|患者数|園児数|生徒数|学生数|会員数|登録者数|フォロワー数|閲覧数|PV|座席数|病床数|車両数|保有台数|台数|戸数|件数|施工件数|実績数|店舗数|拠点数|事業所数|営業所数|学校数|顧客数|取引先数|掲載社数|導入社数|売上|売上高|年商|資本金|設立|創業|沿革|年|月|日)/i;
 
 const EMPLOYEE_COUNT_PAGE_KEYWORDS =
   /(従業員数|社員数|職員数|スタッフ数|人数|人員|人員数|総人員|従業員データ|社員データ|数字で見る|データで見る|会社データ|採用データ|就業人数|就業者数|staff|member|members|data|numbers|facts|ir|esg|sustainability|profile|outline)/i;
@@ -2221,19 +2213,6 @@ function normalizeEmployeeCount(value: string) {
     }
   }
 
-  const directPersonOnlyMatch = text.match(
-    new RegExp(`^([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}$`, "i")
-  );
-
-  if (directPersonOnlyMatch?.[1]) {
-    const directPersonOnlyCount = Number(
-      directPersonOnlyMatch[1].replace(/,/g, "")
-    );
-    if (Number.isFinite(directPersonOnlyCount) && directPersonOnlyCount > 0) {
-      return `${directPersonOnlyCount.toLocaleString()}名`;
-    }
-  }
-
   const GROUP_PRIORITY_LABELS = [
     "連結",
     "consolidated",
@@ -2292,22 +2271,22 @@ function normalizeEmployeeCount(value: string) {
     for (const label of labels) {
       const escaped = escapeRegex(label);
 
-      const beforeMatch = text.match(
+      const before = text.match(
         new RegExp(
-          `${escaped}[^0-9]{0,20}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+          `${escaped}[^0-9]{0,12}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
           "i"
         )
       );
-      const beforeCount = toCount(beforeMatch?.[1]);
+      const beforeCount = toCount(before?.[1]);
       if (beforeCount != null) return beforeCount;
 
-      const afterMatch = text.match(
+      const after = text.match(
         new RegExp(
-          `([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}[^0-9]{0,20}${escaped}`,
+          `([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}[^0-9]{0,12}${escaped}`,
           "i"
         )
       );
-      const afterCount = toCount(afterMatch?.[1]);
+      const afterCount = toCount(after?.[1]);
       if (afterCount != null) return afterCount;
     }
 
@@ -2320,16 +2299,15 @@ function normalizeEmployeeCount(value: string) {
   }
 
   const employmentPattern = new RegExp(
-    `(?:${EMPLOYMENT_LABELS.map(escapeRegex).join("|")})[^0-9]{0,20}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+    `(?:${EMPLOYMENT_LABELS.map(escapeRegex).join("|")})[^0-9]{0,12}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
     "gi"
   );
 
-  const employmentMatches = [...text.matchAll(employmentPattern)];
+  const employmentMatches = Array.from(text.matchAll(employmentPattern));
 
   if (employmentMatches.length >= 2) {
-    const total = employmentMatches.reduce((sum, matched) => {
-      const count = toCount(matched[1]);
-      return sum + (count ?? 0);
+    const total = employmentMatches.reduce((sum, match) => {
+      return sum + (toCount(match[1]) ?? 0);
     }, 0);
 
     if (total > 0) {
@@ -2348,46 +2326,27 @@ function normalizeEmployeeCount(value: string) {
       "i"
     )
   );
+
   const exactLabelNumberOnlyCount = toCount(exactLabelNumberOnlyMatch?.[1]);
   if (exactLabelNumberOnlyCount != null) {
     return formatCount(exactLabelNumberOnlyCount);
   }
 
-  const standalonePersonOnlyMatch = text.match(
-    new RegExp(`^([0-9][0-9,]*)\\s*(?:名|人)$`, "i")
-  );
-  const standalonePersonOnlyCount = toCount(standalonePersonOnlyMatch?.[1]);
-  if (standalonePersonOnlyCount != null) {
-    return formatCount(standalonePersonOnlyCount);
-  }
-
   const hasContext = hasEmployeeCountContext(text);
 
   if (!hasContext) {
-    const pureNumberMatch = text.match(/^[0-9][0-9,]*$/);
-    const pureNumberCount = toCount(pureNumberMatch?.[0]);
-    if (pureNumberCount != null) {
-      return formatCount(pureNumberCount);
-    }
     return null;
   }
 
-  const personMatches = [
-    ...text.matchAll(
-      new RegExp(`([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`, "g")
-    ),
-  ]
-    .map((matched) => toCount(matched[1]))
-    .filter((num): num is number => num != null);
+  const labelNearMatch = text.match(
+    new RegExp(
+      `(従業員数|従業員|社員数|職員数|スタッフ数|人員数|総人員|就業人数|就業者数)[^0-9]{0,20}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+      "i"
+    )
+  );
 
-  if (personMatches.length > 0) {
-    return `${Math.max(...personMatches).toLocaleString()}名`;
-  }
-
-  const pureNumberMatch = text.match(/^[0-9][0-9,]*$/);
-  const pureNumberCount = toCount(pureNumberMatch?.[0]);
-  if (pureNumberCount != null) {
-    return formatCount(pureNumberCount);
+  if (labelNearMatch?.[2]) {
+    return formatCount(toCount(labelNearMatch[2]));
   }
 
   return null;
@@ -3207,8 +3166,9 @@ function shouldProcessPermitInFocus(
 function getFocusScoreThreshold(focus: CrawlPageFocus) {
   switch (focus) {
     case "representative":
-    case "employee_count":
       return -220;
+    case "employee_count":
+      return 80;
     case "permit":
       return -120;
     default:
@@ -3504,12 +3464,36 @@ function getCandidateLinkScore(
     }
   }
 
-  if (focus === "employee_count") {
-    if (EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS.test(target)) score += 320;
-    if (EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) score += 300;
-    if (COMPANY_KEYWORDS.test(target)) score += 120;
-    if (BUSINESS_KEYWORDS.test(target)) score += 40;
-  }
+    if (focus === "employee_count") {
+        if (!link.sameOrigin) {
+        score -= 500;
+        }
+
+        if (EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS.test(target)) score += 320;
+        if (EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) score += 300;
+        if (COMPANY_KEYWORDS.test(target)) score += 120;
+        if (BUSINESS_KEYWORDS.test(target)) score += 40;
+
+        if (RECRUIT_KEYWORDS.test(target) && !EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) {
+        score -= 250;
+        }
+
+        if (CONTACT_KEYWORDS.test(target)) {
+        score -= 200;
+        }
+
+        if (NEWS_BLOG_KEYWORDS.test(target)) {
+        score -= 250;
+        }
+
+        if (PDF_PAGE_REGEX.test(link.url)) {
+        if (EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) {
+            score += 140;
+        } else {
+            score -= 200;
+        }
+        }
+    }
 
   if (focus === "business_content") {
     if (BUSINESS_KEYWORDS.test(target)) score += 320;
@@ -3765,6 +3749,8 @@ function pickNestedCandidatePageUrls(
   const urls: string[] = [];
   const seen = new Set<string>();
 
+  const base = new URL(page.finalUrl);
+
   const sortedLinks = [...page.links]
     .map((link) => ({
       url: link.url,
@@ -3776,6 +3762,16 @@ function pickNestedCandidatePageUrls(
   for (const item of sortedLinks) {
     if (seen.has(item.url)) continue;
     if (HTML_PAGE_DENY_EXT.test(item.url)) continue;
+
+    if (focus === "employee_count") {
+      try {
+        const parsed = new URL(item.url);
+        if (parsed.origin !== base.origin) continue;
+      } catch {
+        continue;
+      }
+    }
+
     seen.add(item.url);
     urls.push(item.url);
   }
