@@ -163,6 +163,8 @@ const CRAWL_CONFIRM_FIELD_OPTIONS = [
 type CrawlFieldKey =
   (typeof CRAWL_CONFIRM_FIELD_OPTIONS)[number]["key"];
 
+type CrawlPreviewFieldKey = CrawlFieldKey | "permit_number";
+
 function createInitialCrawlFieldSelections(): Record<CrawlFieldKey, boolean> {
   return CRAWL_CONFIRM_FIELD_OPTIONS.reduce((acc, field) => {
     acc[field.key] = true;
@@ -190,7 +192,7 @@ function getSelectedCrawlFields(
 }
 
 type CrawlPreviewChange = {
-  key: CrawlFieldKey;
+  key: CrawlPreviewFieldKey;
   label: string;
   before: string | null;
   after: string | null;
@@ -209,7 +211,7 @@ type CrawlPreviewRow = {
 type CrawlSelectedChangeValue = string | null;
 type CrawlSelectedChanges = Record<
   string,
-  Partial<Record<CrawlFieldKey, CrawlSelectedChangeValue>>
+  Partial<Record<CrawlPreviewFieldKey, CrawlSelectedChangeValue>>
 >;
 
 type ItemInspectionMethodKey =
@@ -5009,6 +5011,7 @@ const handlePreviewCsvExport = async () => {
           previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
           previewTab,
         }),
+        cache: "no-store",
       });
 
       const data = await readApiResponse(res);
@@ -5279,6 +5282,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             previewPage: 1,
             previewPageSize: CRAWL_PREVIEW_PAGE_SIZE,
           }),
+          cache: "no-store",
         });
 
         const data = await readApiResponse(res);
@@ -5303,7 +5307,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           setCrawlSelectedChanges({});
           setCrawlPreviewOpen(previewTotal > 0);
           setCrawlResumeConfirmOpen(previewTotal === 0);
-          setCrawlMessage("クローリングを中止しました");
+          setCrawlMessage("クローリングを中断しました");
           saveActiveCrawlJobId(jobId);
           return;
         }
@@ -5466,7 +5470,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       setCrawlCurrentWebsiteUrl(null);
       setCrawlCurrentFields([]);
       setCrawlRemainingCount(0);
-      setCrawlMessage("クローリングを中止しました");
+      setCrawlMessage("クローリングを中断しました");
       setCrawlError("");
     } catch (e) {
       setCrawlError(
@@ -5611,6 +5615,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        cache: "no-store",
       });
 
       const data = await readApiResponse(res);
@@ -5662,6 +5667,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           jobId: crawlJobId,
           selectedChanges: crawlSelectedChanges,
         }),
+        cache: "no-store",
       });
 
       const data = await readApiResponse(res);

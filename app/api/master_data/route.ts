@@ -1789,46 +1789,12 @@ function inspectRepresentativeNameValue(value: string | null) {
     };
   }
 
-  const normalizedSource = trimRepresentativeAffixes(
-    normalizeRepresentativeSource(original)
-  );
-
-  if (!normalizedSource) {
-    return {
-      cleanedValue: null as string | null,
-      shouldUpdate: false,
-      shouldDelete: true,
-      shouldReview: false,
-      reason: "空欄相当のため削除候補",
-    };
-  }
-
-  if (shouldAutoDeleteRepresentativeName(original)) {
-    return {
-      cleanedValue: null as string | null,
-      shouldUpdate: false,
-      shouldDelete: true,
-      shouldReview: false,
-      reason: "氏名ではないことが明確なため削除候補",
-    };
-  }
-
-  if (looksLikeNonNameToken(normalizedSource)) {
-    return {
-      cleanedValue: null as string | null,
-      shouldUpdate: false,
-      shouldDelete: false,
-      shouldReview: true,
-      reason: "氏名ではない可能性はあるが自動削除は危険なため要確認",
-    };
-  }
-
   return {
-    cleanedValue: null as string | null,
+    cleanedValue: original,
     shouldUpdate: false,
     shouldDelete: false,
-    shouldReview: true,
-    reason: "氏名か断定できないため要確認",
+    shouldReview: false,
+    reason: "",
   };
 }
 

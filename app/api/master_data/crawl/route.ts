@@ -4,9 +4,11 @@ export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 import { pool } from "@/lib/db";
 import type { PoolClient } from "pg";
-import { promises as fs } from "fs";
-import path from "path";
-import { crawlCompanyWebsite } from "@/lib/master-data-crawler";
+import {
+  crawlCompanyWebsite,
+  type CrawlExtractedFields,
+  type CrawlExtractedOffice,
+} from "@/lib/master-data-crawler";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -864,7 +866,7 @@ function hasPermitSelection(selectedFieldSet: Set<CrawlSelectableFieldKey>) {
 }
 
 function buildCrawlPayloadBundles(
-  extracted: Awaited<ReturnType<typeof crawlCompanyWebsite>>,
+  extracted: CrawlExtractedFields,
   sourceCompany: string | null
 ): CrawlPayloadBundle[] {
   const extractedCompany = normalizeNullableText(extracted.company);
@@ -874,7 +876,7 @@ function buildCrawlPayloadBundles(
       ? extractedCompany
       : fallbackCompany;
 
-  const officeSources =
+  const officeSources: CrawlExtractedOffice[] =
     Array.isArray(extracted.offices) && extracted.offices.length > 0
       ? extracted.offices
       : [
@@ -1281,7 +1283,6 @@ type CrawlJobState = {
   jobId: string;
   selectedFields: CrawlSelectableFieldKey[];
   selectedFieldLabels: string[];
-  targets: Record<string, unknown>[];
   nextIndex: number;
   total: number;
   processed: number;
@@ -1334,12 +1335,6 @@ if (!globalForCrawlJobs.__masterDataCrawlJobs) {
 
 const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
 
-type SerializedCrawlJobState = Omit<CrawlJobState, "savedPreviewRowIds"> & {
-  savedPreviewRowIds: string[];
-};
-
-const CRAWL_JOB_STATE_DIR = path.join(process.cwd(), ".crawl-job-state");
-
 type SerializedCrawlJobPreviewItem = {
   row_id: string;
   preview_row_id: string;
@@ -1377,6 +1372,55 @@ async function ensureCrawlPreviewTable(client: DbClient) {
   await client.query(`
     CREATE INDEX IF NOT EXISTS master_data_crawl_preview_job_idx
     ON public.master_data_crawl_preview (job_id, row_id, office_index)
+  `);
+}
+
+async function ensureCrawlJobTables(client: DbClient) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS public.master_data_crawl_jobs (
+      job_id text PRIMARY KEY,
+      selected_fields jsonb NOT NULL,
+      selected_field_labels jsonb NOT NULL,
+      next_index integer NOT NULL DEFAULT 0,
+      total integer NOT NULL DEFAULT 0,
+      processed integer NOT NULL DEFAULT 0,
+      updated integer NOT NULL DEFAULT 0,
+      skipped integer NOT NULL DEFAULT 0,
+      failed integer NOT NULL DEFAULT 0,
+      current_company text,
+      current_website_url text,
+      running boolean NOT NULL DEFAULT false,
+      paused boolean NOT NULL DEFAULT false,
+      pause_requested boolean NOT NULL DEFAULT false,
+      completed boolean NOT NULL DEFAULT false,
+      error text,
+      sort_key text,
+      sort_direction text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS public.master_data_crawl_targets (
+      job_id text NOT NULL,
+      target_index integer NOT NULL,
+      row_id bigint NOT NULL,
+      company text,
+      address text,
+      website_url text,
+      status text NOT NULL DEFAULT 'pending',
+      skip_reason text,
+      error_message text,
+      started_at timestamptz,
+      finished_at timestamptz,
+      PRIMARY KEY (job_id, target_index)
+    )
+  `);
+
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS master_data_crawl_targets_job_status_idx
+    ON public.master_data_crawl_targets (job_id, status, target_index)
   `);
 }
 
@@ -1637,92 +1681,104 @@ async function persistCrawlJobStateIfNeeded(
   checkpoint.lastPersistedAt = now;
 }
 
-function compactProcessedTargetRow(row: Record<string, unknown>) {
-  return {
-    row_id: String(row.row_id ?? ""),
-    company: normalizeNullableText(row.company),
-    website_url: normalizeNullableText(row.website_url),
-  } as Record<string, unknown>;
-}
-
-async function ensureCrawlJobStateDir() {
-  try {
-    await fs.mkdir(CRAWL_JOB_STATE_DIR, { recursive: true });
-  } catch {}
-}
-
-function getCrawlJobStatePath(jobId: string) {
-  return path.join(CRAWL_JOB_STATE_DIR, `${jobId}.json`);
-}
-
-function serializeCrawlJobState(job: CrawlJobState): SerializedCrawlJobState {
-  return {
-    ...job,
-    savedPreviewRowIds: Array.from(job.savedPreviewRowIds),
-  };
-}
-
-function revivePersistedCrawlJobState(job: CrawlJobState): CrawlJobState {
-  const normalizedSelectedFields = Array.from(
-    normalizeSelectedFields(job.selectedFields)
-  );
-
-  const normalizedJob: CrawlJobState = {
-    ...job,
-    selectedFields: normalizedSelectedFields,
-    selectedFieldLabels: buildSelectedFieldLabels(normalizedSelectedFields),
-  };
-
-  if (normalizedJob.completed || normalizedJob.error) {
-    return normalizedJob;
-  }
-
-  return {
-    ...normalizedJob,
-    running: false,
-    paused: true,
-    pauseRequested: false,
-    currentCompany: null,
-    currentWebsiteUrl: null,
-  };
-}
-
-function deserializeCrawlJobState(rawText: string) {
-  try {
-    const parsed = JSON.parse(rawText) as SerializedCrawlJobState;
-
-    if (!parsed || typeof parsed.jobId !== "string" || parsed.jobId === "") {
-      return null;
-    }
-
-    return revivePersistedCrawlJobState({
-      ...parsed,
-      savedPreviewRowIds: new Set(
-        Array.isArray(parsed.savedPreviewRowIds)
-          ? parsed.savedPreviewRowIds.map((value) => String(value))
-          : []
-      ),
-    });
-  } catch {
-    return null;
-  }
-}
-
 async function persistCrawlJobState(job: CrawlJobState) {
+  const client = await pool.connect();
+
   try {
-    await ensureCrawlJobStateDir();
-    await fs.writeFile(
-      getCrawlJobStatePath(job.jobId),
-      JSON.stringify(serializeCrawlJobState(job)),
-      "utf-8"
+    await ensureCrawlJobTables(client);
+
+    await client.query(
+      `
+        INSERT INTO public.master_data_crawl_jobs (
+          job_id,
+          selected_fields,
+          selected_field_labels,
+          next_index,
+          total,
+          processed,
+          updated,
+          skipped,
+          failed,
+          current_company,
+          current_website_url,
+          running,
+          paused,
+          pause_requested,
+          completed,
+          error,
+          sort_key,
+          sort_direction,
+          updated_at
+        )
+        VALUES (
+          $1, $2::jsonb, $3::jsonb, $4, $5, $6, $7, $8, $9,
+          $10, $11, $12, $13, $14, $15, $16, $17, $18, now()
+        )
+        ON CONFLICT (job_id)
+        DO UPDATE SET
+          selected_fields = EXCLUDED.selected_fields,
+          selected_field_labels = EXCLUDED.selected_field_labels,
+          next_index = EXCLUDED.next_index,
+          total = EXCLUDED.total,
+          processed = EXCLUDED.processed,
+          updated = EXCLUDED.updated,
+          skipped = EXCLUDED.skipped,
+          failed = EXCLUDED.failed,
+          current_company = EXCLUDED.current_company,
+          current_website_url = EXCLUDED.current_website_url,
+          running = EXCLUDED.running,
+          paused = EXCLUDED.paused,
+          pause_requested = EXCLUDED.pause_requested,
+          completed = EXCLUDED.completed,
+          error = EXCLUDED.error,
+          sort_key = EXCLUDED.sort_key,
+          sort_direction = EXCLUDED.sort_direction,
+          updated_at = now()
+      `,
+      [
+        job.jobId,
+        JSON.stringify(job.selectedFields),
+        JSON.stringify(job.selectedFieldLabels),
+        job.nextIndex,
+        job.total,
+        job.processed,
+        job.updated,
+        job.skipped,
+        job.failed,
+        job.currentCompany,
+        job.currentWebsiteUrl,
+        job.running,
+        job.paused,
+        job.pauseRequested,
+        job.completed,
+        job.error,
+        job.sortKey ?? null,
+        job.sortDirection ?? null,
+      ]
     );
-  } catch {}
+  } finally {
+    client.release();
+  }
 }
 
 async function deletePersistedCrawlJobState(jobId: string) {
+  const client = await pool.connect();
+
   try {
-    await fs.unlink(getCrawlJobStatePath(jobId));
-  } catch {}
+    await ensureCrawlJobTables(client);
+
+    await client.query(
+      `DELETE FROM public.master_data_crawl_targets WHERE job_id = $1`,
+      [jobId]
+    );
+
+    await client.query(
+      `DELETE FROM public.master_data_crawl_jobs WHERE job_id = $1`,
+      [jobId]
+    );
+  } finally {
+    client.release();
+  }
 }
 
 async function loadPersistedCrawlJobState(jobId: string) {
@@ -1731,78 +1787,90 @@ async function loadPersistedCrawlJobState(jobId: string) {
     return existing;
   }
 
-  try {
-    const rawText = await fs.readFile(getCrawlJobStatePath(jobId), "utf-8");
-    const job = deserializeCrawlJobState(rawText);
+  const client = await pool.connect();
 
-    if (!job) {
+  try {
+    await ensureCrawlJobTables(client);
+
+    const res = await client.query(
+      `
+        SELECT
+          job_id,
+          selected_fields,
+          selected_field_labels,
+          next_index,
+          total,
+          processed,
+          updated,
+          skipped,
+          failed,
+          current_company,
+          current_website_url,
+          running,
+          paused,
+          pause_requested,
+          completed,
+          error,
+          sort_key,
+          sort_direction
+        FROM public.master_data_crawl_jobs
+        WHERE job_id = $1
+        LIMIT 1
+      `,
+      [jobId]
+    );
+
+    const row = res.rows[0];
+
+    if (!row) {
       return null;
     }
+
+    const selectedFields = Array.isArray(row.selected_fields)
+      ? row.selected_fields
+      : JSON.parse(String(row.selected_fields ?? "[]"));
+
+    const normalizedSelectedFields = Array.from(
+      normalizeSelectedFields(selectedFields)
+    );
+
+    const job: CrawlJobState = {
+      jobId: String(row.job_id),
+      selectedFields: normalizedSelectedFields,
+      selectedFieldLabels: buildSelectedFieldLabels(normalizedSelectedFields),
+      nextIndex: Number(row.next_index ?? 0),
+      total: Number(row.total ?? 0),
+      processed: Number(row.processed ?? 0),
+      updated: Number(row.updated ?? 0),
+      skipped: Number(row.skipped ?? 0),
+      failed: Number(row.failed ?? 0),
+      currentCompany: normalizeNullableText(row.current_company),
+      currentWebsiteUrl: normalizeNullableText(row.current_website_url),
+      running: false,
+      paused: !!row.paused,
+      pauseRequested: false,
+      completed: !!row.completed,
+      error: normalizeNullableText(row.error),
+      previewItems: [],
+      excludedPreviewRows: [],
+      savedPreviewRowIds: new Set<string>(),
+      sortKey: row.sort_key as FilterKey | null,
+      sortDirection: row.sort_direction as SortDirection | "" | null,
+    };
 
     crawlJobs.set(job.jobId, job);
     return job;
-  } catch {
-    return null;
-  }
-}
-
-async function loadLatestPersistedCrawlJobState() {
-  try {
-    await ensureCrawlJobStateDir();
-
-    const fileNames = (await fs.readdir(CRAWL_JOB_STATE_DIR)).filter((fileName) =>
-      fileName.endsWith(".json")
-    );
-
-    if (fileNames.length === 0) {
-      return null;
-    }
-
-    const ranked = await Promise.all(
-      fileNames.map(async (fileName) => {
-        const fullPath = path.join(CRAWL_JOB_STATE_DIR, fileName);
-        const stat = await fs.stat(fullPath);
-
-        return {
-          fileName,
-          updatedAt: stat.mtimeMs,
-        };
-      })
-    );
-
-    ranked.sort((a, b) => b.updatedAt - a.updatedAt);
-
-    for (const item of ranked) {
-      const jobId = item.fileName.replace(/\.json$/, "");
-      const job = await loadPersistedCrawlJobState(jobId);
-
-      if (!job) {
-        continue;
-      }
-
-      if (
-        job.completed &&
-        job.previewItems.length === 0 &&
-        job.nextIndex >= job.total
-      ) {
-        continue;
-      }
-
-      return job;
-    }
-
-    return null;
-  } catch {
-    return null;
+  } finally {
+    client.release();
   }
 }
 
 async function getCrawlJobFromMemoryOrFile(jobId?: string | null) {
-  if (jobId) {
-    return await loadPersistedCrawlJobState(jobId);
+  if (!jobId) {
+    return null;
   }
 
-  return await loadLatestPersistedCrawlJobState();
+  return await loadPersistedCrawlJobState(jobId);
 }
 
 function isCrawlPausedError(error: unknown) {
@@ -1876,38 +1944,94 @@ async function buildPublicPreviewRows(
     };
   }
 
-  const candidateRowIdSet = await fetchCrawlPreviewRowIdSet(client, job.jobId);
-
-  const completedTargets = job.targets.slice(
-    0,
-    Math.max(job.nextIndex, job.processed)
+  const countRes = await client.query(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM public.master_data_crawl_targets AS t
+      WHERE t.job_id = $1
+        AND t.status IN ('done', 'skipped', 'failed')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.master_data_crawl_preview AS p
+          WHERE p.job_id = t.job_id
+            AND p.row_id = t.row_id
+        )
+    `,
+    [job.jobId]
   );
 
-  const excludedBaseRows = completedTargets.filter((row) => {
-    const rowId = String(row.row_id ?? "");
-    return !candidateRowIdSet.has(rowId);
-  });
-
-  const total = excludedBaseRows.length;
+  const total = Number(countRes.rows[0]?.total ?? 0);
   const totalPages = Math.max(1, Math.ceil(total / previewPageSize));
   const safePage = Math.min(Math.max(previewPage, 1), totalPages);
   const start = (safePage - 1) * previewPageSize;
-  const end = start + previewPageSize;
 
-  const rows: CrawlPreviewRow[] = excludedBaseRows
-    .slice(start, end)
-    .map((row) => {
-      const rowId = String(row.row_id ?? "");
+  const excludedRes = await client.query(
+    `
+      SELECT
+        row_id::text,
+        company,
+        website_url,
+        skip_reason,
+        error_message
+      FROM public.master_data_crawl_targets AS t
+      WHERE t.job_id = $1
+        AND t.status IN ('done', 'skipped', 'failed')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.master_data_crawl_preview AS p
+          WHERE p.job_id = t.job_id
+            AND p.row_id = t.row_id
+        )
+      ORDER BY t.target_index ASC
+      LIMIT $2 OFFSET $3
+    `,
+    [job.jobId, previewPageSize, start]
+  );
 
-      return {
-        row_id: rowId,
-        preview_row_id: `${rowId}__excluded`,
-        company: typeof row.company === "string" ? row.company : null,
-        website_url: typeof row.website_url === "string" ? row.website_url : null,
-        source_row: buildPreviewSourceRow(row as Record<string, unknown>),
-        changes: [],
-      };
-    });
+  const rows: CrawlPreviewRow[] = excludedRes.rows.map((row) => {
+    const rowId = String(row.row_id ?? "");
+    const reason =
+      normalizeNullableText(row.skip_reason) ??
+      normalizeNullableText(row.error_message);
+
+    return {
+      row_id: rowId,
+      preview_row_id: `${rowId}__excluded`,
+      company: normalizeNullableText(row.company),
+      website_url: normalizeNullableText(row.website_url),
+      source_row: {
+        company: normalizeNullableText(row.company),
+        zipcode: null,
+        address: null,
+        big_industry: null,
+        small_industry: null,
+        company_kana: null,
+        summary: reason,
+        website_url: normalizeNullableText(row.website_url),
+        form_url: null,
+        phone: null,
+        fax: null,
+        email: null,
+        established_date: null,
+        representative_name: null,
+        representative_title: null,
+        capital: null,
+        employee_count: null,
+        employee_count_year: null,
+        previous_sales: null,
+        latest_sales: null,
+        closing_month: null,
+        office_count: null,
+        tag: null,
+        business_type: null,
+        business_content: null,
+        industry_category: null,
+        permit_number: null,
+        memo: reason,
+      },
+      changes: [],
+    };
+  });
 
   return {
     rows,
@@ -1949,35 +2073,103 @@ function buildJobResponse(job: CrawlJobState) {
   };
 }
 
-async function fetchCrawlTargets(
+async function createCrawlTargets(
   client: DbClient,
+  jobId: string,
   body: CrawlRequestBody
 ) {
   await ensureMasterDataIdColumn(client);
+  await ensureCrawlJobTables(client);
+
   const filterModels = body.filterModels ?? {};
   const advancedFilters = body.advancedFilters ?? {};
-
   const { whereSql, params } = buildWhereClause(filterModels, advancedFilters);
+  const orderBySql = buildOrderBy(body.sortKey, body.sortDirection);
 
-  const targetWhereSql = whereSql;
+  await client.query(
+    `
+      INSERT INTO public.master_data_crawl_targets (
+        job_id,
+        target_index,
+        row_id,
+        company,
+        address,
+        website_url
+      )
+      SELECT
+        $${params.length + 1} AS job_id,
+        ROW_NUMBER() OVER (${orderBySql})::integer - 1 AS target_index,
+        md.id::bigint AS row_id,
+        md."企業名" AS company,
+        md."住所" AS address,
+        md."企業サイトURL" AS website_url
+      FROM public.master_data AS md
+      ${whereSql}
+      ${orderBySql}
+    `,
+    [...params, jobId]
+  );
 
-  const targetSql = `
-    SELECT
-      md.id::text AS row_id,
-      md."企業名" AS company,
-      md."住所" AS address,
-      md."企業サイトURL" AS website_url
-    FROM public.master_data AS md
-    ${targetWhereSql}
-    ${buildOrderBy(body.sortKey, body.sortDirection)}
-  `;
+  const countRes = await client.query(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM public.master_data_crawl_targets
+      WHERE job_id = $1
+    `,
+    [jobId]
+  );
 
-  const targetRes = await client.query(targetSql, params);
-  return targetRes.rows as Record<string, unknown>[];
+  return Number(countRes.rows[0]?.total ?? 0);
+}
+
+async function fetchCrawlTargetByIndex(
+  client: DbClient,
+  jobId: string,
+  targetIndex: number
+) {
+  const res = await client.query(
+    `
+      SELECT
+        row_id::text,
+        company,
+        address,
+        website_url
+      FROM public.master_data_crawl_targets
+      WHERE job_id = $1
+        AND target_index = $2
+      LIMIT 1
+    `,
+    [jobId, targetIndex]
+  );
+
+  return (res.rows[0] as Record<string, unknown> | undefined) ?? null;
+}
+
+async function markCrawlTargetStatus(
+  client: DbClient,
+  jobId: string,
+  targetIndex: number,
+  status: "processing" | "done" | "skipped" | "failed",
+  reason?: string | null
+) {
+  await client.query(
+    `
+      UPDATE public.master_data_crawl_targets
+      SET
+        status = $3,
+        skip_reason = CASE WHEN $3 = 'skipped' THEN $4 ELSE skip_reason END,
+        error_message = CASE WHEN $3 = 'failed' THEN $4 ELSE error_message END,
+        started_at = CASE WHEN $3 = 'processing' THEN now() ELSE started_at END,
+        finished_at = CASE WHEN $3 IN ('done', 'skipped', 'failed') THEN now() ELSE finished_at END
+      WHERE job_id = $1
+        AND target_index = $2
+    `,
+    [jobId, targetIndex, status, reason ?? null]
+  );
 }
 
 async function runCrawlJob(jobId: string) {
-  const firstJob = crawlJobs.get(jobId);
+  const firstJob = await getCrawlJobFromMemoryOrFile(jobId);
   if (!firstJob || firstJob.running || firstJob.completed) return;
 
   firstJob.running = true;
@@ -1998,12 +2190,9 @@ async function runCrawlJob(jobId: string) {
   try {
     client = await pool.connect();
     await ensureCrawlPreviewTable(client);
+    await ensureCrawlJobTables(client);
 
-    for (
-      let index = firstJob.nextIndex;
-      index < firstJob.targets.length;
-      index += 1
-    ) {
+    for (let index = firstJob.nextIndex; index < firstJob.total; index += 1) {
       const job = crawlJobs.get(jobId);
       if (!job) return;
 
@@ -2013,11 +2202,24 @@ async function runCrawlJob(jobId: string) {
         return;
       }
 
-      const row = job.targets[index];
+      const row = await fetchCrawlTargetByIndex(client, job.jobId, index);
+
+      if (!row) {
+        job.failed += 1;
+        job.processed += 1;
+        job.nextIndex = index + 1;
+        await persistCrawlJobStateIfNeeded(job, persistCheckpoint, true);
+        continue;
+      }
+
       job.currentCompany = normalizeNullableText(row.company);
       job.currentWebsiteUrl = normalizeNullableText(row.website_url);
 
+      await markCrawlTargetStatus(client, job.jobId, index, "processing");
+
       let pauseTriggered = false;
+      let targetStatus: "done" | "skipped" | "failed" = "done";
+      let statusReason: string | null = null;
 
       try {
         const selectedFieldSet = new Set(job.selectedFields);
@@ -2025,6 +2227,8 @@ async function runCrawlJob(jobId: string) {
 
         if (!websiteUrl) {
           job.skipped += 1;
+          targetStatus = "skipped";
+          statusReason = "企業サイトURLが空です";
         } else {
           const currentRowData = await fetchSourceRowForPreview(
             client,
@@ -2033,6 +2237,8 @@ async function runCrawlJob(jobId: string) {
 
           if (!currentRowData) {
             job.failed += 1;
+            targetStatus = "failed";
+            statusReason = "DB上の元データが見つかりません";
           } else {
             const extracted = await crawlCompanyWebsite(
               websiteUrl,
@@ -2084,8 +2290,11 @@ async function runCrawlJob(jobId: string) {
               if (rowPreviewItems.length > 0) {
                 await insertCrawlPreviewItems(client, job.jobId, rowPreviewItems);
                 job.updated += rowPreviewItems.length;
+                targetStatus = "done";
               } else {
                 job.skipped += 1;
+                targetStatus = "skipped";
+                statusReason = "取得候補なし、または既存値と同じため更新候補なし";
               }
             }
           }
@@ -2095,12 +2304,24 @@ async function runCrawlJob(jobId: string) {
           pauseTriggered = true;
         } else {
           job.failed += 1;
+          targetStatus = "failed";
+          statusReason =
+            error instanceof Error
+              ? error.message
+              : "クローリング中に不明なエラーが発生しました";
         }
       } finally {
         if (!pauseTriggered) {
+          await markCrawlTargetStatus(
+            client,
+            job.jobId,
+            index,
+            targetStatus,
+            statusReason
+          );
+
           job.processed += 1;
           job.nextIndex = index + 1;
-          job.targets[index] = compactProcessedTargetRow(row);
           await persistCrawlJobStateIfNeeded(job, persistCheckpoint, false);
         }
       }
@@ -2137,7 +2358,7 @@ async function runCrawlJob(jobId: string) {
     }
 
     job.running = false;
-    job.paused = false;
+    job.paused = true;
     job.completed = false;
     job.currentCompany = null;
     job.currentWebsiteUrl = null;
@@ -2321,6 +2542,13 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      if (!job.completed && !job.running && !job.paused && !job.pauseRequested) {
+        job.error = null;
+        job.paused = false;
+        crawlJobs.set(job.jobId, job);
+        void runCrawlJob(job.jobId);
+      }
+
       const includePreviewRows =
         job.paused || job.completed || !!job.error;
 
@@ -2370,6 +2598,11 @@ export async function POST(req: NextRequest) {
       job.savedPreviewRowIds = new Set<string>();
 
       await deleteAllCrawlPreviewItems(client, job.jobId);
+
+      await client.query(
+        `DELETE FROM public.master_data_crawl_targets WHERE job_id = $1`,
+        [job.jobId]
+      );
 
       crawlJobs.delete(job.jobId);
       await deletePersistedCrawlJobState(job.jobId);
@@ -2487,9 +2720,12 @@ export async function POST(req: NextRequest) {
 
       const selectedFieldSet = normalizeSelectedFields(body.selectedFields);
       const selectedFields = Array.from(selectedFieldSet);
-      const targets = await fetchCrawlTargets(client, body);
 
-      if (targets.length === 0) {
+      const jobId = crypto.randomUUID();
+      const total = await createCrawlTargets(client, jobId, body);
+
+      if (total === 0) {
+
         return NextResponse.json({
           ok: true,
           jobId: null,
@@ -2504,16 +2740,14 @@ export async function POST(req: NextRequest) {
       }
 
       await ensureCrawlPreviewTable(client);
-
-      const jobId = crypto.randomUUID();
+      await ensureCrawlJobTables(client);
 
       const job: CrawlJobState = {
         jobId,
         selectedFields,
         selectedFieldLabels: buildSelectedFieldLabels(selectedFields),
-        targets,
         nextIndex: 0,
-        total: targets.length,
+        total,
         processed: 0,
         updated: 0,
         skipped: 0,
