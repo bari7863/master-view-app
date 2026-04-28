@@ -1323,6 +1323,7 @@ const CRAWL_FIELD_LABEL_MAP: Record<CrawlSelectableFieldKey, string> = {
 
 const globalForCrawlJobs = globalThis as typeof globalThis & {
   __masterDataCrawlJobs?: Map<string, CrawlJobState>;
+  __masterDataCrawlJobRuns?: Set<string>;
 };
 
 const crawlJobs =
@@ -1331,6 +1332,13 @@ const crawlJobs =
 
 if (!globalForCrawlJobs.__masterDataCrawlJobs) {
   globalForCrawlJobs.__masterDataCrawlJobs = crawlJobs;
+}
+
+const runningCrawlJobIds =
+  globalForCrawlJobs.__masterDataCrawlJobRuns ?? new Set<string>();
+
+if (!globalForCrawlJobs.__masterDataCrawlJobRuns) {
+  globalForCrawlJobs.__masterDataCrawlJobRuns = runningCrawlJobIds;
 }
 
 const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
@@ -1350,8 +1358,43 @@ type CrawlPersistCheckpoint = {
   lastPersistedAt: number;
 };
 
-const CRAWL_JOB_PROGRESS_SAVE_EVERY = 10;
-const CRAWL_JOB_PROGRESS_SAVE_INTERVAL_MS = 2000;
+const CRAWL_JOB_PROGRESS_SAVE_EVERY = 1;
+const CRAWL_JOB_PROGRESS_SAVE_INTERVAL_MS = 1000;
+
+// 5万件を1回で走り切らず、一定件数ごとに区切って自動再開する
+const CRAWL_JOB_MAX_ROWS_PER_RUN = 30;
+const CRAWL_JOB_MAX_RUN_MS = 3 * 60 * 1000;
+const CRAWL_JOB_RESTART_DELAY_MS = 1000;
+
+function startCrawlJobRunner(jobId: string) {
+  if (runningCrawlJobIds.has(jobId)) return;
+
+  runningCrawlJobIds.add(jobId);
+
+  void runCrawlJob(jobId)
+    .catch(() => {
+      // runCrawlJob内で状態保存するため、ここでは落とさない
+    })
+    .finally(() => {
+      runningCrawlJobIds.delete(jobId);
+
+      const job = crawlJobs.get(jobId);
+
+      if (
+        !job ||
+        job.completed ||
+        job.paused ||
+        job.pauseRequested ||
+        job.error
+      ) {
+        return;
+      }
+
+      setTimeout(() => {
+        startCrawlJobRunner(jobId);
+      }, CRAWL_JOB_RESTART_DELAY_MS);
+    });
+}
 
 async function ensureCrawlPreviewTable(client: DbClient) {
   await client.query(`
@@ -1880,6 +1923,12 @@ function isCrawlPausedError(error: unknown) {
   );
 }
 
+function isRetryableCrawlJobError(message: string) {
+  return /(Connection terminated|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|ECONNREFUSED|fetch failed|timeout|terminating connection|server closed the connection unexpectedly|Client has encountered a connection error|Connection lost|ConnectionError|read ECONNRESET|socket hang up)/i.test(
+    message
+  );
+}
+
 function markCrawlJobPaused(job: CrawlJobState) {
   job.running = false;
   job.paused = true;
@@ -2168,9 +2217,21 @@ async function markCrawlTargetStatus(
   );
 }
 
+async function withCrawlDbClient<T>(
+  callback: (client: DbClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+
+  try {
+    return await callback(client);
+  } finally {
+    client.release();
+  }
+}
+
 async function runCrawlJob(jobId: string) {
   const firstJob = await getCrawlJobFromMemoryOrFile(jobId);
-  if (!firstJob || firstJob.running || firstJob.completed) return;
+  if (!firstJob || firstJob.completed) return;
 
   firstJob.running = true;
   firstJob.paused = false;
@@ -2178,19 +2239,21 @@ async function runCrawlJob(jobId: string) {
   firstJob.error = null;
 
   await persistCrawlJobState(firstJob);
+
   const persistCheckpoint = createCrawlPersistCheckpoint(firstJob);
+  const runStartedAt = Date.now();
+  const runStartedProcessed = firstJob.processed;
 
   const shouldStop = () => {
     const currentJob = crawlJobs.get(jobId);
     return !currentJob || currentJob.pauseRequested;
   };
 
-  let client: DbClient | null = null;
-
   try {
-    client = await pool.connect();
-    await ensureCrawlPreviewTable(client);
-    await ensureCrawlJobTables(client);
+    await withCrawlDbClient(async (client) => {
+      await ensureCrawlPreviewTable(client);
+      await ensureCrawlJobTables(client);
+    });
 
     for (let index = firstJob.nextIndex; index < firstJob.total; index += 1) {
       const job = crawlJobs.get(jobId);
@@ -2202,7 +2265,19 @@ async function runCrawlJob(jobId: string) {
         return;
       }
 
-      const row = await fetchCrawlTargetByIndex(client, job.jobId, index);
+      if (
+        index > firstJob.nextIndex &&
+        (
+          Date.now() - runStartedAt >= CRAWL_JOB_MAX_RUN_MS ||
+          job.processed - runStartedProcessed >= CRAWL_JOB_MAX_ROWS_PER_RUN
+        )
+      ) {
+        break;
+      }
+
+      const row = await withCrawlDbClient((client) =>
+        fetchCrawlTargetByIndex(client, job.jobId, index)
+      );
 
       if (!row) {
         job.failed += 1;
@@ -2215,7 +2290,9 @@ async function runCrawlJob(jobId: string) {
       job.currentCompany = normalizeNullableText(row.company);
       job.currentWebsiteUrl = normalizeNullableText(row.website_url);
 
-      await markCrawlTargetStatus(client, job.jobId, index, "processing");
+      await withCrawlDbClient((client) =>
+        markCrawlTargetStatus(client, job.jobId, index, "processing")
+      );
 
       let pauseTriggered = false;
       let targetStatus: "done" | "skipped" | "failed" = "done";
@@ -2230,9 +2307,8 @@ async function runCrawlJob(jobId: string) {
           targetStatus = "skipped";
           statusReason = "企業サイトURLが空です";
         } else {
-          const currentRowData = await fetchSourceRowForPreview(
-            client,
-            String(row.row_id ?? "")
+          const currentRowData = await withCrawlDbClient((client) =>
+            fetchSourceRowForPreview(client, String(row.row_id ?? ""))
           );
 
           if (!currentRowData) {
@@ -2288,7 +2364,10 @@ async function runCrawlJob(jobId: string) {
               });
 
               if (rowPreviewItems.length > 0) {
-                await insertCrawlPreviewItems(client, job.jobId, rowPreviewItems);
+                await withCrawlDbClient((client) =>
+                  insertCrawlPreviewItems(client, job.jobId, rowPreviewItems)
+                );
+
                 job.updated += rowPreviewItems.length;
                 targetStatus = "done";
               } else {
@@ -2312,12 +2391,14 @@ async function runCrawlJob(jobId: string) {
         }
       } finally {
         if (!pauseTriggered) {
-          await markCrawlTargetStatus(
-            client,
-            job.jobId,
-            index,
-            targetStatus,
-            statusReason
+          await withCrawlDbClient((client) =>
+            markCrawlTargetStatus(
+              client,
+              job.jobId,
+              index,
+              targetStatus,
+              statusReason
+            )
           );
 
           job.processed += 1;
@@ -2339,12 +2420,20 @@ async function runCrawlJob(jobId: string) {
     const job = crawlJobs.get(jobId);
     if (!job) return;
 
-    job.completed = true;
-    job.running = false;
-    job.paused = false;
-    job.pauseRequested = false;
-    job.currentCompany = null;
-    job.currentWebsiteUrl = null;
+    if (job.nextIndex >= job.total) {
+      job.completed = true;
+      job.running = false;
+      job.paused = false;
+      job.pauseRequested = false;
+      job.currentCompany = null;
+      job.currentWebsiteUrl = null;
+    } else {
+      job.running = false;
+      job.paused = false;
+      job.pauseRequested = false;
+      job.currentCompany = null;
+      job.currentWebsiteUrl = null;
+    }
 
     await persistCrawlJobStateIfNeeded(job, persistCheckpoint, true);
   } catch (error) {
@@ -2357,19 +2446,31 @@ async function runCrawlJob(jobId: string) {
       return;
     }
 
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "クローリング中にエラーが発生しました";
+
+    if (isRetryableCrawlJobError(errorMessage)) {
+      job.running = false;
+      job.paused = false;
+      job.completed = false;
+      job.currentCompany = null;
+      job.currentWebsiteUrl = null;
+      job.error = null;
+
+      await persistCrawlJobState(job);
+      return;
+    }
+
     job.running = false;
     job.paused = true;
     job.completed = false;
     job.currentCompany = null;
     job.currentWebsiteUrl = null;
-    job.error =
-      error instanceof Error
-        ? error.message
-        : "クローリング中にエラーが発生しました";
+    job.error = errorMessage;
 
     await persistCrawlJobState(job);
-  } finally {
-    client?.release();
   }
 }
 
@@ -2542,11 +2643,28 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (!job.completed && !job.running && !job.paused && !job.pauseRequested) {
+      const hasActiveRunner = runningCrawlJobIds.has(job.jobId);
+
+      if (job.running && !hasActiveRunner) {
+        job.running = false;
+        job.currentCompany = null;
+        job.currentWebsiteUrl = null;
+        await persistCrawlJobState(job);
+      }
+
+      if (
+        !job.completed &&
+        !job.pauseRequested &&
+        !hasActiveRunner &&
+        (!job.paused || !!job.error)
+      ) {
         job.error = null;
         job.paused = false;
+        job.running = false;
         crawlJobs.set(job.jobId, job);
-        void runCrawlJob(job.jobId);
+
+        await persistCrawlJobState(job);
+        startCrawlJobRunner(job.jobId);
       }
 
       const includePreviewRows =
@@ -2656,7 +2774,7 @@ export async function POST(req: NextRequest) {
 
       await persistCrawlJobState(job);
 
-      void runCrawlJob(job.jobId);
+      startCrawlJobRunner(job.jobId);
 
       return NextResponse.json({
         ...buildJobResponse(job),
@@ -2770,7 +2888,7 @@ export async function POST(req: NextRequest) {
 
       await persistCrawlJobState(job);
 
-      void runCrawlJob(jobId);
+      startCrawlJobRunner(jobId);
 
       return NextResponse.json({
         ...buildJobResponse(job),

@@ -164,6 +164,11 @@ const HTML_PAGE_DENY_EXT =
 
 const PDF_PAGE_REGEX = /\.pdf(?:$|\?)/i;
 
+const CRAWLER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+  "AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/124.0.0.0 Safari/537.36";
+
 const REPRESENTATIVE_TRAILING_TITLE_REGEX =
   /\s*(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|代表)\s*$/i;
 
@@ -266,6 +271,41 @@ const REPRESENTATIVE_OBVIOUS_NON_NAME_VALUES = new Set([
   "基本情報",
 ]);
 
+function isSentenceLikeRepresentativeNoise(value: string) {
+  const normalized = normalizeSpace(value).normalize("NFKC");
+  if (!normalized) return true;
+
+  if (/^(?:が|は|を|に|で|と|の|へ|も|から|より|まで)/.test(normalized)) {
+    return true;
+  }
+
+  if (
+    /(です|ます|ました|おります|いたします|ください|について|ため|功績|感謝状|受賞|表彰|加入者|機構|業界|セーフティネット|支援|サービス|事業|会社|情報|一覧|詳細|こちら)/.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  const compact = normalized.replace(/[\s・･　]/g, "");
+
+  if (
+    compact === normalized &&
+    compact.length > 12 &&
+    /^[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵーA-Za-z]+$/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (normalized.length > 24) {
+    return true;
+  }
+
+  return false;
+}
+
 function isLikelyRepresentativePersonNameCandidate(value: string) {
   const cleaned = cleanRepresentativeCandidate(value);
   if (!cleaned) return false;
@@ -276,6 +316,7 @@ function isLikelyRepresentativePersonNameCandidate(value: string) {
   if (REPRESENTATIVE_COMPANY_REGEX.test(normalized)) return false;
   if (/[0-9０-９]/.test(normalized)) return false;
   if (normalized.length < 2 || normalized.length > 80) return false;
+  if (isSentenceLikeRepresentativeNoise(normalized)) return false;
 
   return /^[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵーA-Za-z]+(?:[\s・･　]+[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵーA-Za-z]+){0,3}$/u.test(
     normalized
@@ -682,6 +723,25 @@ const REPRESENTATIVE_NAME_LABELS = [
   /理事長/,
 ];
 
+const REPRESENTATIVE_INLINE_SAFE_LABELS = [
+  /^代表者名$/,
+  /^代表者氏名$/,
+  /^代表氏名$/,
+  /^代表取締役社長$/,
+  /^代表取締役会長$/,
+  /^代表取締役$/,
+  /^取締役社長$/,
+  /^代表社員$/,
+  /^代表理事$/,
+  /^代表者$/,
+  /代表者名/,
+  /代表者氏名/,
+  /代表氏名/,
+  /代表取締役/,
+  /代表社員/,
+  /代表理事/,
+];
+
 const CAPITAL_LABELS = [
   /^資本金$/,
   /^出資金$/,
@@ -1048,13 +1108,16 @@ function extractSingleLineLabeledValue(
     .map((line) => normalizeSpace(line))
     .filter((line) => line !== "");
 
+  const looseLabelPattern = buildLooseLabelPattern(labelRegexList);
+  const isRepresentativeLabelList = labelRegexList === REPRESENTATIVE_NAME_LABELS;
+
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
 
     if (labelRegexList.some((regex) => regex.test(line))) {
       const sameLine = line.replace(
         new RegExp(
-          `^(?:${buildLooseLabelPattern(labelRegexList)})\\s*[:：]?\\s*`,
+          `^(?:${looseLabelPattern})\\s*[:：]?\\s*`,
           "i"
         ),
         ""
@@ -1072,13 +1135,33 @@ function extractSingleLineLabeledValue(
 
     const matched = line.match(
       new RegExp(
-        `^(?:${buildLooseLabelPattern(labelRegexList)})\\s*[:：]?\\s*(.+)$`,
+        `^(?:${looseLabelPattern})\\s*[:：]?\\s*(.+)$`,
         "i"
       )
     );
 
     if (matched?.[1]) {
       return normalizeSpace(matched[1]);
+    }
+
+    if (isRepresentativeLabelList) {
+      const representativeInlineSafeLabelPattern = buildLooseLabelPattern(
+        REPRESENTATIVE_INLINE_SAFE_LABELS
+      );
+
+      const looseMatched = line.match(
+        new RegExp(
+          `(?:${representativeInlineSafeLabelPattern})\\s*(?:\\||｜|¦|┃|‖|／|/|：|:)?\\s*(.+)$`,
+          "i"
+        )
+      );
+
+      if (looseMatched?.[1]) {
+        const value = normalizeSpace(looseMatched[1]);
+        if (value && value !== line) {
+          return value;
+        }
+      }
     }
   }
 
@@ -2713,7 +2796,19 @@ function shouldUseBrowserRenderedHtml(html: string, finalUrl = "") {
   );
 }
 
+type BrowserRouteLike = {
+  request(): {
+    resourceType(): string;
+  };
+  abort(): Promise<unknown>;
+  continue(): Promise<unknown>;
+};
+
 type BrowserPageLike = {
+  route(
+    url: string,
+    handler: (route: BrowserRouteLike) => Promise<void>
+  ): Promise<unknown>;
   setDefaultNavigationTimeout(timeout: number): void;
   setDefaultTimeout(timeout: number): void;
   goto(
@@ -2832,9 +2927,22 @@ async function fetchPageWithBrowser(
     const browser = await getSharedBrowser();
 
     page = await browser.newPage({
-      userAgent: "Mozilla/5.0 (compatible; MasterDataCrawler/1.0)",
+      userAgent: CRAWLER_USER_AGENT,
       locale: "ja-JP",
     });
+
+    await page
+      .route("**/*", async (route) => {
+        const resourceType = route.request().resourceType();
+
+        if (["image", "media", "font"].includes(resourceType)) {
+          await route.abort();
+          return;
+        }
+
+        await route.continue();
+      })
+      .catch(() => {});
 
     page.setDefaultNavigationTimeout(timeoutMs);
     page.setDefaultTimeout(timeoutMs);
@@ -2850,7 +2958,7 @@ async function fetchPageWithBrowser(
       })
       .catch(() => {});
 
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1000);
 
     throwIfCrawlShouldStop(runtimeOptions);
 
@@ -2923,7 +3031,7 @@ async function fetchPage(
           redirect: "follow",
           signal: controller.signal,
           headers: {
-            "User-Agent": "Mozilla/5.0 (compatible; MasterDataCrawler/1.0)",
+            "User-Agent": CRAWLER_USER_AGENT,
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
             "Cache-Control": "no-cache",
@@ -3031,6 +3139,52 @@ async function fetchPage(
     clearTimeout(timeoutId);
     clearInterval(stopCheckId);
   }
+}
+
+const PAGE_FETCH_CONCURRENCY = 3;
+
+async function fetchPagesConcurrently(
+  urls: string[],
+  timeoutMs: number,
+  runtimeOptions?: CrawlRuntimeOptions,
+  concurrency = PAGE_FETCH_CONCURRENCY
+) {
+  const seen = new Set<string>();
+  const dedupedUrls = urls.filter((url) => {
+    const key = normalizeUrlWithoutHash(url);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const results: Array<PageData | null> = new Array(dedupedUrls.length).fill(
+    null
+  );
+
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < dedupedUrls.length) {
+      throwIfCrawlShouldStop(runtimeOptions);
+
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+
+      results[currentIndex] = await fetchPage(
+        dedupedUrls[currentIndex],
+        timeoutMs,
+        runtimeOptions
+      );
+    }
+  };
+
+  const workerCount = Math.min(concurrency, dedupedUrls.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker())
+  );
+
+  return results.filter((page): page is PageData => page !== null);
 }
 
 async function fetchTopPage(
@@ -3217,6 +3371,8 @@ function getStrongCandidatePathsForFocus(focus: CrawlPageFocus) {
     case "representative":
       return [
         "/company/",
+        "/group/",
+        "/group/index.html",
         "/company.html",
         "/company/index.html",
         "/company/outline.html",
@@ -3411,6 +3567,10 @@ function getCandidateLinkScore(
 
     if (isRepresentativeOverviewPageTarget(target)) {
       score += 520;
+    }
+
+    if (/\/group\/?(?:$|\?)|\/group\/index\.html/i.test(target)) {
+      score += 260;
     }
 
     if (/(役員一覧|officer|executive)/i.test(target)) {
@@ -4142,31 +4302,25 @@ export async function crawlCompanyWebsite(
         (url) => !isRepresentativeOverviewPageTarget(url)
       );
 
-      for (const candidateUrl of overviewCandidateUrls) {
-        throwIfCrawlShouldStop(runtimeOptions);
-
-        if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
-          break;
-        }
-
-        const page = await fetchPage(
-          candidateUrl,
+      const fetchAndProcessRepresentativePages = async (
+        candidateUrls: string[]
+      ) => {
+        const pages = await fetchPagesConcurrently(
+          candidateUrls,
           pageFetchTimeoutMs,
           runtimeOptions
         );
 
-        if (!page) continue;
-        if (fetchedUrlSet.has(page.finalUrl)) continue;
+        for (const page of pages) {
+          throwIfCrawlShouldStop(runtimeOptions);
 
-        if (!shouldProcessRepresentativePage(page)) continue;
+          if (fetchedUrlSet.has(page.finalUrl)) continue;
+          if (!shouldProcessRepresentativePage(page)) continue;
 
-        fetchedUrlSet.add(page.finalUrl);
+          fetchedUrlSet.add(page.finalUrl);
 
-        processPage(page, best, selectedFieldSet, sourceContext, focus);
+          processPage(page, best, selectedFieldSet, sourceContext, focus);
 
-        throwIfCrawlShouldStop(runtimeOptions);
-
-        if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
           const nestedUrls = pickNestedCandidatePageUrls(
             page,
             selectedFieldSet,
@@ -4178,48 +4332,14 @@ export async function crawlCompanyWebsite(
             nestedCandidateUrls.push(nestedUrl);
           }
         }
-      }
+      };
+
+      await fetchAndProcessRepresentativePages(overviewCandidateUrls);
 
       const shouldFetchFallbackRepresentativePages = true;
 
       if (shouldFetchFallbackRepresentativePages) {
-        for (const candidateUrl of fallbackCandidateUrls) {
-          throwIfCrawlShouldStop(runtimeOptions);
-
-          if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
-            break;
-          }
-
-          const page = await fetchPage(
-            candidateUrl,
-            pageFetchTimeoutMs,
-            runtimeOptions
-          );
-
-          if (!page) continue;
-          if (fetchedUrlSet.has(page.finalUrl)) continue;
-
-          if (!shouldProcessRepresentativePage(page)) continue;
-
-          fetchedUrlSet.add(page.finalUrl);
-
-          processPage(page, best, selectedFieldSet, sourceContext, focus);
-
-          throwIfCrawlShouldStop(runtimeOptions);
-
-          if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
-            const nestedUrls = pickNestedCandidatePageUrls(
-              page,
-              selectedFieldSet,
-              focus
-            );
-
-            for (const nestedUrl of nestedUrls) {
-              if (nestedCandidateUrls.includes(nestedUrl)) continue;
-              nestedCandidateUrls.push(nestedUrl);
-            }
-          }
-        }
+        await fetchAndProcessRepresentativePages(fallbackCandidateUrls);
       }
     } else {
       await fetchFocusPages(
@@ -4231,38 +4351,64 @@ export async function crawlCompanyWebsite(
     }
 
     if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
-      for (const nestedUrl of nestedCandidateUrls.slice(
+      const limitedNestedCandidateUrls = nestedCandidateUrls.slice(
         0,
         getFocusNestedCandidateLimit(focus)
-      )) {
-        throwIfCrawlShouldStop(runtimeOptions);
+      );
 
-        if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
-          break;
-        }
-
-        const nestedPage = await fetchPage(
-          nestedUrl,
+      if (focus === "representative") {
+        const nestedPages = await fetchPagesConcurrently(
+          limitedNestedCandidateUrls,
           pageFetchTimeoutMs,
           runtimeOptions
         );
 
-        if (!nestedPage) continue;
-        if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
+        for (const nestedPage of nestedPages) {
+          throwIfCrawlShouldStop(runtimeOptions);
 
-        fetchedUrlSet.add(nestedPage.finalUrl);
+          if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
 
-        if (shouldExtractOffices && focus === "contact") {
-          pushOfficePageSnapshotIfNeeded(collectedPages, nestedPage);
+          fetchedUrlSet.add(nestedPage.finalUrl);
+
+          processPage(
+            nestedPage,
+            best,
+            selectedFieldSet,
+            sourceContext,
+            focus
+          );
         }
+      } else {
+        for (const nestedUrl of limitedNestedCandidateUrls) {
+          throwIfCrawlShouldStop(runtimeOptions);
 
-        processPage(
-          nestedPage,
-          best,
-          selectedFieldSet,
-          sourceContext,
-          focus
-        );
+          if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+            break;
+          }
+
+          const nestedPage = await fetchPage(
+            nestedUrl,
+            pageFetchTimeoutMs,
+            runtimeOptions
+          );
+
+          if (!nestedPage) continue;
+          if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
+
+          fetchedUrlSet.add(nestedPage.finalUrl);
+
+          if (shouldExtractOffices && focus === "contact") {
+            pushOfficePageSnapshotIfNeeded(collectedPages, nestedPage);
+          }
+
+          processPage(
+            nestedPage,
+            best,
+            selectedFieldSet,
+            sourceContext,
+            focus
+          );
+        }
       }
     }
   }
