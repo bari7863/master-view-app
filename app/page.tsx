@@ -1010,6 +1010,17 @@ function includesAllValues(base: string[], values: string[]) {
   return values.every((value) => base.includes(value));
 }
 
+function getSingleLineFitFontSize(value: string) {
+  const length = Array.from(value.replace(/\s/g, "")).length;
+
+  if (length >= 22) return "0.7em";
+  if (length >= 18) return "0.76em";
+  if (length >= 14) return "0.84em";
+  if (length >= 11) return "0.92em";
+
+  return undefined;
+}
+
 function formatYearMonthInputValue(value: string) {
   if (!value || value.length !== 6) return "";
   return `${value.slice(0, 4)}-${value.slice(4, 6)}`;
@@ -1338,7 +1349,7 @@ function HeaderCell({
         typeof document !== "undefined" &&
         createPortal(
           <div
-            className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+            className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
             onClick={() => onToggleOpen(filterKey)}
           >
             <div className="flex min-h-full items-center justify-center">
@@ -2726,10 +2737,13 @@ export default function Home() {
                     className="flex-1 text-left text-sm font-semibold text-slate-100"
                   >
                     <span className="flex items-center justify-between gap-3">
-                      <span>
+                      <span
+                        className="app-fit-one-line flex-1"
+                        style={{ fontSize: getSingleLineFitFontSize(region) }}
+                      >
                         {isRegionOpen ? "▼" : "▶"} {region}
                       </span>
-                      <span className="text-sm font-bold text-slate-200">
+                      <span className="shrink-0 text-sm font-bold text-slate-200">
                         {regionCount.toLocaleString()}
                       </span>
                     </span>
@@ -2803,10 +2817,13 @@ export default function Home() {
                               className="flex-1 text-left text-sm font-medium text-slate-100"
                             >
                               <span className="flex items-center justify-between gap-3">
-                                <span>
+                                <span
+                                  className="app-fit-one-line flex-1"
+                                  style={{ fontSize: getSingleLineFitFontSize(item.prefecture) }}
+                                >
                                   {isPrefectureOpen ? "▼" : "▶"} {item.prefecture}
                                 </span>
-                                <span className="text-sm font-bold text-slate-200">
+                                <span className="shrink-0 text-sm font-bold text-slate-200">
                                   {item.prefectureCount.toLocaleString()}
                                 </span>
                               </span>
@@ -2846,9 +2863,11 @@ export default function Home() {
                                     }
                                     className="h-4 w-4 accent-sky-500"
                                   />
-                                  <span className="min-w-0 flex-1 truncate">{city}</span>
-                                  <span className="shrink-0 text-sm font-bold text-slate-200">
-                                    {(item.cityCounts[city] ?? 0).toLocaleString()}
+                                  <span
+                                    className="app-fit-one-line min-w-0 flex-1"
+                                    style={{ fontSize: getSingleLineFitFontSize(city) }}
+                                  >
+                                    {city}
                                   </span>
                                 </label>
                               ))}
@@ -2950,10 +2969,13 @@ export default function Home() {
                     className="flex-1 text-left text-sm font-semibold text-slate-100"
                   >
                     <span className="flex items-center justify-between gap-3">
-                      <span>
+                      <span
+                        className="app-fit-one-line flex-1"
+                        style={{ fontSize: getSingleLineFitFontSize(industryParent) }}
+                      >
                         {isParentOpen ? "▼" : "▶"} {industryParent}
                       </span>
-                      <span className="text-sm font-bold text-slate-200">
+                      <span className="shrink-0 text-sm font-bold text-slate-200">
                         {parentCount.toLocaleString()}
                       </span>
                     </span>
@@ -3027,10 +3049,13 @@ export default function Home() {
                               className="flex-1 text-left text-sm font-medium text-slate-100"
                             >
                               <span className="flex items-center justify-between gap-3">
-                                <span>
+                                <span
+                                  className="app-fit-one-line flex-1"
+                                  style={{ fontSize: getSingleLineFitFontSize(item.bigIndustry) }}
+                                >
                                   {isOpen ? "▼" : "▶"} {item.bigIndustry}
                                 </span>
-                                <span className="text-sm font-bold text-slate-200">
+                                <span className="shrink-0 text-sm font-bold text-slate-200">
                                   {item.bigIndustryCount.toLocaleString()}
                                 </span>
                               </span>
@@ -3069,7 +3094,12 @@ export default function Home() {
                                     }
                                     className="h-4 w-4 accent-sky-500"
                                   />
-                                  <span className="min-w-0 flex-1 truncate">{smallIndustry}</span>
+                                  <span
+                                    className="app-fit-one-line min-w-0 flex-1"
+                                    style={{ fontSize: getSingleLineFitFontSize(smallIndustry) }}
+                                  >
+                                    {smallIndustry}
+                                  </span>
                                   <span className="shrink-0 text-sm font-bold text-slate-200">
                                     {(item.smallIndustryCounts[smallIndustry] ?? 0).toLocaleString()}
                                   </span>
@@ -3367,10 +3397,13 @@ export default function Home() {
                     className="flex-1 text-left text-sm font-semibold text-slate-100"
                   >
                     <span className="flex items-center justify-between gap-3">
-                      <span>
+                      <span
+                        className="app-fit-one-line flex-1"
+                        style={{ fontSize: getSingleLineFitFontSize(item.parent) }}
+                      >
                         {isOpen ? "▼" : "▶"} {item.parent}
                       </span>
-                      <span className="text-sm font-bold text-slate-200">
+                      <span className="shrink-0 text-sm font-bold text-slate-200">
                         {item.parentCount.toLocaleString()}
                       </span>
                     </span>
@@ -3400,7 +3433,12 @@ export default function Home() {
                           }
                           className="h-4 w-4 accent-sky-500"
                         />
-                        <span className="min-w-0 flex-1 truncate">{tag}</span>
+                        <span
+                          className="app-fit-one-line min-w-0 flex-1"
+                          style={{ fontSize: getSingleLineFitFontSize(tag) }}
+                        >
+                          {tag}
+                        </span>
                         <span className="shrink-0 text-sm font-bold text-slate-200">
                           {(item.tagCounts[tag] ?? 0).toLocaleString()}
                         </span>
@@ -6567,25 +6605,23 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   return (
     <main
       data-theme={themeMode}
-      className="h-[100dvh] overflow-hidden bg-transparent text-slate-100"
+      className={`app-responsive-root ${
+        sidebarOpen ? "app-sidebar-open" : "app-sidebar-closed"
+      } h-[100dvh] overflow-hidden bg-transparent text-slate-100`}
     >
       <div
-        className={`mx-auto flex h-full max-w-[1880px] flex-col pr-2 py-3 transition-all duration-300 ${
-          sidebarOpen ? "pl-[248px]" : "pl-[120px]"
-        }`}
+        className="mx-auto flex h-full min-w-0 max-w-[1880px] flex-col px-[var(--app-page-x)] py-[var(--app-page-y)] pl-[var(--app-content-left)] transition-all duration-300"
       >
 
         <aside
-          className={`fixed left-6 top-0 z-40 transition-all duration-300 ${
-            sidebarOpen ? "w-[220px]" : "w-[92px]"
-          }`}
+          className="fixed bottom-[var(--app-sidebar-gap)] left-[var(--app-sidebar-left)] top-[var(--app-sidebar-gap)] z-40 w-[var(--app-sidebar-width)] overflow-visible transition-all duration-300"
         >
           <div className="mb-0 flex justify-center">
-            <MasterDataBrandLogo className="h-auto w-[280px] shrink-0 md:w-[340px]" />
+            <MasterDataBrandLogo className="h-auto w-[var(--app-logo-width)] shrink-0" />
           </div>
 
-          <div className="rounded-[28px] border border-white/10 bg-[#08101d]/90 p-2 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
-            <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/85 p-3">
+          <div className="app-scrollbar max-h-[calc(100dvh-var(--app-sidebar-menu-offset))] overflow-y-auto rounded-[var(--app-radius-lg)] border border-white/10 bg-[#08101d]/90 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+            <div className="rounded-[var(--app-radius-md)] border border-white/10 bg-[#0b1326]/85 p-[var(--app-panel-pad)]">
 
               <div
                 className={`mb-2 flex items-center ${
@@ -6616,18 +6652,18 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       <button
                         type="button"
                         onClick={() => handleOpenSidebarPanel(item.key)}
-                        className={`flex w-full items-center gap-3 rounded-2xl border px-3 py-3 text-left text-sm font-medium transition ${
+                        className={`flex w-full items-center gap-2 rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-medium transition ${
                           isActive
                             ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
                             : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
                         } ${sidebarOpen ? "justify-start" : "justify-center"}`}
                       >
-                        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f172a]">
+                        <span className="inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl bg-[#0f172a]">
                           <SidebarMenuIcon menuKey={item.key} />
                         </span>
 
                         {sidebarOpen && (
-                          <span className="truncate">{item.label}</span>
+                          <span className="min-w-0 whitespace-nowrap leading-none">{item.label}</span>
                         )}
                       </button>
 
@@ -6640,16 +6676,16 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                             setOpenAdvancedFilterKey(null);
                             setAllFiltersClearConfirmOpen(true);
                           }}
-                          className={`flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-left text-sm font-medium text-slate-200 transition hover:bg-white/10 ${
+                          className={`flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-medium text-slate-200 transition hover:bg-white/10 ${
                             sidebarOpen ? "justify-start" : "justify-center"
                           }`}
                         >
-                          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0f172a] text-base">
+                          <span className="inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl bg-[#0f172a] text-base">
                             ↺
                           </span>
 
                           {sidebarOpen && (
-                            <span className="truncate">フィルタ解除</span>
+                            <span className="min-w-0 whitespace-nowrap leading-none">フィルタ解除</span>
                           )}
                         </button>
                       )}
@@ -6663,39 +6699,39 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
         <div
           ref={topPanelRef}
-          className="sticky top-0 z-30 mb-4 rounded-[28px] border border-white/10 bg-[#08101d]/80 p-1.5 shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
+          className="sticky top-0 z-30 mb-[var(--app-gap-md)] rounded-[var(--app-radius-lg)] border border-white/10 bg-[#08101d]/80 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
         >
-          <div className="rounded-[24px] border border-white/10 bg-[#0b1326]/85 p-4">
+          <div className="rounded-[var(--app-radius-md)] border border-white/10 bg-[#0b1326]/85 p-[var(--app-panel-pad-lg)]">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex justify-start pl-20 xl:flex-1 xl:pl-24">
+              <div className="flex justify-start pl-0 sm:pl-6 xl:flex-1 xl:pl-24">
                 <h1 className="master-data-brand-title text-left text-[30px] leading-none md:text-[42px]">
                   マスタデータ
                 </h1>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
+              <div className="grid grid-cols-2 gap-[var(--app-gap-sm)] xl:grid-cols-4">
+                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
                   <div className="text-xs text-slate-400">総件数</div>
                   <div className="mt-1 text-lg font-semibold text-white md:text-xl">
                     {total.toLocaleString()}件
                   </div>
                 </div>
 
-                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
+                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
                   <div className="text-xs text-slate-400">現在ページ</div>
                   <div className="mt-1 text-lg font-semibold text-white md:text-xl">
                     {page}
                   </div>
                 </div>
 
-                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
+                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
                   <div className="text-xs text-slate-400">総ページ数</div>
                   <div className="mt-1 text-lg font-semibold text-white md:text-xl">
                     {totalPages}
                   </div>
                 </div>
 
-                <div className="flex min-h-[72px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-center">
+                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
                   <div className="text-xs text-slate-400">表示件数</div>
                   <div className="mt-2">
                     <select
@@ -6722,7 +6758,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => setOpenSidebarPanel(null)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -6757,7 +6793,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => setListAddSourceOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -6798,7 +6834,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => setMynaviYearOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -6865,7 +6901,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => setMynaviPageCountOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -6933,7 +6969,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         {mynaviProgressOpen &&
           typeof document !== "undefined" &&
           createPortal(
-            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+            <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
               <div className="flex min-h-full items-center justify-center">
                 <div
                   className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
@@ -7100,7 +7136,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         {mynaviResultOpen &&
           typeof document !== "undefined" &&
           createPortal(
-            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+            <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
               <div className="flex min-h-full items-center justify-center">
                 <div
                   className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
@@ -7219,7 +7255,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => setOpenAdvancedFilterKey(null)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -7323,7 +7359,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 if (itemInspecting) return;
                 setItemInspectionFieldOpen(false);
@@ -7397,7 +7433,12 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                             }
                             className="h-4 w-4 accent-cyan-500"
                           />
-                          <span>{field.label}</span>
+                          <span
+                            className="app-fit-one-line min-w-0 flex-1"
+                            style={{ fontSize: getSingleLineFitFontSize(field.label) }}
+                          >
+                            {field.label}
+                          </span>
                         </label>
                       ))}
                     </div>
@@ -7443,7 +7484,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 if (itemInspecting) return;
                 setItemInspectionMethodOpen(false);
@@ -7562,7 +7603,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         {itemInspectionProgressOpen &&
           typeof document !== "undefined" &&
           createPortal(
-            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+            <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
               <div className="flex min-h-full items-center justify-center">
                 <div className="flex w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
@@ -7689,7 +7730,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         {itemInspectionPreviewConfirmOpen &&
           typeof document !== "undefined" &&
           createPortal(
-            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+            <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
               <div className="flex min-h-full items-center justify-center">
                 <div
                   className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
@@ -7948,7 +7989,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 setCrawlScopeOpen(false);
                 setCrawlTargetScope(null);
@@ -8013,7 +8054,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 setItemInspectionScopeOpen(false);
                 setItemInspectionTargetScope(null);
@@ -8078,7 +8119,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 setDedupeScopeOpen(false);
                 setDedupeTargetScope(null);
@@ -8143,7 +8184,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 setItemDeleteScopeOpen(false);
                 setItemDeleteTarget(null);
@@ -8209,7 +8250,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 if (itemDeleting) return;
                 setItemDeleteFieldOpen(false);
@@ -8326,7 +8367,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => {
                 if (itemDeleting) return;
                 setItemDeleteConfirmOpen(false);
@@ -8402,7 +8443,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => setListDeleteScopeOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -8459,7 +8500,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => !listDeleting && setListDeleteConfirmTarget(null)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -8511,7 +8552,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => setSingleFilterClearConfirm(null)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -8553,7 +8594,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         {crawlProgressOpen &&
           typeof document !== "undefined" &&
           createPortal(
-            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+            <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
               <div className="flex min-h-full items-center justify-center">
                 <div className="flex w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
@@ -8677,7 +8718,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => !crawling && setCrawlConfirmOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -8780,7 +8821,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           {crawlPreviewOpen &&
             typeof document !== "undefined" &&
             createPortal(
-              <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+              <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
                 <div className="flex min-h-full items-center justify-center">
                   <div
                     className="flex w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
@@ -9100,7 +9141,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         {crawlResumeConfirmOpen &&
           typeof document !== "undefined" &&
           createPortal(
-            <div className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6">
+            <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
               <div className="flex min-h-full items-center justify-center">
                 <div className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
@@ -9146,7 +9187,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => !deduplicating && setDedupeConfirmOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -9200,7 +9241,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => !importing && setImportConfirmOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -9314,7 +9355,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           typeof document !== "undefined" &&
           createPortal(
             <div
-              className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
               onClick={() => !importing && setImportDuplicateConfirmOpen(false)}
             >
               <div className="flex min-h-full items-center justify-center">
@@ -9359,7 +9400,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             typeof document !== "undefined" &&
             createPortal(
               <div
-                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
                 onClick={() => {
                   setPreviewCsvScopeOpen(false);
                   setPreviewCsvSource(null);
@@ -9433,7 +9474,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             typeof document !== "undefined" &&
             createPortal(
               <div
-                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
                 onClick={() => setPreviewCsvConfirmOpen(false)}
               >
                 <div className="flex min-h-full items-center justify-center">
@@ -9490,7 +9531,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             typeof document !== "undefined" &&
             createPortal(
               <div
-                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
                 onClick={() => setExportScopeOpen(false)}
               >
                 <div className="flex min-h-full items-center justify-center">
@@ -9551,7 +9592,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             typeof document !== "undefined" &&
             createPortal(
               <div
-                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
                 onClick={() => setExportConfirmOpen(false)}
               >
                 <div className="flex min-h-full items-center justify-center">
@@ -9603,7 +9644,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             typeof document !== "undefined" &&
             createPortal(
               <div
-                className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
                 onClick={() => setExportDuplicateConfirmOpen(false)}
               >
                 <div className="flex min-h-full items-center justify-center">
@@ -9652,7 +9693,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               typeof document !== "undefined" &&
               createPortal(
                 <div
-                  className="fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-4 sm:p-6"
+                  className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
                   onClick={() => setAllFiltersClearConfirmOpen(false)}
                 >
                   <div className="flex min-h-full items-center justify-center">
@@ -9698,9 +9739,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         )}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col rounded-[24px] border border-white/10 bg-[#0b1326]/90 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
-          <div className="flex-1 overflow-auto">
-            <div className="min-w-[5200px]">
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden border border-white/10 bg-[#0b1326]/90 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
+          <div className="app-scrollbar flex-1 overflow-auto">
+            <div className="min-w-[5230px]">
               <div
                 className="sticky z-20 grid border-b border-white/10 bg-[#162033]/95 backdrop-blur-xl"
                 style={{
@@ -9739,7 +9780,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           </div>
         </div>
 
-        <div className="mt-5 shrink-0 flex flex-wrap items-center justify-center gap-2">
+        <div className="mt-[var(--app-gap-lg)] shrink-0 flex flex-wrap items-center justify-center gap-[var(--app-gap-sm)]">
           <button
             onClick={() => setPage(1)}
             disabled={page <= 1 || limit === "all"}
@@ -9798,6 +9839,442 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
         body[data-app-theme="light"] {
           color: #0f172a;
+        }
+
+        .app-responsive-root {
+          --app-sidebar-left: 24px;
+          --app-sidebar-gap: 8px;
+          --app-sidebar-width: 220px;
+          --app-content-left: 248px;
+          --app-logo-width: 340px;
+          --app-sidebar-menu-offset: 190px;
+
+          --app-page-x: 8px;
+          --app-page-y: 12px;
+          --app-panel-pad-xs: 6px;
+          --app-panel-pad: 12px;
+          --app-panel-pad-lg: 16px;
+          --app-card-x: 12px;
+          --app-card-y: 12px;
+          --app-gap-sm: 8px;
+          --app-gap-md: 16px;
+          --app-gap-lg: 20px;
+          --app-radius-lg: 28px;
+          --app-radius-md: 24px;
+          --app-stat-card-h: 72px;
+          --app-menu-icon-size: 40px;
+          --app-fit-font: clamp(11px, 0.82vw, 14px);
+          --app-fit-font-sm: clamp(10px, 0.72vw, 12px);
+          --app-fit-font-lg: clamp(15px, 1.3vw, 20px);
+        }
+
+        .app-responsive-root.app-sidebar-closed {
+          --app-sidebar-width: 92px;
+          --app-content-left: 120px;
+          --app-logo-width: 280px;
+        }
+
+        .app-responsive-root button,
+        .app-responsive-root label,
+        .app-responsive-root input,
+        .app-responsive-root select {
+          font-size: var(--app-fit-font);
+        }
+
+        .app-responsive-root button span,
+        .app-responsive-root label span {
+          text-overflow: clip;
+        }
+
+        .app-responsive-root button,
+        .app-responsive-root label {
+          min-width: 0;
+        }
+
+        .app-responsive-root [class*="text-sm"] {
+          font-size: var(--app-fit-font);
+        }
+
+        .app-responsive-root [class*="text-xs"] {
+          font-size: var(--app-fit-font-sm);
+        }
+
+        .app-responsive-root [class*="text-lg"],
+        .app-responsive-root [class*="text-xl"] {
+          font-size: var(--app-fit-font-lg);
+        }
+
+        .app-modal-root {
+          --app-modal-page-pad: clamp(6px, 1.2vw, 20px);
+          --app-modal-panel-pad-x: clamp(10px, 1.2vw, 16px);
+          --app-modal-panel-pad-y: clamp(10px, 1.2vw, 16px);
+          --app-modal-font: clamp(12px, 0.95vw, 15px);
+          --app-modal-font-sm: clamp(11px, 0.85vw, 13px);
+          --app-modal-font-lg: clamp(15px, 1.2vw, 20px);
+          --app-modal-radius: clamp(12px, 1.1vw, 16px);
+          --app-modal-control-h: clamp(38px, 3.6vw, 44px);
+          --app-modal-close-size: clamp(28px, 2.8vw, 32px);
+          --app-modal-grid-min: 260px;
+        }
+
+        .app-modal-root,
+        .app-modal-root * {
+          box-sizing: border-box;
+        }
+
+        .app-modal-root > div {
+          min-width: 0;
+          padding: 0;
+          align-items: center !important;
+          justify-content: center !important;
+        }
+
+        .app-modal-root > div > div {
+          min-width: 0 !important;
+          max-height: calc(100dvh - var(--app-modal-page-pad) * 2) !important;
+          overflow: auto !important;
+          border-radius: var(--app-modal-radius) !important;
+        }
+
+        .app-modal-root > div > div > div {
+          min-width: 0;
+        }
+
+        .app-modal-root > div > div > div:first-child,
+        .app-modal-root > div > div > div:last-child {
+          padding: var(--app-modal-panel-pad-y) var(--app-modal-panel-pad-x) !important;
+        }
+
+        .app-modal-root button,
+        .app-modal-root label,
+        .app-modal-root input,
+        .app-modal-root select,
+        .app-modal-root textarea {
+          min-width: 0;
+          font-size: var(--app-modal-font) !important;
+          line-height: 1.25 !important;
+        }
+
+        .app-modal-root [class*="text-sm"] {
+          font-size: var(--app-modal-font) !important;
+        }
+
+        .app-modal-root [class*="text-xs"] {
+          font-size: var(--app-modal-font-sm) !important;
+        }
+
+        .app-modal-root [class*="text-lg"],
+        .app-modal-root [class*="text-xl"] {
+          font-size: var(--app-modal-font-lg) !important;
+        }
+
+        .app-modal-root button,
+        .app-modal-root label {
+          white-space: nowrap !important;
+          overflow-wrap: normal !important;
+          word-break: keep-all !important;
+        }
+
+        .app-modal-root button span,
+        .app-modal-root label span,
+        .app-modal-root .truncate,
+        .app-modal-root [class*="truncate"],
+        .app-modal-root .whitespace-nowrap,
+        .app-modal-root [class*="whitespace-nowrap"] {
+          overflow: visible !important;
+          text-overflow: clip !important;
+          white-space: nowrap !important;
+          overflow-wrap: normal !important;
+          word-break: keep-all !important;
+        }
+
+        .app-modal-root .app-fit-one-line {
+          display: block;
+          min-width: 0;
+          max-width: 100%;
+          white-space: nowrap !important;
+          overflow: visible !important;
+          text-overflow: clip !important;
+          line-height: 1.1 !important;
+        }
+
+        .app-modal-root .flex {
+          min-width: 0;
+        }
+
+        .app-modal-root .items-center.justify-between {
+          flex-wrap: nowrap;
+        }
+
+        .app-modal-root .grid[class*="grid-cols-"] {
+          grid-template-columns: repeat(
+            auto-fit,
+            minmax(min(100%, var(--app-modal-grid-min)), 1fr)
+          ) !important;
+        }
+
+        .app-modal-root .grid.grid-cols-3 {
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        }
+
+        .app-modal-root .grid.grid-cols-2 {
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        }
+
+        .app-modal-root .h-11,
+        .app-modal-root .h-10,
+        .app-modal-root .h-9 {
+          min-height: var(--app-modal-control-h) !important;
+          height: auto !important;
+        }
+
+        .app-modal-root .h-8.w-8,
+        .app-modal-root .h-7.w-7 {
+          width: var(--app-modal-close-size) !important;
+          height: var(--app-modal-close-size) !important;
+          min-width: var(--app-modal-close-size) !important;
+          min-height: var(--app-modal-close-size) !important;
+          flex-shrink: 0;
+        }
+
+        .app-modal-root .px-5,
+        .app-modal-root .px-4,
+        .app-modal-root .px-3 {
+          padding-left: var(--app-modal-panel-pad-x) !important;
+          padding-right: var(--app-modal-panel-pad-x) !important;
+        }
+
+        .app-modal-root .py-6,
+        .app-modal-root .py-4,
+        .app-modal-root .py-3 {
+          padding-top: var(--app-modal-panel-pad-y) !important;
+          padding-bottom: var(--app-modal-panel-pad-y) !important;
+        }
+
+        .app-modal-root .rounded-2xl,
+        .app-modal-root .rounded-xl {
+          border-radius: var(--app-modal-radius) !important;
+        }
+
+        @media (max-width: 900px) {
+          .app-modal-root {
+            --app-modal-page-pad: 8px;
+            --app-modal-panel-pad-x: 10px;
+            --app-modal-panel-pad-y: 10px;
+            --app-modal-font: clamp(11px, 1.15vw, 14px);
+            --app-modal-font-sm: clamp(10px, 1vw, 12px);
+            --app-modal-font-lg: clamp(14px, 1.45vw, 18px);
+            --app-modal-control-h: 38px;
+            --app-modal-close-size: 28px;
+            --app-modal-grid-min: 240px;
+          }
+        }
+
+        @media (max-width: 700px) {
+          .app-modal-root {
+            --app-modal-page-pad: 6px;
+            --app-modal-panel-pad-x: 8px;
+            --app-modal-panel-pad-y: 8px;
+            --app-modal-font: clamp(10px, 1.35vw, 13px);
+            --app-modal-font-sm: clamp(9px, 1.15vw, 11px);
+            --app-modal-font-lg: clamp(13px, 1.65vw, 16px);
+            --app-modal-control-h: 36px;
+            --app-modal-close-size: 26px;
+            --app-modal-grid-min: 220px;
+          }
+
+          .app-modal-root > div {
+            align-items: center !important;
+            justify-content: center !important;
+          }
+        }
+
+        @media (max-height: 700px) {
+          .app-modal-root > div {
+            align-items: center !important;
+            justify-content: center !important;
+          }
+        }
+
+        @media (max-width: 1280px) {
+          .app-responsive-root.app-sidebar-open {
+            --app-sidebar-left: 16px;
+            --app-sidebar-width: 200px;
+            --app-content-left: 224px;
+            --app-logo-width: 300px;
+            --app-sidebar-menu-offset: 176px;
+            --app-panel-pad: 10px;
+            --app-panel-pad-lg: 14px;
+            --app-card-x: 10px;
+            --app-card-y: 10px;
+            --app-gap-md: 14px;
+            --app-gap-lg: 16px;
+          }
+
+          .app-responsive-root.app-sidebar-closed {
+            --app-sidebar-left: 16px;
+            --app-sidebar-width: 84px;
+            --app-content-left: 108px;
+            --app-logo-width: 240px;
+            --app-sidebar-menu-offset: 160px;
+          }
+        }
+
+        @media (max-width: 1100px) {
+          .app-responsive-root.app-sidebar-open {
+            --app-sidebar-left: 10px;
+            --app-sidebar-width: 176px;
+            --app-content-left: 194px;
+            --app-logo-width: 260px;
+            --app-sidebar-menu-offset: 150px;
+            --app-page-x: 6px;
+            --app-page-y: 8px;
+            --app-panel-pad-xs: 5px;
+            --app-panel-pad: 8px;
+            --app-panel-pad-lg: 10px;
+            --app-card-x: 8px;
+            --app-card-y: 8px;
+            --app-radius-lg: 22px;
+            --app-radius-md: 18px;
+            --app-stat-card-h: 60px;
+            --app-menu-icon-size: 36px;
+            --app-fit-font: clamp(10px, 0.9vw, 13px);
+            --app-fit-font-sm: clamp(9px, 0.78vw, 11px);
+            --app-fit-font-lg: clamp(13px, 1.25vw, 17px);
+          }
+
+          .app-responsive-root.app-sidebar-closed {
+            --app-sidebar-left: 10px;
+            --app-sidebar-width: 76px;
+            --app-content-left: 92px;
+            --app-logo-width: 210px;
+            --app-sidebar-menu-offset: 140px;
+          }
+        }
+
+        @media (max-width: 900px) {
+          .app-responsive-root.app-sidebar-open {
+            --app-sidebar-left: 6px;
+            --app-sidebar-width: 152px;
+            --app-content-left: 164px;
+            --app-logo-width: 220px;
+            --app-sidebar-menu-offset: 126px;
+            --app-page-x: 4px;
+            --app-page-y: 6px;
+            --app-panel-pad-xs: 4px;
+            --app-panel-pad: 6px;
+            --app-panel-pad-lg: 8px;
+            --app-card-x: 6px;
+            --app-card-y: 7px;
+            --app-gap-sm: 6px;
+            --app-gap-md: 10px;
+            --app-gap-lg: 12px;
+            --app-radius-lg: 18px;
+            --app-radius-md: 15px;
+            --app-stat-card-h: 54px;
+            --app-menu-icon-size: 32px;
+            --app-fit-font: clamp(9px, 1.05vw, 12px);
+            --app-fit-font-sm: clamp(8px, 0.9vw, 10px);
+            --app-fit-font-lg: clamp(12px, 1.45vw, 15px);
+          }
+
+          .app-responsive-root.app-sidebar-closed {
+            --app-sidebar-left: 6px;
+            --app-sidebar-width: 68px;
+            --app-content-left: 78px;
+            --app-logo-width: 180px;
+            --app-sidebar-menu-offset: 118px;
+          }
+
+          .app-responsive-root .master-data-brand-title {
+            font-size: clamp(22px, 3vw, 30px) !important;
+          }
+        }
+
+        @media (max-width: 760px) {
+          .app-responsive-root.app-sidebar-open {
+            --app-sidebar-left: 4px;
+            --app-sidebar-width: 134px;
+            --app-content-left: 144px;
+            --app-logo-width: 190px;
+            --app-sidebar-menu-offset: 110px;
+            --app-stat-card-h: 48px;
+            --app-menu-icon-size: 28px;
+            --app-fit-font: clamp(8px, 1.18vw, 11px);
+            --app-fit-font-sm: clamp(7px, 1vw, 9px);
+            --app-fit-font-lg: clamp(11px, 1.6vw, 14px);
+          }
+
+          .app-responsive-root.app-sidebar-closed {
+            --app-sidebar-left: 4px;
+            --app-sidebar-width: 60px;
+            --app-content-left: 68px;
+            --app-logo-width: 150px;
+            --app-sidebar-menu-offset: 100px;
+          }
+        }
+
+        .app-scrollbar,
+        html,
+        body,
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(56, 189, 248, 0.55) rgba(8, 16, 29, 0.45);
+        }
+
+        .app-scrollbar::-webkit-scrollbar,
+        *::-webkit-scrollbar {
+          width: 10px;
+          height: 10px;
+        }
+
+        .app-scrollbar::-webkit-scrollbar-track,
+        *::-webkit-scrollbar-track {
+          background: rgba(8, 16, 29, 0.55);
+          border-radius: 999px;
+        }
+
+        .app-scrollbar::-webkit-scrollbar-thumb,
+        *::-webkit-scrollbar-thumb {
+          background: linear-gradient(
+            180deg,
+            rgba(56, 189, 248, 0.72),
+            rgba(148, 163, 184, 0.42)
+          );
+          border: 2px solid rgba(8, 16, 29, 0.85);
+          border-radius: 999px;
+        }
+
+        .app-scrollbar::-webkit-scrollbar-thumb:hover,
+        *::-webkit-scrollbar-thumb:hover {
+          background: linear-gradient(
+            180deg,
+            rgba(125, 211, 252, 0.9),
+            rgba(56, 189, 248, 0.58)
+          );
+        }
+
+        main[data-theme="light"] .app-scrollbar,
+        body[data-app-theme="light"] .app-scrollbar,
+        body[data-app-theme="light"] * {
+          scrollbar-color: rgba(14, 165, 233, 0.55) rgba(226, 232, 240, 0.85);
+        }
+
+        main[data-theme="light"] .app-scrollbar::-webkit-scrollbar-track,
+        body[data-app-theme="light"] .app-scrollbar::-webkit-scrollbar-track,
+        body[data-app-theme="light"] *::-webkit-scrollbar-track {
+          background: rgba(226, 232, 240, 0.85);
+        }
+
+        main[data-theme="light"] .app-scrollbar::-webkit-scrollbar-thumb,
+        body[data-app-theme="light"] .app-scrollbar::-webkit-scrollbar-thumb,
+        body[data-app-theme="light"] *::-webkit-scrollbar-thumb {
+          background: linear-gradient(
+            180deg,
+            rgba(14, 165, 233, 0.68),
+            rgba(100, 116, 139, 0.35)
+          );
+          border: 2px solid rgba(248, 250, 252, 0.95);
         }
 
         main[data-theme="light"] [class*="bg-[#08101d]"],
