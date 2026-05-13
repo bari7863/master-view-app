@@ -1,0 +1,3273 @@
+"use strict";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
+// scripts/crawl-worker.ts
+var import_node_http = __toESM(require("node:http"));
+var import_node_fs = __toESM(require("node:fs"));
+var import_node_path = __toESM(require("node:path"));
+var import_node_os = __toESM(require("node:os"));
+var import_node_crypto = __toESM(require("node:crypto"));
+
+// lib/master-data-crawler.ts
+var DEFAULT_CRAWL_SELECTABLE_FIELDS = [
+  "company",
+  "zipcode",
+  "address",
+  "website_url",
+  "form_url",
+  "phone",
+  "fax",
+  "email",
+  "established_date",
+  "representative_name",
+  "capital",
+  "employee_count",
+  "business_content",
+  "worker_dispatch_license",
+  "paid_job_placement_license"
+];
+function hasSelectedCrawlField(selectedFieldSet, field) {
+  return selectedFieldSet.has(field);
+}
+var CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
+var WORKER_DISPATCH_LICENSE_REGEX = /派\s*[0-9０-９]{2}\s*[-－ー―]\s*[0-9０-９]{6}/i;
+var PAID_JOB_PLACEMENT_LICENSE_REGEX = /[0-9０-９]{2}\s*[-－ー―]\s*ユ\s*[-－ー―]\s*[0-9０-９]{6}/i;
+function hasSelectedPermitFields(selectedFieldSet) {
+  return hasSelectedCrawlField(selectedFieldSet, "worker_dispatch_license") || hasSelectedCrawlField(selectedFieldSet, "paid_job_placement_license");
+}
+function extractPermitNumberCategory(text) {
+  const normalized = text.normalize("NFKC");
+  const hasWorkerDispatch = WORKER_DISPATCH_LICENSE_REGEX.test(normalized);
+  const hasPaidPlacement = PAID_JOB_PLACEMENT_LICENSE_REGEX.test(normalized);
+  if (hasWorkerDispatch && hasPaidPlacement) {
+    return "\u52B4\u50CD\u8005\u6D3E\u9063\u30FB\u6709\u6599\u8077\u696D\u7D39\u4ECB";
+  }
+  if (hasWorkerDispatch) {
+    return "\u52B4\u50CD\u8005\u6D3E\u9063";
+  }
+  if (hasPaidPlacement) {
+    return "\u6709\u6599\u8077\u696D\u7D39\u4ECB";
+  }
+  return null;
+}
+function throwIfCrawlShouldStop(runtimeOptions) {
+  if (runtimeOptions?.shouldStop?.()) {
+    throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+  }
+}
+var CONTACT_KEYWORDS = /(お問い合わせ|お問合せ|お問い合わせ先|お問合せ先|連絡先|contact|inquiry|consult|相談|資料請求|フォーム|form|mail)/i;
+var COMPANY_KEYWORDS = /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|事務所概要|事業所案内|店舗案内|拠点情報|アクセス|所在地|outline|profile|company|about|corporate|information)/i;
+var BUSINESS_KEYWORDS = /(事業内容|業務内容|営業内容|取扱業務|取扱内容|取扱商品|サービス|service|business|業容|事業概要|サービス内容)/i;
+var STAFF_KEYWORDS = /(代表|代表者|社長|会長|役員|理事長|所長|センター長|学院長|校長|学長|施設長|室長|ご挨拶|あいさつ|メッセージ|greeting|message|president|ceo|director|chief|officer|executive)/i;
+var RECRUIT_KEYWORDS = /(採用|求人|募集要項|recruit|career|job|jobs|entry)/i;
+var NEWS_BLOG_KEYWORDS = /(お知らせ|新着|news|blog|ブログ|column|コラム|topics|トピックス|works|実績|case|事例|seminar|セミナー|event|イベント|voice|story|success|diary|interview|インタビュー|ひとりごと|卒業生|在校生|コーチ|先生)/i;
+var HTML_PAGE_DENY_EXT = /\.(zip|jpg|jpeg|png|gif|svg|webp|doc|docx|xls|xlsx|ppt|pptx)$/i;
+var PDF_PAGE_REGEX = /\.pdf(?:$|\?)/i;
+var CRAWLER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+var REPRESENTATIVE_LEADING_LABEL_REGEX = /^(?:代表者氏名|代表氏名|代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長|役員(?!一覧|紹介))\s*[:：]?\s*/i;
+var REPRESENTATIVE_STRONG_PAGE_REGEX = /(会社概要(?:・沿革)?|会社案内|会社情報|企業情報|法人概要|企業概要|会社データ|会社紹介|会社基本情報|基本情報|outline|profile|company|corporate|about|gaiyou|overview|information)/i;
+var REPRESENTATIVE_GREETING_PAGE_REGEX = /(代表挨拶|社長挨拶|理事長挨拶|所長挨拶|ご挨拶|トップメッセージ|topmessage|greeting|message|president)/i;
+var REPRESENTATIVE_WEAK_PAGE_REGEX = /(役員一覧|officer|executive|member|staff)/i;
+var REPRESENTATIVE_DENY_PAGE_REGEX = /$^/i;
+var REPRESENTATIVE_COMPANY_REGEX = /株式会社|有限会社|合同会社|合資会社|合名会社|御中/i;
+function cleanRepresentativeCandidate(value) {
+  const normalized = normalizeSpace(value).replace(/[（(][^）)]*[）)]/g, " ").replace(/[【】\[\]「」『』<>〈〉《》〔〕]/g, " ").replace(REPRESENTATIVE_LEADING_LABEL_REGEX, "").replace(
+    /^(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|代表者?|代表|執行役員(?:専務|常務)?|常務取締役?|専務取締役?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工)\s*/i,
+    ""
+  ).replace(
+    /\s*(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|代表者?|代表|執行役員(?:専務|常務)?|常務取締役?|専務取締役?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工)\s*$/i,
+    ""
+  ).replace(/\s*[／/].*$/, "").replace(/\s+/g, " ").trim();
+  return normalized === "" ? null : normalized;
+}
+function normalizeRepresentativeCandidateForBest(value) {
+  return cleanRepresentativeCandidate(value);
+}
+var REPRESENTATIVE_OBVIOUS_NON_NAME_VALUES = /* @__PURE__ */ new Set([
+  "\u6328\u62F6",
+  "\u3054\u6328\u62F6",
+  "\u4EE3\u8868\u6328\u62F6",
+  "\u793E\u9577\u6328\u62F6",
+  "\u7406\u4E8B\u9577\u6328\u62F6",
+  "\u30C8\u30C3\u30D7\u30E1\u30C3\u30BB\u30FC\u30B8",
+  "\u30E1\u30C3\u30BB\u30FC\u30B8",
+  "\u6C0F\u540D",
+  "\u4EE3\u8868\u8005",
+  "\u4EE3\u8868\u8005\u540D",
+  "\u4EE3\u8868\u8005\u6C0F\u540D",
+  "\u4EE3\u8868",
+  "\u793E\u9577",
+  "\u4F1A\u9577",
+  "\u7406\u4E8B\u9577",
+  "\u5F79\u54E1",
+  "\u5F79\u54E1\u4E00\u89A7",
+  "\u4F1A\u793E\u6982\u8981",
+  "\u4F1A\u793E\u60C5\u5831",
+  "\u4F01\u696D\u60C5\u5831",
+  "\u57FA\u672C\u60C5\u5831"
+]);
+function isSentenceLikeRepresentativeNoise(value) {
+  const normalized = normalizeSpace(value).normalize("NFKC");
+  if (!normalized) return true;
+  if (/^(?:が|は|を|に|で|と|の|へ|も|から|より|まで)/.test(normalized)) {
+    return true;
+  }
+  if (/(です|ます|ました|おります|いたします|ください|について|ため|功績|感謝状|受賞|表彰|加入者|機構|業界|セーフティネット|支援|サービス|事業|会社|情報|一覧|詳細|こちら)/.test(
+    normalized
+  )) {
+    return true;
+  }
+  const compact = normalized.replace(/[\s・･　]/g, "");
+  if (compact === normalized && compact.length > 12 && /^[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵーA-Za-z]+$/u.test(
+    normalized
+  )) {
+    return true;
+  }
+  if (normalized.length > 24) {
+    return true;
+  }
+  return false;
+}
+function isLikelyRepresentativePersonNameCandidate(value) {
+  const cleaned = cleanRepresentativeCandidate(value);
+  if (!cleaned) return false;
+  const normalized = cleaned.normalize("NFKC");
+  if (REPRESENTATIVE_OBVIOUS_NON_NAME_VALUES.has(normalized)) return false;
+  if (REPRESENTATIVE_COMPANY_REGEX.test(normalized)) return false;
+  if (/[0-9０-９]/.test(normalized)) return false;
+  if (normalized.length < 2 || normalized.length > 80) return false;
+  if (isSentenceLikeRepresentativeNoise(normalized)) return false;
+  return /^[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵーA-Za-z]+(?:[\s・･　]+[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵーA-Za-z]+){0,3}$/u.test(
+    normalized
+  );
+}
+function pushRepresentativeCandidate(candidateMap, rawValue, score) {
+  if (!rawValue) return;
+  const cleaned = cleanRepresentativeCandidate(rawValue);
+  if (!cleaned) return;
+  if (!isLikelyRepresentativePersonNameCandidate(cleaned)) return;
+  const current = candidateMap.get(cleaned);
+  if (current == null || score > current) {
+    candidateMap.set(cleaned, score);
+  }
+}
+function collectRepresentativeCandidatesFromText(text, baseScore = 0) {
+  const candidateMap = /* @__PURE__ */ new Map();
+  const lines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const exactLabelOnlyPattern = /^(?:代表者氏名|代表氏名|代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)$/i;
+  const exactSameLinePattern = /^(?:代表者氏名|代表氏名|代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長)\s*[:：]?\s*(.+)$/i;
+  const sameLineAfterTitlePattern = /^(?:代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|会長|社長)\s*[:：/／]?\s*(.+)$/i;
+  const sameLineBeforeTitlePattern = /^(.+?)\s+(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|代表)$/u;
+  const titleOnlyPattern = /^(?:代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工)(?:\s+(?:一級塗装技能士|二級塗装技能士|一級建築士|二級建築士|建築士|大工))*$/u;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const sameLine = line.match(exactSameLinePattern);
+    if (sameLine?.[1]) {
+      pushRepresentativeCandidate(candidateMap, sameLine[1], 1100 + baseScore);
+    }
+    if (exactLabelOnlyPattern.test(line)) {
+      pushRepresentativeCandidate(candidateMap, lines[i + 1] ?? null, 1080 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 2] ?? null, 1040 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 3] ?? null, 1e3 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 4] ?? null, 960 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 5] ?? null, 920 + baseScore);
+    }
+    const sameLineAfterTitle = line.match(sameLineAfterTitlePattern);
+    if (sameLineAfterTitle?.[1]) {
+      pushRepresentativeCandidate(candidateMap, sameLineAfterTitle[1], 980 + baseScore);
+    }
+    const sameLineBeforeTitle = line.match(sameLineBeforeTitlePattern);
+    if (sameLineBeforeTitle?.[1]) {
+      pushRepresentativeCandidate(candidateMap, sameLineBeforeTitle[1], 960 + baseScore);
+    }
+    if (titleOnlyPattern.test(line)) {
+      pushRepresentativeCandidate(candidateMap, lines[i + 1] ?? null, 1060 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 2] ?? null, 1020 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 3] ?? null, 980 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 4] ?? null, 940 + baseScore);
+      pushRepresentativeCandidate(candidateMap, lines[i + 5] ?? null, 900 + baseScore);
+    }
+  }
+  return Array.from(candidateMap.entries()).map(([value, score]) => ({ value, score })).sort((a, b) => b.score - a.score);
+}
+function getRepresentativePagePriorityBoost(page) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+  let score = 0;
+  if (REPRESENTATIVE_STRONG_PAGE_REGEX.test(target)) score += 400;
+  if (/(?:当社|弊社|私たち|わたしたち|会社|企業|法人|事務所|株式会社[^\s　/]{0,30}|有限会社[^\s　/]{0,30}|合同会社[^\s　/]{0,30})について/i.test(target)) score += 260;
+  if (REPRESENTATIVE_GREETING_PAGE_REGEX.test(target)) score += 240;
+  if (REPRESENTATIVE_WEAK_PAGE_REGEX.test(target)) score += 120;
+  if (REPRESENTATIVE_DENY_PAGE_REGEX.test(target)) score -= 320;
+  return score;
+}
+function collectRepresentativeCandidates(page) {
+  const candidateMap = /* @__PURE__ */ new Map();
+  const pagePriorityBoost = getRepresentativePagePriorityBoost(page);
+  const pairs = extractPairs(page.html);
+  const representativePairValue = pickRepresentativePairValue(pairs);
+  pushRepresentativeCandidate(
+    candidateMap,
+    representativePairValue,
+    1250 + pagePriorityBoost
+  );
+  const representativeTextValue = extractSingleLineLabeledValue(page.structuredText, REPRESENTATIVE_NAME_LABELS) ?? null;
+  pushRepresentativeCandidate(
+    candidateMap,
+    representativeTextValue,
+    1230 + pagePriorityBoost
+  );
+  const representativeStructuredTableValue = extractRepresentativeTableLikeValue(page.structuredText);
+  pushRepresentativeCandidate(
+    candidateMap,
+    representativeStructuredTableValue,
+    1220 + pagePriorityBoost
+  );
+  const representativeFlatTextValue = page.text !== page.structuredText ? extractSingleLineLabeledValue(page.text, REPRESENTATIVE_NAME_LABELS) : null;
+  pushRepresentativeCandidate(
+    candidateMap,
+    representativeFlatTextValue,
+    1190 + pagePriorityBoost
+  );
+  const representativeFlatTableValue = page.text !== page.structuredText ? extractRepresentativeTableLikeValue(page.text) : null;
+  pushRepresentativeCandidate(
+    candidateMap,
+    representativeFlatTableValue,
+    1180 + pagePriorityBoost
+  );
+  const textCandidates = collectRepresentativeCandidatesFromText(
+    page.structuredText,
+    pagePriorityBoost
+  );
+  for (const candidate of textCandidates) {
+    pushRepresentativeCandidate(candidateMap, candidate.value, candidate.score);
+  }
+  if (page.text !== page.structuredText) {
+    const flatTextCandidates = collectRepresentativeCandidatesFromText(
+      page.text,
+      pagePriorityBoost - 60
+    );
+    for (const candidate of flatTextCandidates) {
+      pushRepresentativeCandidate(candidateMap, candidate.value, candidate.score);
+    }
+  }
+  return Array.from(candidateMap.entries()).map(([value, score]) => ({ value, score })).sort((a, b) => b.score - a.score);
+}
+var COMMON_CANDIDATE_PATHS = [
+  "/company.html",
+  "/company/",
+  "/company/index.html",
+  "/company/outline.html",
+  "/company/profile.html",
+  "/company/message.html",
+  "/company/greeting.html",
+  "/company/access.html",
+  "/company/gaiyou.html",
+  "/company/overview.html",
+  "/company/about/",
+  "/company/data/",
+  "/company/numbers/",
+  "/company/numbers.html",
+  "/numbers/",
+  "/numbers/index.html",
+  "/recruit/",
+  "/recruit/data/",
+  "/recruit/company/",
+  "/companyinfo.html",
+  "/profile.html",
+  "/about.html",
+  "/about/",
+  "/aboutus/",
+  "/aboutus/company-outline/",
+  "/corporate.html",
+  "/corporate/",
+  "/corporate/profile/",
+  "/outline.html",
+  "/gaiyou.html",
+  "/overview.html",
+  "/information.html",
+  "/message.html",
+  "/greeting.html",
+  "/staff.html",
+  "/member.html",
+  "/office.html",
+  "/access.html",
+  "/contact.html",
+  "/data/",
+  "/data/index.html",
+  "/about/chubu/index.html",
+  "/chubu/office/greeting.html",
+  "/domestic/chubu/office/greeting.html",
+  "/office/greeting.html",
+  "/aisatsu.html",
+  "/greeting/president.html",
+  "/president.html",
+  "/president/message.html",
+  "/ceo-message.html",
+  "/topmessage.html",
+  "/message/president.html",
+  "/about/message.html",
+  "/about/greeting.html",
+  "/company/topmessage.html",
+  "/company/president.html",
+  "/corporate/message.html",
+  "/corporate/greeting.html",
+  "/about/outline/",
+  "/about/company/",
+  "/company/about/",
+  "/company/info/",
+  "/kaisya.html",
+  "/kaisya/gaiyou.html",
+  "/company/about.html",
+  "/company/overview/",
+  "/company/outline/",
+  "/company/profile/",
+  "/company/message/",
+  "/company/greeting/",
+  "/corporate/about/",
+  "/corporate/outline/",
+  "/corporate/company/",
+  "/outline/",
+  "/profile/",
+  "/company/",
+  "/kaisha/",
+  "/company/base/"
+];
+var REPRESENTATIVE_OVERVIEW_PAGE_KEYWORDS = /(会社概要(?:・沿革)?|会社案内|会社情報|企業情報|法人概要|企業概要|会社データ|会社紹介|会社基本情報|基本情報|会社を知る|outline|profile|company|corporate|about|gaiyou|overview|information)/i;
+var REPRESENTATIVE_FALLBACK_DENY_KEYWORDS = /$^/i;
+function isRepresentativeOverviewPageTarget(target) {
+  const normalized = decodeURIComponent(target);
+  return REPRESENTATIVE_OVERVIEW_PAGE_KEYWORDS.test(normalized) && !REPRESENTATIVE_FALLBACK_DENY_KEYWORDS.test(normalized);
+}
+function shouldProcessRepresentativePage(page) {
+  void page;
+  return true;
+}
+var ZIPCODE_LABELS = [
+  /^郵便番号$/,
+  /^〒$/,
+  /^所在地〒$/,
+  /^住所〒$/,
+  /郵便番号/,
+  /〒/
+];
+var ADDRESS_LABELS = [
+  /^所在地$/,
+  /^住所$/,
+  /^本社$/,
+  /^本店$/,
+  /^支店$/,
+  /^営業所$/,
+  /^工場$/,
+  /^本社所在地$/,
+  /^本店所在地$/,
+  /^支店所在地$/,
+  /^営業所所在地$/,
+  /^工場所在地$/,
+  /^事業所$/,
+  /^事業所所在地$/,
+  /^本社住所$/,
+  /^本店住所$/,
+  /^所在地・連絡先$/,
+  /^アクセス$/,
+  /所在地/,
+  /住所/,
+  /本社/,
+  /本店/,
+  /支店/,
+  /営業所/,
+  /工場/,
+  /事業所/,
+  /アクセス/
+];
+var FAX_LABELS = [
+  /^FAX$/i,
+  /^FAX番号$/i,
+  /^ＦＡＸ$/,
+  /^ＦＡＸ番号$/,
+  /fax/i,
+  /ファックス/
+];
+var ESTABLISHED_LABELS = [
+  /^設立$/,
+  /^創業$/,
+  /^設立年月日$/,
+  /^創立$/,
+  /^設立日$/,
+  /^会社設立$/,
+  /^法人設立$/,
+  /設立/,
+  /創業/,
+  /創立/
+];
+var REPRESENTATIVE_NAME_LABELS = [
+  /^代表者$/,
+  /^代表者名$/,
+  /^代表者氏名$/,
+  /^代表氏名$/,
+  /^代表取締役$/,
+  /^代表取締役社長$/,
+  /^代表取締役会長$/,
+  /^取締役社長$/,
+  /^代表社員$/,
+  /^代表理事$/,
+  /^理事長$/,
+  /^社長$/,
+  /^会長$/,
+  /^代表$/,
+  /^所長$/,
+  /^センター長$/,
+  /^学院長$/,
+  /^校長$/,
+  /^学長$/,
+  /^施設長$/,
+  /^室長$/,
+  /代表者氏名/,
+  /代表氏名/,
+  /代表者/,
+  /代表取締役/,
+  /代表社員/,
+  /代表理事/,
+  /理事長/
+];
+var REPRESENTATIVE_INLINE_SAFE_LABELS = [
+  /^代表者名$/,
+  /^代表者氏名$/,
+  /^代表氏名$/,
+  /^代表取締役社長$/,
+  /^代表取締役会長$/,
+  /^代表取締役$/,
+  /^取締役社長$/,
+  /^代表社員$/,
+  /^代表理事$/,
+  /^代表者$/,
+  /代表者名/,
+  /代表者氏名/,
+  /代表氏名/,
+  /代表取締役/,
+  /代表社員/,
+  /代表理事/
+];
+var CAPITAL_LABELS = [
+  /^資本金$/,
+  /^出資金$/,
+  /^資本準備金$/,
+  /^資本$/,
+  /資本金/,
+  /出資金/
+];
+var EMPLOYEE_COUNT_LABELS = [
+  /^従業員数$/,
+  /^従業員$/,
+  /^総従業員数$/,
+  /^全従業員数$/,
+  /^連結従業員数$/,
+  /^単体従業員数$/,
+  /^単独従業員数$/,
+  /^個別従業員数$/,
+  /^グループ従業員数$/,
+  /^グループ社員数$/,
+  /^グループ社員合計$/,
+  /^社員数$/,
+  /^社員合計$/,
+  /^職員数$/,
+  /^職員合計$/,
+  /^スタッフ数$/,
+  /^スタッフ人数$/,
+  /^在籍スタッフ数$/,
+  /^人員構成$/,
+  /^人員数$/,
+  /^総人員$/,
+  /^メンバー数$/,
+  /^就業人数$/,
+  /^就業者数$/,
+  /^従業員合計$/,
+  /^常勤職員数$/,
+  /^非常勤職員数$/,
+  /^常勤社員数$/,
+  /^非常勤社員数$/,
+  /^従業員規模$/,
+  /従業員数/,
+  /従業員/,
+  /総従業員数/,
+  /全従業員数/,
+  /連結従業員数/,
+  /単体従業員数/,
+  /単独従業員数/,
+  /個別従業員数/,
+  /グループ従業員数/,
+  /グループ社員数/,
+  /グループ社員合計/,
+  /社員数/,
+  /社員合計/,
+  /職員数/,
+  /職員合計/,
+  /スタッフ数/,
+  /スタッフ人数/,
+  /在籍スタッフ数/,
+  /人員構成/,
+  /人員数/,
+  /総人員/,
+  /メンバー数/,
+  /就業人数/,
+  /就業者数/,
+  /従業員合計/,
+  /常勤職員数/,
+  /非常勤職員数/,
+  /常勤社員数/,
+  /非常勤社員数/,
+  /従業員規模/
+];
+var EMPLOYEE_COUNT_PRIMARY_LABELS = [
+  /^従業員数$/,
+  /^総従業員数$/,
+  /^全従業員数$/,
+  /^連結従業員数$/,
+  /^単体従業員数$/,
+  /^単独従業員数$/,
+  /^個別従業員数$/,
+  /従業員数/
+];
+var EMPLOYEE_COUNT_CONTEXT_REGEX = /(従業員|社員|職員|スタッフ|人員|メンバー|就業人数|就業者数|連結|単体|単独|個別|グループ社員|正社員|正職員|パート|アルバイト|契約社員|契約職員|派遣社員|派遣スタッフ|嘱託|常勤|非常勤)/i;
+var EMPLOYEE_COUNT_DENY_REGEX = /(採用人数|募集人数|募集人員|採用予定人数|新卒採用|中途採用|採用実績|定員|参加人数|来場者数|利用者数|入居者数|患者数|園児数|生徒数|学生数|会員数|登録者数|フォロワー数|閲覧数|PV|座席数|病床数|車両数|保有台数|台数|戸数|件数|施工件数|実績数|店舗数|拠点数|事業所数|営業所数|学校数|顧客数|取引先数|掲載社数|導入社数|売上|売上高|年商|資本金|設立|創業|沿革|年|月|日)/i;
+var EMPLOYEE_COUNT_PAGE_KEYWORDS = /(従業員数|社員数|職員数|スタッフ数|人数|人員|人員数|総人員|従業員データ|社員データ|数字で見る|データで見る|会社データ|採用データ|就業人数|就業者数|staff|member|members|data|numbers|facts|ir|esg|sustainability|profile|outline)/i;
+var EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS = /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|会社データ|会社基本情報|基本情報|company|corporate|about|outline|profile|overview|information)/i;
+var EMPLOYEE_COUNT_SECTION_END_LABELS = /(会社名|商号|代表取締役|代表者|所在地|住所|電話番号|TEL|ＦＡＸ|FAX|従業員数|事業内容|設立|創業|資本金|アクセス|お問い合わせ|営業時間|受付時間|最寄りの交通機関|MAP)/i;
+var BUSINESS_CONTENT_LABELS = [
+  /^事業内容$/,
+  /^業務内容$/,
+  /^営業内容$/,
+  /^サービス内容$/,
+  /^事業概要$/,
+  /^業容$/,
+  /^取扱業務$/,
+  /^取扱内容$/,
+  /^取扱商品$/,
+  /^主な事業$/,
+  /^業務案内$/,
+  /^サービス$/,
+  /事業内容/,
+  /業務内容/,
+  /営業内容/,
+  /サービス内容/,
+  /事業概要/,
+  /業容/
+];
+var PHONE_LABELS = [
+  /^電話番号$/i,
+  /^電話$/i,
+  /^TEL$/i,
+  /^Tel$/i,
+  /^tel$/i,
+  /^本社電話番号$/i,
+  /^代表電話$/i,
+  /電話番号/i,
+  /電話/i,
+  /TEL/i
+];
+var CONTACT_INFO_LABELS = [
+  /^連絡先$/i,
+  /^連絡先情報$/i,
+  /連絡先/i
+];
+var ADDRESS_STOP_WORDS = /(連絡先|アクセス方法|アクセス|TEL|Tel|tel|電話|FAX|Fax|fax|営業時間|定休日|MAP|Google|メール|E-mail|E-mai|Mail|お問合せ|お問い合わせ|Copyright|著作権|All Rights Reserved|業種|創業|設立|資本金|従業員数|取引先|Top Message|代表ご挨拶|Our Philosophy|Our Policy|History|沿革|Access|Contact|会社情報|事業紹介|設備紹介|お知らせ)/i;
+var BUSINESS_STOP_WORDS = /(お問い合わせ|お問合せ|スタッフ紹介|仕事紹介|サービス紹介|NEWS|BLOG|COLUMN|会社概要|所在地|連絡先|TEL|FAX|営業時間|定休日)/i;
+var BUSINESS_HINT_WORDS = /(事業|業務|販売|企画|請負|開発|分譲|売買|施工|設計|運営|介護|福祉|サービス|広告|製造|卸|小売|コンサル|代理店|保険|デイサービス)/i;
+var PREFECTURE_REGEX_SOURCE = "(?:\u5317\u6D77\u9053|\u9752\u68EE\u770C|\u5CA9\u624B\u770C|\u5BAE\u57CE\u770C|\u79CB\u7530\u770C|\u5C71\u5F62\u770C|\u798F\u5CF6\u770C|\u8328\u57CE\u770C|\u6803\u6728\u770C|\u7FA4\u99AC\u770C|\u57FC\u7389\u770C|\u5343\u8449\u770C|\u6771\u4EAC\u90FD|\u795E\u5948\u5DDD\u770C|\u65B0\u6F5F\u770C|\u5BCC\u5C71\u770C|\u77F3\u5DDD\u770C|\u798F\u4E95\u770C|\u5C71\u68A8\u770C|\u9577\u91CE\u770C|\u5C90\u961C\u770C|\u9759\u5CA1\u770C|\u611B\u77E5\u770C|\u4E09\u91CD\u770C|\u6ECB\u8CC0\u770C|\u4EAC\u90FD\u5E9C|\u5927\u962A\u5E9C|\u5175\u5EAB\u770C|\u5948\u826F\u770C|\u548C\u6B4C\u5C71\u770C|\u9CE5\u53D6\u770C|\u5CF6\u6839\u770C|\u5CA1\u5C71\u770C|\u5E83\u5CF6\u770C|\u5C71\u53E3\u770C|\u5FB3\u5CF6\u770C|\u9999\u5DDD\u770C|\u611B\u5A9B\u770C|\u9AD8\u77E5\u770C|\u798F\u5CA1\u770C|\u4F50\u8CC0\u770C|\u9577\u5D0E\u770C|\u718A\u672C\u770C|\u5927\u5206\u770C|\u5BAE\u5D0E\u770C|\u9E7F\u5150\u5CF6\u770C|\u6C96\u7E04\u770C)";
+var MUNICIPALITY_REGEX_SOURCE = "(?:[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u5E02[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]*\u533A?|[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u90E1[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u753A|[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u90E1[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u6751|[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u533A|[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u753A|[\u4E00-\u9FA0\u3005\u3041-\u3093\u30A1-\u30F6\u30FC]+\u6751)";
+var ADDRESS_PREFIX_REGEX = /^(?:所在地|住所|本社所在地|本店所在地|支店所在地|営業所所在地|工場所在地|事業所所在地|本社住所|本店住所|本社|本店|支店|営業所|工場|事業所|(?:[^\s　]+(?:工場|支店|営業所|事業所)))\s*[:：]?\s*/i;
+var ADDRESS_TRAILING_LABEL_REGEX = /\s*(?:営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|連絡先|本社|本店|支店|営業所|工場|事業所)\s*$/i;
+function normalizeDigits(value) {
+  return value.replace(
+    /[０-９]/g,
+    (char) => String.fromCharCode(char.charCodeAt(0) - 65248)
+  );
+}
+function normalizeSpace(value) {
+  return value.replace(/\u00A0/g, " ").replace(/&nbsp;/gi, " ").replace(/&#160;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/\r/g, " ").replace(/\n/g, " ").replace(/\t/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+function stripHtml(html) {
+  return normalizeSpace(
+    html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<br\s*\/?>/gi, "\n").replace(
+      /<\/(p|div|section|article|li|ul|ol|tr|td|th|dd|dt|h1|h2|h3|h4|h5|h6)>/gi,
+      "\n"
+    ).replace(/<[^>]+>/g, " ")
+  );
+}
+function firstMatch(text, regex) {
+  const matched = text.match(regex);
+  return matched?.[1] ? normalizeSpace(matched[1]) : null;
+}
+function extractTitle(html) {
+  return firstMatch(html, /<title[^>]*>([\s\S]*?)<\/title>/i) ?? "";
+}
+function extractH1(html) {
+  return firstMatch(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i) ?? "";
+}
+function extractMetaDescription(html) {
+  return firstMatch(
+    html,
+    /<meta[^>]+name=["']description["'][^>]+content=["']([\s\S]*?)["'][^>]*>/i
+  ) ?? firstMatch(
+    html,
+    /<meta[^>]+content=["']([\s\S]*?)["'][^>]+name=["']description["'][^>]*>/i
+  ) ?? "";
+}
+function extractOgSiteName(html) {
+  return firstMatch(
+    html,
+    /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([\s\S]*?)["'][^>]*>/i
+  ) ?? firstMatch(
+    html,
+    /<meta[^>]+content=["']([\s\S]*?)["'][^>]+property=["']og:site_name["'][^>]*>/i
+  ) ?? "";
+}
+function extractJsonLdOrganizationName(html) {
+  const scriptMatches = html.match(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+  );
+  if (!scriptMatches) return "";
+  for (const block of scriptMatches) {
+    const name = firstMatch(
+      block,
+      /"@type"\s*:\s*"Organization"[\s\S]*?"name"\s*:\s*"([^"]+)"/i
+    ) ?? firstMatch(
+      block,
+      /"name"\s*:\s*"([^"]+)"[\s\S]*?"@type"\s*:\s*"Organization"/i
+    );
+    if (name) return name;
+  }
+  return "";
+}
+function normalizeSeedUrl(input) {
+  const trimmed = normalizeSpace(input);
+  if (trimmed === "") return null;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+function normalizeUrlWithoutHash(url) {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+function extractLinks(html, baseUrl) {
+  const result = [];
+  const seen = /* @__PURE__ */ new Set();
+  const base = new URL(baseUrl);
+  const regex = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match = null;
+  while ((match = regex.exec(html)) !== null) {
+    const href = normalizeSpace(match[1] || "");
+    const text = stripHtml(match[2] || "");
+    if (!href || /^javascript:/i.test(href) || href.startsWith("#")) continue;
+    if (/^(mailto:|tel:)/i.test(href)) continue;
+    try {
+      const resolved = normalizeUrlWithoutHash(new URL(href, base).toString());
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+      result.push({
+        url: resolved,
+        text,
+        sameOrigin: new URL(resolved).origin === base.origin
+      });
+    } catch {
+      continue;
+    }
+  }
+  return result;
+}
+function cleanCompanyName(value) {
+  const normalized = normalizeSpace(value);
+  if (!normalized) return null;
+  const parts = normalized.split(/\s*[|｜]\s*|\s+[ー―_・]\s+/).map((item) => normalizeSpace(item)).filter(
+    (item) => item !== "" && !/^(top|home|ホーム|トップページ|latest news|最新情報|news|recruit|contact|会社情報|会社概要|企業情報|企業概要|アクセス|about|company|information)$/i.test(
+      item
+    )
+  );
+  const picked = parts.find(
+    (item) => /株式会社|有限会社|合同会社|合資会社|合名会社|Inc\.?|INC\.?|Co\.\s*,?\s*Ltd\.?|CO\.\s*,?\s*LTD\.?/i.test(
+      item
+    )
+  );
+  return picked || parts[0] || null;
+}
+function extractCompanyNameFromText(text) {
+  const normalized = normalizeSpace(text);
+  if (!normalized) return null;
+  const matches = normalized.match(
+    /(?:株式会社|有限会社|合同会社|合資会社|合名会社)\s*[^\s　]{1,40}|[^\s　]{1,40}(?:株式会社|有限会社|合同会社|合資会社|合名会社)/g
+  ) ?? [];
+  for (const candidate of matches) {
+    const cleaned = cleanCompanyName(candidate);
+    if (cleaned) return cleaned;
+  }
+  return null;
+}
+function extractSingleLineLabeledValue(text, labelRegexList, _maxLength = 120) {
+  const lines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const looseLabelPattern = buildLooseLabelPattern(labelRegexList);
+  const isRepresentativeLabelList = labelRegexList === REPRESENTATIVE_NAME_LABELS;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (labelRegexList.some((regex) => regex.test(line))) {
+      const sameLine = line.replace(
+        new RegExp(
+          `^(?:${looseLabelPattern})\\s*[:\uFF1A]?\\s*`,
+          "i"
+        ),
+        ""
+      );
+      if (sameLine && sameLine !== line) {
+        return normalizeSpace(sameLine);
+      }
+      const nextLine = lines[i + 1] ?? "";
+      if (nextLine) {
+        return nextLine;
+      }
+    }
+    const matched = line.match(
+      new RegExp(
+        `^(?:${looseLabelPattern})\\s*[:\uFF1A]?\\s*(.+)$`,
+        "i"
+      )
+    );
+    if (matched?.[1]) {
+      return normalizeSpace(matched[1]);
+    }
+    if (isRepresentativeLabelList) {
+      const representativeInlineSafeLabelPattern = buildLooseLabelPattern(
+        REPRESENTATIVE_INLINE_SAFE_LABELS
+      );
+      const looseMatched = line.match(
+        new RegExp(
+          `(?:${representativeInlineSafeLabelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:)?\\s*(.+)$`,
+          "i"
+        )
+      );
+      if (looseMatched?.[1]) {
+        const value = normalizeSpace(looseMatched[1]);
+        if (value && value !== line) {
+          return value;
+        }
+      }
+    }
+  }
+  return null;
+}
+function extractRepresentativeTableLikeValue(text) {
+  const lines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const labelPattern = buildLooseLabelPattern(REPRESENTATIVE_NAME_LABELS);
+  for (const line of lines) {
+    const matched = line.match(
+      new RegExp(
+        `^(?:${labelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:)\\s*(.+)$`,
+        "i"
+      )
+    );
+    if (matched?.[1]) {
+      return normalizeSpace(matched[1]);
+    }
+  }
+  return null;
+}
+function extractEmployeeCountTableLikeValue(text) {
+  const lines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+  for (const line of lines) {
+    const matched = line.match(
+      new RegExp(
+        `^(?:${labelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:)\\s*(.+)$`,
+        "i"
+      )
+    );
+    if (matched?.[1]) {
+      return normalizeSpace(matched[1]);
+    }
+  }
+  return null;
+}
+function extractPrimaryEmployeeCountValueFromPairs(pairs) {
+  for (const pair of pairs) {
+    if (!EMPLOYEE_COUNT_PRIMARY_LABELS.some((regex) => regex.test(pair.label))) {
+      continue;
+    }
+    const normalized = normalizeDigits(
+      normalizeSpace(`${pair.label} ${pair.value}`)
+    );
+    const matched = normalized.match(/([0-9][0-9,]*)\s*(名|人)\b/i);
+    if (matched?.[1] && matched?.[2]) {
+      return `${matched[1]}${matched[2]}`;
+    }
+  }
+  return null;
+}
+function extractPrimaryEmployeeCountValueFromText(text) {
+  const lines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_PRIMARY_LABELS);
+  const sameLinePattern = new RegExp(
+    `^(?:${labelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:)?\\s*([0-9][0-9,]*)\\s*(\u540D|\u4EBA)\\b`,
+    "i"
+  );
+  const labelOnlyPattern = new RegExp(
+    `^(?:${labelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:)?\\s*$`,
+    "i"
+  );
+  for (let i = 0; i < lines.length; i += 1) {
+    const currentLine = normalizeDigits(lines[i]);
+    const sameLine = currentLine.match(sameLinePattern);
+    if (sameLine?.[1] && sameLine?.[2]) {
+      return `${sameLine[1]}${sameLine[2]}`;
+    }
+    if (!labelOnlyPattern.test(currentLine)) {
+      continue;
+    }
+    for (let j = i + 1; j < Math.min(lines.length, i + 4); j += 1) {
+      const nextLine = normalizeDigits(lines[j]);
+      const nextMatched = nextLine.match(/^([0-9][0-9,]*)\s*(名|人)\b/i);
+      if (nextMatched?.[1] && nextMatched?.[2]) {
+        return `${nextMatched[1]}${nextMatched[2]}`;
+      }
+    }
+  }
+  return null;
+}
+function formatJapanesePhone(digits) {
+  const normalized = digits.replace(/\D/g, "");
+  if (!/^0\d{9,10}$/.test(normalized)) return null;
+  if (/^(070|080|090|050|020)\d{8}$/.test(normalized)) {
+    return `${normalized.slice(0, 3)}-${normalized.slice(3, 7)}-${normalized.slice(7)}`;
+  }
+  if (/^0120\d{6}$/.test(normalized)) {
+    return `${normalized.slice(0, 4)}-${normalized.slice(4, 7)}-${normalized.slice(7)}`;
+  }
+  if (/^0570\d{6}$/.test(normalized)) {
+    return `${normalized.slice(0, 4)}-${normalized.slice(4, 6)}-${normalized.slice(6)}`;
+  }
+  if (/^(03|06)\d{8}$/.test(normalized)) {
+    return `${normalized.slice(0, 2)}-${normalized.slice(2, 6)}-${normalized.slice(6)}`;
+  }
+  if (normalized.length === 10) {
+    return `${normalized.slice(0, 4)}-${normalized.slice(4, 6)}-${normalized.slice(6)}`;
+  }
+  if (normalized.length === 11) {
+    return `${normalized.slice(0, 3)}-${normalized.slice(3, 7)}-${normalized.slice(7)}`;
+  }
+  return normalized;
+}
+function normalizePhone(value) {
+  const normalized = normalizeDigits(normalizeSpace(value)).replace(/[()（）]/g, "-");
+  if (!normalized) return null;
+  const labeledMatch = normalized.match(
+    /(?:TEL|Tel|tel|電話番号|電話|本社電話番号|代表電話|連絡先)\s*[:：.]?\s*(0[\d\s-]{8,13}\d)/i
+  );
+  if (labeledMatch?.[1]) {
+    return formatJapanesePhone(labeledMatch[1]);
+  }
+  const candidates = Array.from(
+    normalized.matchAll(/(^|[^\d])(0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4})(?=$|[^\d])/g),
+    (match) => match[2]
+  );
+  for (const candidate of candidates) {
+    const digits = candidate.replace(/\D/g, "");
+    if (digits.length < 10 || digits.length > 11) continue;
+    return formatJapanesePhone(digits);
+  }
+  return null;
+}
+function normalizeFax(value) {
+  const normalized = normalizeDigits(normalizeSpace(value)).replace(/[()（）]/g, "-");
+  if (!normalized) return null;
+  const labeledMatch = normalized.match(
+    /(?:FAX|ＦＡＸ|Fax|fax|ファックス)\s*[:：.]?\s*(0[\d\s-]{8,13}\d)/i
+  );
+  if (labeledMatch?.[1]) {
+    return formatJapanesePhone(labeledMatch[1]);
+  }
+  if (/^[0-9\s-]+$/.test(normalized)) {
+    return formatJapanesePhone(normalized);
+  }
+  return null;
+}
+function normalizeZipcode(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return null;
+  const matched = normalized.match(/(?:〒\s*)?(\d{3})-?(\d{4})/);
+  return matched ? `${matched[1]}-${matched[2]}` : null;
+}
+function pickAddressCore(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return null;
+  const cleaned = normalized.replace(ADDRESS_PREFIX_REGEX, "").replace(/(?:〒\s*)?\d{3}-?\d{4}\s*/g, "").replace(/\s{2,}/g, " ").trim();
+  const stopSource = `${ADDRESS_STOP_WORDS.source}|\u55B6\u696D\u90E8|\u7DCF\u52D9\u90E8|\u751F\u7523\u90E8|\u7BA1\u7406\u90E8|\u54C1\u8CEA\u7BA1\u7406\u90E8|\u6280\u8853\u90E8|\u958B\u767A\u90E8|\u5DE5\u52D9\u90E8|\u7D4C\u7406\u90E8|\u4EBA\u4E8B\u90E8|\u4F01\u753B\u90E8|\u8CFC\u8CB7\u90E8|\u7269\u6D41\u90E8|\u696D\u52D9\u90E8|\u672C\u793E|\u672C\u5E97|\u652F\u5E97|\u55B6\u696D\u6240|\u5DE5\u5834|\u4E8B\u696D\u6240`;
+  const prefectureMatch = cleaned.match(
+    new RegExp(
+      `((?:${PREFECTURE_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
+    )
+  );
+  if (prefectureMatch?.[1]) {
+    return prefectureMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
+  }
+  const municipalityMatch = cleaned.match(
+    new RegExp(
+      `((?:${MUNICIPALITY_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
+    )
+  );
+  if (municipalityMatch?.[1]) {
+    return municipalityMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
+  }
+  return cleaned.replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim() || null;
+}
+function normalizeAddress(value) {
+  const core = pickAddressCore(value);
+  if (!core) return null;
+  const cleaned = core.replace(/\s*(?:連絡先|アクセス方法|アクセス|TEL.*|Tel.*|tel.*|電話.*|FAX.*|Fax.*|fax.*|営業時間.*|定休日.*|MAP.*|Google.*|メール.*|E-mail.*|E-mai.*|Mail.*|お問合せ.*|お問い合わせ.*)$/i, "").replace(ADDRESS_TRAILING_LABEL_REGEX, "").replace(/\s{2,}/g, " ").trim();
+  if (!cleaned) return null;
+  if (/@/.test(cleaned)) return null;
+  if (/copyright|all rights reserved/i.test(cleaned)) return null;
+  const addressLikePattern = new RegExp(
+    `${PREFECTURE_REGEX_SOURCE}|${MUNICIPALITY_REGEX_SOURCE}`
+  );
+  if (!addressLikePattern.test(cleaned)) return null;
+  return cleaned;
+}
+function extractAddressFromText(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return null;
+  const withoutPrefix = normalized.replace(ADDRESS_PREFIX_REGEX, "").trim();
+  const stopSource = `${ADDRESS_STOP_WORDS.source}|\u55B6\u696D\u90E8|\u7DCF\u52D9\u90E8|\u751F\u7523\u90E8|\u7BA1\u7406\u90E8|\u54C1\u8CEA\u7BA1\u7406\u90E8|\u6280\u8853\u90E8|\u958B\u767A\u90E8|\u5DE5\u52D9\u90E8|\u7D4C\u7406\u90E8|\u4EBA\u4E8B\u90E8|\u4F01\u753B\u90E8|\u8CFC\u8CB7\u90E8|\u7269\u6D41\u90E8|\u696D\u52D9\u90E8|\u672C\u793E|\u672C\u5E97|\u652F\u5E97|\u55B6\u696D\u6240|\u5DE5\u5834|\u4E8B\u696D\u6240`;
+  const matched = withoutPrefix.match(
+    new RegExp(
+      `((?:\u3012\\s*)?\\d{3}-?\\d{4}\\s*)?((?:(?:${PREFECTURE_REGEX_SOURCE})|(?:${MUNICIPALITY_REGEX_SOURCE})).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
+    )
+  );
+  if (!matched) return null;
+  return normalizeAddress(`${matched[1] ?? ""} ${matched[2] ?? ""}`);
+}
+function normalizeEmail(value) {
+  const normalized = normalizeSpace(value);
+  const matched = normalized.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return matched ? matched[0] : null;
+}
+function stripHtmlKeepLineBreaks(html) {
+  const decoded = html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ").replace(/<br\s*\/?>/gi, "\n").replace(
+    /<\/(p|div|section|article|li|ul|ol|tr|td|th|dd|dt|h1|h2|h3|h4|h5|h6)>/gi,
+    "\n"
+  ).replace(/<[^>]+>/g, " ").replace(/\u00A0/g, " ").replace(/&nbsp;/gi, " ").replace(/&#160;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">");
+  return decoded.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "").join("\n");
+}
+function uniqueNonEmpty(values) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const value of values) {
+    const normalized = normalizeSpace(value ?? "");
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+function normalizeEstablished(value) {
+  const normalized = normalizeSpace(value);
+  if (!normalized) return null;
+  const matched = normalized.match(/([12][0-9]{3})[^0-9]{0,3}([0-9]{1,2})?/);
+  if (!matched) return null;
+  const year = matched[1];
+  const month = matched[2] ? String(Number(matched[2])) : "";
+  if (month) {
+    return `${year}\u5E74${month}\u6708`;
+  }
+  return `${year}\u5E74`;
+}
+function hasEmployeeCountContext(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return false;
+  return EMPLOYEE_COUNT_CONTEXT_REGEX.test(normalized);
+}
+function isLikelyEmployeeCountNoise(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return true;
+  if (hasEmployeeCountContext(normalized)) return false;
+  return EMPLOYEE_COUNT_DENY_REGEX.test(normalized);
+}
+function pushEmployeeCountCandidate(candidateMap, rawValue, score) {
+  if (!rawValue) return;
+  if (isLikelyEmployeeCountNoise(rawValue)) return;
+  const normalized = normalizeEmployeeCount(rawValue);
+  if (!normalized) return;
+  const current = candidateMap.get(normalized);
+  if (current == null || score > current) {
+    candidateMap.set(normalized, score);
+  }
+}
+function collectEmployeeCountCandidatesFromText(text, baseScore = 0) {
+  const candidateMap = /* @__PURE__ */ new Map();
+  const lines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+  const exactLabelOnlyPattern = new RegExp(`^(?:${labelPattern})$`, "i");
+  const exactSameLinePattern = new RegExp(
+    `^(?:${labelPattern})\\s*[:\uFF1A]?\\s*(.+)$`,
+    "i"
+  );
+  const exactTableLikePattern = new RegExp(
+    `^(?:${labelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:)\\s*(.+)$`,
+    "i"
+  );
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const next1 = lines[i + 1] ?? "";
+    const next2 = lines[i + 2] ?? "";
+    const next3 = lines[i + 3] ?? "";
+    const next4 = lines[i + 4] ?? "";
+    const next5 = lines[i + 5] ?? "";
+    const sameLine = line.match(exactSameLinePattern);
+    if (sameLine?.[1]) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${sameLine[1]}`,
+        1200 + baseScore
+      );
+    }
+    const tableLike = line.match(exactTableLikePattern);
+    if (tableLike?.[1]) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${tableLike[1]}`,
+        1190 + baseScore
+      );
+    }
+    if (exactLabelOnlyPattern.test(line)) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${next1}`,
+        1180 + baseScore
+      );
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${next1} ${next2}`,
+        1140 + baseScore
+      );
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${next1} ${next2} ${next3}`,
+        1100 + baseScore
+      );
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${next2}`,
+        1060 + baseScore
+      );
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${next3}`,
+        1020 + baseScore
+      );
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${next4}`,
+        980 + baseScore
+      );
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `${line} ${next5}`,
+        940 + baseScore
+      );
+    }
+    const block2 = [line, next1].filter(Boolean).join(" ");
+    const block3 = [line, next1, next2].filter(Boolean).join(" ");
+    const block4 = [line, next1, next2, next3].filter(Boolean).join(" ");
+    const block5 = [line, next1, next2, next3, next4].filter(Boolean).join(" ");
+    if (hasEmployeeCountContext(line) && /\d/.test(normalizeDigits(line))) {
+      pushEmployeeCountCandidate(candidateMap, line, 1040 + baseScore);
+    }
+    if (hasEmployeeCountContext(block2) && /\d/.test(normalizeDigits(block2))) {
+      pushEmployeeCountCandidate(candidateMap, block2, 1020 + baseScore);
+    }
+    if (hasEmployeeCountContext(block3) && /\d/.test(normalizeDigits(block3))) {
+      pushEmployeeCountCandidate(candidateMap, block3, 1e3 + baseScore);
+    }
+    if (hasEmployeeCountContext(block4) && /\d/.test(normalizeDigits(block4))) {
+      pushEmployeeCountCandidate(candidateMap, block4, 980 + baseScore);
+    }
+    if (hasEmployeeCountContext(block5) && /\d/.test(normalizeDigits(block5))) {
+      pushEmployeeCountCandidate(candidateMap, block5, 960 + baseScore);
+    }
+  }
+  return Array.from(candidateMap.entries()).map(([value, sourceScore]) => ({ value, sourceScore })).sort((a, b) => b.sourceScore - a.sourceScore);
+}
+async function extractPdfTextFromArrayBuffer(buffer) {
+  try {
+    const imported = await new Function("return import('pdf-parse')")().catch(() => null);
+    const pdfParse = imported?.default ?? imported;
+    if (typeof pdfParse !== "function") return null;
+    const parsed = await pdfParse(Buffer.from(buffer));
+    const text = String(parsed?.text ?? "");
+    const normalized = text.split(/\r?\n/).map((line) => normalizeSpace(line)).filter((line) => line !== "").join("\n");
+    return normalized || null;
+  } catch {
+    return null;
+  }
+}
+function buildPdfPageData(requestedUrl, finalUrl, pdfText) {
+  const title = decodeURIComponent(finalUrl.split("/").pop() || "document.pdf");
+  return {
+    requestedUrl,
+    finalUrl,
+    html: "",
+    text: pdfText,
+    structuredText: pdfText,
+    title,
+    h1: "",
+    links: []
+  };
+}
+function escapeEmployeeCountRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+var EMPLOYEE_COUNT_BOUNDARY_LABELS = [
+  "\u4F1A\u793E\u540D",
+  "\u5546\u53F7",
+  "\u4EE3\u8868\u53D6\u7DE0\u5F79",
+  "\u4EE3\u8868\u8005",
+  "\u6240\u5728\u5730",
+  "\u4F4F\u6240",
+  "\u96FB\u8A71\u756A\u53F7",
+  "TEL",
+  "\uFF26\uFF21\uFF38",
+  "FAX",
+  "\u5F93\u696D\u54E1\u6570",
+  "\u5F93\u696D\u54E1",
+  "\u7DCF\u5F93\u696D\u54E1\u6570",
+  "\u5168\u5F93\u696D\u54E1\u6570",
+  "\u9023\u7D50\u5F93\u696D\u54E1\u6570",
+  "\u5358\u4F53\u5F93\u696D\u54E1\u6570",
+  "\u5358\u72EC\u5F93\u696D\u54E1\u6570",
+  "\u500B\u5225\u5F93\u696D\u54E1\u6570",
+  "\u30B0\u30EB\u30FC\u30D7\u5F93\u696D\u54E1\u6570",
+  "\u30B0\u30EB\u30FC\u30D7\u793E\u54E1\u6570",
+  "\u30B0\u30EB\u30FC\u30D7\u793E\u54E1\u5408\u8A08",
+  "\u793E\u54E1\u6570",
+  "\u793E\u54E1\u5408\u8A08",
+  "\u8077\u54E1\u6570",
+  "\u8077\u54E1\u5408\u8A08",
+  "\u30B9\u30BF\u30C3\u30D5\u6570",
+  "\u30B9\u30BF\u30C3\u30D5\u4EBA\u6570",
+  "\u5728\u7C4D\u30B9\u30BF\u30C3\u30D5\u6570",
+  "\u4EBA\u6570",
+  "\u7DCF\u4EBA\u6570",
+  "\u5728\u7C4D\u4EBA\u6570",
+  "\u4EBA\u54E1\u69CB\u6210",
+  "\u4EBA\u54E1",
+  "\u4EBA\u54E1\u6570",
+  "\u7DCF\u4EBA\u54E1",
+  "\u30E1\u30F3\u30D0\u30FC\u6570",
+  "\u5C31\u696D\u4EBA\u6570",
+  "\u5C31\u696D\u8005\u6570",
+  "\u5F93\u696D\u54E1\u5408\u8A08",
+  "\u5E38\u52E4\u8077\u54E1\u6570",
+  "\u975E\u5E38\u52E4\u8077\u54E1\u6570",
+  "\u5E38\u52E4\u793E\u54E1\u6570",
+  "\u975E\u5E38\u52E4\u793E\u54E1\u6570",
+  "\u5F93\u696D\u54E1\u898F\u6A21",
+  "\u4E8B\u696D\u5185\u5BB9",
+  "\u8A2D\u7ACB",
+  "\u5275\u696D",
+  "\u8CC7\u672C\u91D1",
+  "\u30A2\u30AF\u30BB\u30B9",
+  "\u304A\u554F\u3044\u5408\u308F\u305B",
+  "\u55B6\u696D\u6642\u9593",
+  "\u53D7\u4ED8\u6642\u9593",
+  "\u6700\u5BC4\u308A\u306E\u4EA4\u901A\u6A5F\u95A2",
+  "MAP"
+];
+function buildEmployeeCountStructuredLines(text) {
+  const originalLines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const merged = normalizeSpace(originalLines.join(" "));
+  if (!merged) {
+    return originalLines;
+  }
+  const boundaryPattern = EMPLOYEE_COUNT_BOUNDARY_LABELS.map((label) => escapeEmployeeCountRegex(label)).join("|");
+  const rebuiltLines = merged.split(new RegExp(`(?=(?:${boundaryPattern})\\s*[:\uFF1A]?)`, "g")).map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  return Array.from(/* @__PURE__ */ new Set([...originalLines, ...rebuiltLines]));
+}
+function extractEmployeeCountInlineSnippet(text) {
+  const merged = normalizeSpace(text);
+  if (!merged) return null;
+  const employeeLabelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+  const boundaryPattern = EMPLOYEE_COUNT_BOUNDARY_LABELS.map((label) => escapeEmployeeCountRegex(label)).join("|");
+  const matched = merged.match(
+    new RegExp(
+      `((?:${employeeLabelPattern})\\s*[:\uFF1A]?\\s*[\\s\\S]{0,80}?)(?=(?:${boundaryPattern})\\s*[:\uFF1A]?|$)`,
+      "i"
+    )
+  );
+  return matched?.[1] ? normalizeSpace(matched[1]) : null;
+}
+function extractEmployeeCountSectionText(text) {
+  const lines = buildEmployeeCountStructuredLines(text);
+  const sections = [];
+  const labelPattern = buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(line))) {
+      continue;
+    }
+    const block = [line];
+    for (let j = i + 1; j < Math.min(lines.length, i + 13); j += 1) {
+      const nextLine = lines[j];
+      if (nextLine !== "" && EMPLOYEE_COUNT_SECTION_END_LABELS.test(nextLine) && !EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(nextLine)) && block.length >= 3) {
+        break;
+      }
+      block.push(nextLine);
+    }
+    sections.push(block.join(" "));
+  }
+  const merged = normalizeSpace(lines.join(" "));
+  const matched = merged.match(
+    new RegExp(
+      `((?:${labelPattern})\\s*[:\uFF1A]?\\s*[\\s\\S]{0,220}?)(?=(?:${EMPLOYEE_COUNT_SECTION_END_LABELS.source})\\s*[:\uFF1A]?|$)`,
+      "i"
+    )
+  );
+  if (matched?.[1]) {
+    sections.push(normalizeSpace(matched[1]));
+  }
+  const inlineSnippet = extractEmployeeCountInlineSnippet(merged);
+  if (inlineSnippet) {
+    sections.push(inlineSnippet);
+  }
+  return Array.from(
+    new Set(sections.map((section) => normalizeSpace(section)).filter(Boolean))
+  );
+}
+function extractEmployeeCountFromPage(page, _sourceCompany, _sourceAddress) {
+  const pageTarget = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+  const boost = pageBoost(page.finalUrl) + (EMPLOYEE_COUNT_PAGE_KEYWORDS.test(pageTarget) ? 120 : 0) + (EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS.test(pageTarget) ? 180 : 0);
+  const pairs = extractPairs(page.html);
+  const candidateMap = /* @__PURE__ */ new Map();
+  const primaryPairValue = extractPrimaryEmployeeCountValueFromPairs(pairs);
+  if (primaryPairValue) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `\u5F93\u696D\u54E1\u6570 ${primaryPairValue}`,
+      1200 + boost
+    );
+  }
+  const primaryStructuredValue = extractPrimaryEmployeeCountValueFromText(
+    page.structuredText
+  );
+  if (primaryStructuredValue) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `\u5F93\u696D\u54E1\u6570 ${primaryStructuredValue}`,
+      1180 + boost
+    );
+  }
+  const primaryFlatValue = page.text !== page.structuredText ? extractPrimaryEmployeeCountValueFromText(page.text) : null;
+  if (primaryFlatValue) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `\u5F93\u696D\u54E1\u6570 ${primaryFlatValue}`,
+      1160 + boost
+    );
+  }
+  const rebuiltStructuredText = buildEmployeeCountStructuredLines(
+    page.structuredText
+  ).join("\n");
+  const primaryRebuiltValue = extractPrimaryEmployeeCountValueFromText(
+    rebuiltStructuredText
+  );
+  if (primaryRebuiltValue) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `\u5F93\u696D\u54E1\u6570 ${primaryRebuiltValue}`,
+      1120 + boost
+    );
+  }
+  for (const pair of pairs) {
+    if (!EMPLOYEE_COUNT_LABELS.some((regex) => regex.test(pair.label))) continue;
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `${pair.label} ${pair.value}`,
+      340 + boost
+    );
+  }
+  const labeledTextValue = extractSingleLineLabeledValue(page.structuredText, EMPLOYEE_COUNT_LABELS) ?? (page.text !== page.structuredText ? extractSingleLineLabeledValue(page.text, EMPLOYEE_COUNT_LABELS) : null) ?? extractSingleLineLabeledValue(rebuiltStructuredText, EMPLOYEE_COUNT_LABELS);
+  if (labeledTextValue) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `\u5F93\u696D\u54E1\u6570 ${labeledTextValue}`,
+      320 + boost
+    );
+  }
+  const tableLikeValue = extractEmployeeCountTableLikeValue(page.structuredText) ?? (page.text !== page.structuredText ? extractEmployeeCountTableLikeValue(page.text) : null) ?? extractEmployeeCountTableLikeValue(rebuiltStructuredText);
+  if (tableLikeValue) {
+    pushEmployeeCountCandidate(
+      candidateMap,
+      `\u5F93\u696D\u54E1\u6570 ${tableLikeValue}`,
+      330 + boost
+    );
+  }
+  const inlineSnippet = extractEmployeeCountInlineSnippet(page.structuredText) ?? (page.text !== page.structuredText ? extractEmployeeCountInlineSnippet(page.text) : null) ?? extractEmployeeCountInlineSnippet(rebuiltStructuredText);
+  if (inlineSnippet) {
+    pushEmployeeCountCandidate(candidateMap, inlineSnippet, 380 + boost);
+  }
+  const sectionTexts = uniqueNonEmpty([
+    ...extractEmployeeCountSectionText(page.structuredText),
+    ...page.text !== page.structuredText ? extractEmployeeCountSectionText(page.text) : [],
+    ...extractEmployeeCountSectionText(rebuiltStructuredText)
+  ]);
+  for (const sectionText of sectionTexts) {
+    pushEmployeeCountCandidate(candidateMap, sectionText, 360 + boost);
+    const sectionCandidates = collectEmployeeCountCandidatesFromText(
+      sectionText,
+      boost
+    );
+    for (const candidate of sectionCandidates) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        candidate.value,
+        340 + candidate.sourceScore
+      );
+    }
+  }
+  const sourceTexts = uniqueNonEmpty([
+    page.structuredText,
+    page.text,
+    rebuiltStructuredText
+  ]);
+  sourceTexts.forEach((sourceText, sourceIndex) => {
+    const sourceCandidates = collectEmployeeCountCandidatesFromText(
+      sourceText,
+      boost
+    );
+    const sourceBoost = sourceIndex === 0 ? 260 : sourceIndex === 1 ? 240 : 220;
+    for (const candidate of sourceCandidates) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        candidate.value,
+        sourceBoost + candidate.sourceScore
+      );
+    }
+  });
+  const footerText = stripHtmlKeepLineBreaks(extractFooterHtml(page.html));
+  if (footerText) {
+    const footerCandidates = collectEmployeeCountCandidatesFromText(
+      footerText,
+      boost
+    );
+    for (const candidate of footerCandidates) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        candidate.value,
+        220 + candidate.sourceScore
+      );
+    }
+    const footerTableLikeValue = extractEmployeeCountTableLikeValue(footerText);
+    if (footerTableLikeValue) {
+      pushEmployeeCountCandidate(
+        candidateMap,
+        `\u5F93\u696D\u54E1\u6570 ${footerTableLikeValue}`,
+        240 + boost
+      );
+    }
+  }
+  const bestCandidate = Array.from(candidateMap.entries()).map(([value, sourceScore]) => ({ value, sourceScore })).sort((a, b) => b.sourceScore - a.sourceScore)[0];
+  if (!bestCandidate) return null;
+  return bestCandidate;
+}
+var OFFICE_HEADER_REGEX = /^(.{1,40}?(?:本社|本店|支店|営業所|工場|事業所|センター))(?:(?:\s+|　+)(.*))?$/;
+var OFFICE_BLOCK_STOP_REGEX = /^(?:会社情報|業種|創業|設立|資本金|従業員数|取引先|Top Message|代表ご挨拶|Our Philosophy|経営理念|Our Policy|経営基本方針|History|沿革|Access|Contact|お見積|お気軽にご相談ください|事業紹介|設備紹介|お知らせ)$/i;
+function mergeOfficeResults(offices) {
+  const map = /* @__PURE__ */ new Map();
+  for (const office of offices) {
+    const key = office.office_name || office.address_candidates[0] || office.company || `office-${map.size}`;
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, {
+        office_name: office.office_name,
+        company: office.company,
+        phone_candidates: [...office.phone_candidates],
+        fax_candidates: [...office.fax_candidates],
+        email_candidates: [...office.email_candidates],
+        zipcode_candidates: [...office.zipcode_candidates],
+        address_candidates: [...office.address_candidates]
+      });
+      continue;
+    }
+    current.company = current.company ?? office.company;
+    current.phone_candidates = uniqueNonEmpty([
+      ...current.phone_candidates,
+      ...office.phone_candidates
+    ]);
+    current.fax_candidates = uniqueNonEmpty([
+      ...current.fax_candidates,
+      ...office.fax_candidates
+    ]);
+    current.email_candidates = uniqueNonEmpty([
+      ...current.email_candidates,
+      ...office.email_candidates
+    ]);
+    current.zipcode_candidates = uniqueNonEmpty([
+      ...current.zipcode_candidates,
+      ...office.zipcode_candidates
+    ]);
+    current.address_candidates = uniqueNonEmpty([
+      ...current.address_candidates,
+      ...office.address_candidates
+    ]);
+  }
+  return Array.from(map.values());
+}
+function extractOfficeResults(pages, companyName, fallback) {
+  const offices = [];
+  for (const page of pages) {
+    const lines = page.structuredText.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+    const blocks = [];
+    let current = null;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const nextLine = lines[i + 1] ?? "";
+      const matched = line.match(OFFICE_HEADER_REGEX);
+      const looksLikeOfficeStart = !!matched && [
+        normalizeZipcode(line),
+        normalizeZipcode(nextLine),
+        extractAddressFromText(line),
+        extractAddressFromText(nextLine)
+      ].some(Boolean);
+      if (looksLikeOfficeStart) {
+        if (current) {
+          blocks.push(current);
+        }
+        current = {
+          office_name: normalizeSpace(matched[1]),
+          lines: [line]
+        };
+        continue;
+      }
+      if (current && OFFICE_BLOCK_STOP_REGEX.test(line)) {
+        blocks.push(current);
+        current = null;
+        continue;
+      }
+      if (current) {
+        current.lines.push(line);
+      }
+    }
+    if (current) {
+      blocks.push(current);
+    }
+    for (const block of blocks) {
+      const officeName = normalizeSpace(block.office_name);
+      const company = companyName && officeName && !companyName.includes(officeName) ? `${companyName} ${officeName}` : companyName ?? officeName;
+      const phoneCandidates = uniqueNonEmpty(
+        block.lines.filter(
+          (line) => /(?:TEL|Tel|tel|電話)/i.test(line) && !/(?:FAX|ＦＡＸ|Fax|fax)/i.test(line)
+        ).map((line) => normalizePhone(line))
+      );
+      const faxCandidates = uniqueNonEmpty(
+        block.lines.filter((line) => /(?:FAX|ＦＡＸ|Fax|fax)/i.test(line)).map((line) => normalizeFax(line))
+      );
+      const emailCandidates = uniqueNonEmpty(
+        block.lines.map((line) => normalizeEmail(line))
+      );
+      const zipcodeCandidates = uniqueNonEmpty(
+        block.lines.map((line) => normalizeZipcode(line))
+      );
+      const addressCandidates = uniqueNonEmpty(
+        block.lines.map((line) => extractAddressFromText(line) ?? normalizeAddress(line)).filter((value) => value !== null)
+      ).slice(0, 1);
+      if (phoneCandidates.length === 0 && faxCandidates.length === 0 && emailCandidates.length === 0 && zipcodeCandidates.length === 0 && addressCandidates.length === 0) {
+        continue;
+      }
+      offices.push({
+        office_name: officeName,
+        company,
+        phone_candidates: phoneCandidates,
+        fax_candidates: faxCandidates,
+        email_candidates: emailCandidates,
+        zipcode_candidates: zipcodeCandidates,
+        address_candidates: addressCandidates
+      });
+    }
+  }
+  const merged = mergeOfficeResults(offices);
+  if (merged.length > 0) {
+    return merged;
+  }
+  return [
+    {
+      office_name: null,
+      company: companyName,
+      phone_candidates: uniqueNonEmpty([fallback.phone]),
+      fax_candidates: uniqueNonEmpty([fallback.fax]),
+      email_candidates: uniqueNonEmpty([fallback.email]),
+      zipcode_candidates: uniqueNonEmpty([fallback.zipcode]),
+      address_candidates: uniqueNonEmpty([fallback.address])
+    }
+  ].filter(
+    (office) => office.phone_candidates.length > 0 || office.fax_candidates.length > 0 || office.email_candidates.length > 0 || office.zipcode_candidates.length > 0 || office.address_candidates.length > 0
+  );
+}
+function normalizeCapital(value) {
+  const normalized = normalizeSpace(value);
+  if (!normalized) return null;
+  const matched = normalized.match(/[0-9,\.]+(?:億円|億|千万円|百万円|万円|円)/);
+  return matched ? matched[0] : normalized;
+}
+function normalizeEmployeeCount(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return null;
+  const text = normalized.replace(/[，]/g, ",");
+  const PERSON_UNIT_PATTERN = "(?:\u540D|\u4EBA)";
+  const PRIMARY_LABEL_PATTERN = buildLooseLabelPattern(
+    EMPLOYEE_COUNT_PRIMARY_LABELS
+  );
+  const directPrimaryMatch = text.match(
+    new RegExp(
+      `(?:${PRIMARY_LABEL_PATTERN})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:)?\\s*([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+      "i"
+    )
+  );
+  if (directPrimaryMatch?.[1]) {
+    const directPrimaryCount = Number(
+      directPrimaryMatch[1].replace(/,/g, "")
+    );
+    if (Number.isFinite(directPrimaryCount) && directPrimaryCount > 0) {
+      return `${directPrimaryCount.toLocaleString()}\u540D`;
+    }
+  }
+  const GROUP_PRIORITY_LABELS = [
+    "\u9023\u7D50",
+    "consolidated",
+    "CONSOLIDATED"
+  ];
+  const GROUP_FALLBACK_LABELS = [
+    "\u5358\u4F53",
+    "\u5358\u72EC",
+    "\u500B\u5225",
+    "individual",
+    "INDIVIDUAL",
+    "non-consolidated",
+    "NON-CONSOLIDATED",
+    "nonconsolidated",
+    "NONCONSOLIDATED"
+  ];
+  const EMPLOYMENT_LABELS = [
+    "\u6B63\u793E\u54E1",
+    "\u6B63\u8077\u54E1",
+    "\u793E\u54E1",
+    "\u8077\u54E1",
+    "\u30D1\u30FC\u30C8",
+    "\u30A2\u30EB\u30D0\u30A4\u30C8",
+    "\u5951\u7D04\u793E\u54E1",
+    "\u5951\u7D04\u8077\u54E1",
+    "\u6D3E\u9063\u793E\u54E1",
+    "\u6D3E\u9063\u30B9\u30BF\u30C3\u30D5",
+    "\u5631\u8A17",
+    "\u5631\u8A17\u793E\u54E1",
+    "\u81E8\u6642\u793E\u54E1",
+    "\u81E8\u6642\u8077\u54E1",
+    "\u5E38\u52E4",
+    "\u975E\u5E38\u52E4",
+    "\u30D5\u30EB\u30BF\u30A4\u30E0",
+    "\u77ED\u6642\u9593",
+    "\u518D\u96C7\u7528",
+    "\u6709\u671F\u96C7\u7528",
+    "\u7121\u671F\u96C7\u7528",
+    "\u5F79\u54E1"
+  ];
+  const escapeRegex = (textValue) => textValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const toCount = (numText) => {
+    const num = Number((numText || "").replace(/,/g, ""));
+    return Number.isFinite(num) ? num : null;
+  };
+  const formatCount = (num) => num != null && num > 0 ? `${num.toLocaleString()}\u540D` : null;
+  const findPriorityCount = (labels) => {
+    for (const label of labels) {
+      const escaped = escapeRegex(label);
+      const before = text.match(
+        new RegExp(
+          `${escaped}[^0-9]{0,12}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+          "i"
+        )
+      );
+      const beforeCount = toCount(before?.[1]);
+      if (beforeCount != null) return beforeCount;
+      const after = text.match(
+        new RegExp(
+          `([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}[^0-9]{0,12}${escaped}`,
+          "i"
+        )
+      );
+      const afterCount = toCount(after?.[1]);
+      if (afterCount != null) return afterCount;
+    }
+    return null;
+  };
+  const consolidatedCount = findPriorityCount(GROUP_PRIORITY_LABELS);
+  if (consolidatedCount != null) {
+    return formatCount(consolidatedCount);
+  }
+  const employmentPattern = new RegExp(
+    `(?:${EMPLOYMENT_LABELS.map(escapeRegex).join("|")})[^0-9]{0,12}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+    "gi"
+  );
+  const employmentMatches = Array.from(text.matchAll(employmentPattern));
+  if (employmentMatches.length >= 2) {
+    const total = employmentMatches.reduce((sum, match) => {
+      return sum + (toCount(match[1]) ?? 0);
+    }, 0);
+    if (total > 0) {
+      return `${total.toLocaleString()}\u540D`;
+    }
+  }
+  const standaloneCount = findPriorityCount(GROUP_FALLBACK_LABELS);
+  if (standaloneCount != null) {
+    return formatCount(standaloneCount);
+  }
+  const exactLabelNumberOnlyMatch = text.match(
+    new RegExp(
+      `^(?:${buildLooseLabelPattern(EMPLOYEE_COUNT_LABELS)})\\s*[:\uFF1A]?\\s*([0-9][0-9,]*)$`,
+      "i"
+    )
+  );
+  const exactLabelNumberOnlyCount = toCount(exactLabelNumberOnlyMatch?.[1]);
+  if (exactLabelNumberOnlyCount != null) {
+    return formatCount(exactLabelNumberOnlyCount);
+  }
+  const hasContext = hasEmployeeCountContext(text);
+  if (!hasContext) {
+    return null;
+  }
+  const labelNearMatch = text.match(
+    new RegExp(
+      `(\u5F93\u696D\u54E1\u6570|\u5F93\u696D\u54E1|\u793E\u54E1\u6570|\u8077\u54E1\u6570|\u30B9\u30BF\u30C3\u30D5\u6570|\u4EBA\u54E1\u6570|\u7DCF\u4EBA\u54E1|\u5C31\u696D\u4EBA\u6570|\u5C31\u696D\u8005\u6570)[^0-9]{0,20}([0-9][0-9,]*)\\s*${PERSON_UNIT_PATTERN}`,
+      "i"
+    )
+  );
+  if (labelNearMatch?.[2]) {
+    return formatCount(toCount(labelNearMatch[2]));
+  }
+  return null;
+}
+function buildLooseLabelPattern(labelRegexList) {
+  return labelRegexList.map((regex) => regex.source.replace(/^\^/, "").replace(/\$$/, "")).join("|");
+}
+function extractLabeledSectionText(text, labelRegexList, maxLength = 500) {
+  const normalized = normalizeSpace(text);
+  if (!normalized) return null;
+  const labelPattern = buildLooseLabelPattern(labelRegexList);
+  if (!labelPattern) return null;
+  const matched = normalized.match(
+    new RegExp(
+      `(?:${labelPattern})\\s*[:\uFF1A]?\\s*([\\s\\S]{5,${maxLength}}?)(?=(?:${BUSINESS_STOP_WORDS.source})|$)`,
+      "i"
+    )
+  );
+  return matched?.[1] ? normalizeSpace(matched[1]) : null;
+}
+function isLikelyBusinessContent(value) {
+  const normalized = normalizeSpace(value);
+  if (!normalized) return false;
+  if (normalized.length < 8) return false;
+  if (/(お問い合わせ|お問合せ|スタッフ紹介|仕事紹介|サービス紹介|NEWS|BLOG|COLUMN|会社概要|所在地|連絡先)/i.test(
+    normalized
+  )) {
+    return false;
+  }
+  return BUSINESS_HINT_WORDS.test(normalized) || /[・●■◆]/.test(normalized);
+}
+function normalizeBusinessContent(value) {
+  let normalized = normalizeSpace(value);
+  if (!normalized) return null;
+  normalized = normalized.replace(/^(事業内容|業務内容|営業内容|サービス内容|事業概要|業容|取扱業務|取扱内容|取扱商品|主な事業|業務案内|サービス)\s*[:：]?\s*/i, "").replace(/\s*(?:所在地|連絡先|TEL|FAX|営業時間|定休日|お問い合わせ|お問合せ|会社概要).*$/i, "").replace(/\s*・/g, "\n\u30FB").replace(/\s*[●■◆◉○]\s*/g, "\n\u30FB").replace(/\n{2,}/g, "\n").trim();
+  if (!isLikelyBusinessContent(normalized)) {
+    return null;
+  }
+  return normalized.length > 300 ? `${normalized.slice(0, 300)}\u2026` : normalized;
+}
+function hasHtmlForm(html) {
+  return /<form\b[\s\S]*?<\/form>/i.test(html);
+}
+function extractFooterHtml(html) {
+  const parts = [];
+  const footerTag = html.match(/<footer[\s\S]*?<\/footer>/i)?.[0];
+  if (footerTag) {
+    parts.push(footerTag);
+  }
+  const footerBlocks = html.match(
+    /<(?:div|section)[^>]+(?:id|class)=["'][^"']*(?:footer|foot|site-info|company-info|corp-info|contact)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|section)>/gi
+  );
+  if (footerBlocks?.length) {
+    parts.push(...footerBlocks);
+  }
+  return parts.join(" ");
+}
+function extractPairs(html) {
+  const result = [];
+  const patterns = [
+    /<tr[^>]*>\s*<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>\s*<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>[\s\S]*?<\/tr>/gi,
+    /<dt[^>]*>([\s\S]*?)<\/dt>\s*<dd[^>]*>([\s\S]*?)<\/dd>/gi,
+    /<(?:li|p|div|section)[^>]*>\s*([^<:：]{1,60})\s*[:：]\s*([\s\S]*?)<\/(?:li|p|div|section)>/gi,
+    /<(?:div|p|li|section)[^>]*>\s*<(?:span|strong|b|div|dt|th)[^>]*>([\s\S]{1,60}?)<\/(?:span|strong|b|div|dt|th)>\s*[:：]?\s*<(?:span|em|strong|b|div|dd|td|p|li)[^>]*>([\s\S]*?)<\/(?:span|em|strong|b|div|dd|td|p|li)>/gi,
+    /<(?:span|div|strong|b)[^>]+(?:class|id)=["'][^"']*(?:label|title|name|head|term|key)[^"']*["'][^>]*>([\s\S]{1,60}?)<\/(?:span|div|strong|b)>\s*<(?:span|div|p|dd|td)[^>]+(?:class|id)=["'][^"']*(?:value|data|body|desc|detail)[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|div|p|dd|td)>/gi,
+    /<(?:div|li|section|article)[^>]*>\s*<(?:div|p|span|strong|b)[^>]*>\s*([^<:：]{1,60})\s*<\/(?:div|p|span|strong|b)>\s*<(?:div|p|span|strong|b)[^>]*>\s*([\s\S]{1,240}?)\s*<\/(?:div|p|span|strong|b)>\s*<\/(?:div|li|section|article)>/gi,
+    /<(?:div|section|article)[^>]*>\s*<(?:h2|h3|h4|p|div|span|strong|b)[^>]*>\s*([^<:：]{1,60})\s*<\/(?:h2|h3|h4|p|div|span|strong|b)>\s*(?:<a[^>]*>)?([\s\S]{1,240}?)(?:<\/a>)?\s*<\/(?:div|section|article)>/gi
+  ];
+  for (const pattern of patterns) {
+    let match = null;
+    while ((match = pattern.exec(html)) !== null) {
+      const label = stripHtml(match[1] || "");
+      const value = stripHtml(match[2] || "");
+      if (!label || !value) continue;
+      result.push({ label, value });
+    }
+  }
+  return result;
+}
+function pickPairValue(pairs, labelRegexList) {
+  for (const pair of pairs) {
+    if (labelRegexList.some((regex) => regex.test(pair.label))) {
+      return pair.value;
+    }
+  }
+  return null;
+}
+function pickRepresentativePairValue(pairs) {
+  for (const pair of pairs) {
+    if (!REPRESENTATIVE_NAME_LABELS.some((regex) => regex.test(pair.label))) {
+      continue;
+    }
+    const candidate = normalizeRepresentativeCandidateForBest(pair.value);
+    if (candidate) {
+      return candidate;
+    }
+  }
+  return null;
+}
+function addBest(best, key, value, score) {
+  if (!value) return;
+  const current = best[key];
+  if (!current || score > current.score) {
+    best[key] = { value, score };
+  }
+}
+function buildPageData(requestedUrl, finalUrl, html) {
+  return {
+    requestedUrl,
+    finalUrl,
+    html,
+    text: stripHtml(html),
+    structuredText: stripHtmlKeepLineBreaks(html),
+    title: extractTitle(html),
+    h1: extractH1(html),
+    links: extractLinks(html, finalUrl)
+  };
+}
+function extractCharsetFromContentType(contentType) {
+  return contentType.match(/charset\s*=\s*["']?\s*([^;"'\s]+)/i)?.[1]?.toLowerCase() ?? null;
+}
+function extractCharsetFromHtmlMeta(html) {
+  return firstMatch(
+    html,
+    /<meta[^>]+charset=["']?\s*([^"'\/>\s]+)["']?/i
+  )?.toLowerCase() ?? firstMatch(
+    html,
+    /<meta[^>]+http-equiv=["']content-type["'][^>]+content=["'][^"']*charset\s*=\s*([^;"'\s]+)[^"']*["'][^>]*>/i
+  )?.toLowerCase() ?? firstMatch(
+    html,
+    /<meta[^>]+content=["'][^"']*charset\s*=\s*([^;"'\s]+)[^"']*["'][^>]+http-equiv=["']content-type["'][^>]*>/i
+  )?.toLowerCase() ?? null;
+}
+function scoreDecodedHtml(html) {
+  const structuredText = stripHtmlKeepLineBreaks(html);
+  if (structuredText.length === 0) {
+    return -1e3;
+  }
+  let score = 0;
+  if (/[一-龠ぁ-んァ-ヶ]/.test(structuredText)) score += 120;
+  if (/(会社概要|企業情報|会社案内|従業員数|代表者|事業内容|資本金|所在地)/.test(
+    structuredText
+  )) {
+    score += 160;
+  }
+  if (/�/.test(html)) score -= 300;
+  if (/Ã|Â|ð/.test(structuredText)) score -= 120;
+  score += Math.min(structuredText.length, 4e3) / 20;
+  return score;
+}
+function tryDecodeHtmlBuffer(buffer, encoding) {
+  try {
+    return new TextDecoder(encoding).decode(buffer);
+  } catch {
+    return null;
+  }
+}
+function decodeHtmlFromArrayBuffer(buffer, contentType) {
+  const candidates = [
+    extractCharsetFromContentType(contentType),
+    "utf-8",
+    "shift_jis",
+    "windows-31j",
+    "euc-jp",
+    "iso-2022-jp"
+  ].filter(
+    (value, index, self) => !!value && self.indexOf(value) === index
+  );
+  let bestHtml = null;
+  let bestScore = -Infinity;
+  for (const candidate of candidates) {
+    const decoded = tryDecodeHtmlBuffer(buffer, candidate);
+    if (!decoded) continue;
+    const metaCharset = extractCharsetFromHtmlMeta(decoded);
+    if (metaCharset && !candidates.includes(metaCharset)) {
+      const metaDecoded = tryDecodeHtmlBuffer(buffer, metaCharset);
+      if (metaDecoded) {
+        const metaScore = scoreDecodedHtml(metaDecoded) + 40;
+        if (metaScore > bestScore) {
+          bestHtml = metaDecoded;
+          bestScore = metaScore;
+        }
+      }
+    }
+    const score = scoreDecodedHtml(decoded);
+    if (score > bestScore) {
+      bestHtml = decoded;
+      bestScore = score;
+    }
+  }
+  return bestHtml ?? new TextDecoder("utf-8").decode(buffer);
+}
+function buildOfficePageSnapshot(page) {
+  return {
+    requestedUrl: page.requestedUrl,
+    finalUrl: page.finalUrl,
+    html: "",
+    text: "",
+    structuredText: page.structuredText,
+    title: "",
+    h1: "",
+    links: []
+  };
+}
+function shouldCollectOfficePageSnapshot(page) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+  const text = page.structuredText.slice(0, 4e3);
+  return CONTACT_KEYWORDS.test(target) || COMPANY_KEYWORDS.test(target) || PHONE_LABELS.some((regex) => regex.test(text)) || FAX_LABELS.some((regex) => regex.test(text)) || ZIPCODE_LABELS.some((regex) => regex.test(text)) || ADDRESS_LABELS.some((regex) => regex.test(text)) || /@/.test(text) || /〒\s*\d{3}-?\d{4}/.test(text);
+}
+function pushOfficePageSnapshotIfNeeded(collectedPages, page) {
+  if (!shouldCollectOfficePageSnapshot(page)) return;
+  collectedPages.push(buildOfficePageSnapshot(page));
+}
+function shouldUseBrowserRenderedHtml(html, finalUrl = "") {
+  const structuredText = stripHtmlKeepLineBreaks(html);
+  const target = decodeURIComponent(
+    `${finalUrl} ${structuredText.slice(0, 2e3)} ${html.slice(0, 4e3)}`
+  );
+  const hasClientRenderedSignals = /id=["']__next["']|id=["']root["']|id=["']app["']|data-reactroot|__NEXT_DATA__|_buildManifest|webpack|vite|nuxt/i.test(
+    html
+  );
+  const hasTooLittleReadableText = structuredText.length < 200;
+  const hasImportantPageHint = /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|outline|profile|company|about|corporate|information|従業員数|従業員|社員数|職員数|スタッフ数|employee|staff|member|代表者|代表取締役|社長|会長|理事長|president|greeting|message|トップメッセージ|ご挨拶)/i.test(
+    target
+  );
+  const hasThinImportantHtml = hasImportantPageHint && structuredText.length < 350;
+  const hasRepresentativeHintButThinHtml = /(代表者|代表取締役|社長|会長|理事長|president|greeting|message|トップメッセージ|ご挨拶)/i.test(
+    target
+  ) && structuredText.length < 120;
+  const hasBlockedOrPlaceholderHint = /(enable javascript|javascriptを有効|access denied|forbidden|cloudflare|security check|bot check|please wait|just a moment)/i.test(
+    target
+  ) && structuredText.length < 500;
+  return hasClientRenderedSignals && (hasTooLittleReadableText || hasThinImportantHtml || hasRepresentativeHintButThinHtml) || hasThinImportantHtml || hasRepresentativeHintButThinHtml || hasBlockedOrPlaceholderHint;
+}
+var globalForMasterDataCrawlerBrowser = globalThis;
+async function loadPlaywrightModule() {
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright) {
+    return globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright;
+  }
+  const imported = await new Function("return import('playwright')")().catch(() => null);
+  globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright = imported ?? null;
+  return globalForMasterDataCrawlerBrowser.__masterDataCrawlerPlaywright;
+}
+async function resetSharedBrowser() {
+  const currentPromise = globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise;
+  globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise = null;
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer) {
+    clearTimeout(globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer);
+    globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer = null;
+  }
+  if (!currentPromise) return;
+  try {
+    const browser = await currentPromise;
+    await browser.close().catch(() => {
+    });
+  } catch {
+  }
+}
+async function getSharedBrowser() {
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer) {
+    clearTimeout(globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer);
+    globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer = null;
+  }
+  if (!globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise) {
+    globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise = (async () => {
+      const imported = await loadPlaywrightModule();
+      const chromium = imported?.chromium;
+      if (!chromium) {
+        throw new Error("playwright chromium \u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F");
+      }
+      return await chromium.launch({ headless: true });
+    })();
+  }
+  return await globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserPromise;
+}
+function scheduleSharedBrowserClose() {
+  if (globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer) {
+    clearTimeout(globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer);
+  }
+  globalForMasterDataCrawlerBrowser.__masterDataCrawlerBrowserIdleTimer = setTimeout(() => {
+    void resetSharedBrowser();
+  }, 3e4);
+}
+async function fetchPageWithBrowser(url, timeoutMs = 2e4, runtimeOptions) {
+  throwIfCrawlShouldStop(runtimeOptions);
+  let page = null;
+  try {
+    const browser = await getSharedBrowser();
+    page = await browser.newPage({
+      userAgent: CRAWLER_USER_AGENT,
+      locale: "ja-JP"
+    });
+    await page.route("**/*", async (route) => {
+      const resourceType = route.request().resourceType();
+      if (["image", "media", "font"].includes(resourceType)) {
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    }).catch(() => {
+    });
+    page.setDefaultNavigationTimeout(timeoutMs);
+    page.setDefaultTimeout(timeoutMs);
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: timeoutMs
+    });
+    await page.waitForLoadState("networkidle", {
+      timeout: Math.min(timeoutMs, 12e3)
+    }).catch(() => {
+    });
+    await page.waitForTimeout(1e3);
+    throwIfCrawlShouldStop(runtimeOptions);
+    const html = await page.content();
+    const finalUrl = page.url() || url;
+    const bodyText = await page.textContent("body").catch(() => null) ?? "";
+    const normalizedBodyText = bodyText.split(/\r?\n/).map((line) => normalizeSpace(line)).filter((line) => line !== "").join("\n");
+    if (PDF_PAGE_REGEX.test(finalUrl) && normalizedBodyText !== "") {
+      return buildPdfPageData(url, finalUrl, normalizedBodyText);
+    }
+    return buildPageData(url, finalUrl, html);
+  } catch (error) {
+    if (runtimeOptions?.shouldStop?.()) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+    if (error instanceof Error && error.name === "AbortError" && runtimeOptions?.shouldStop?.()) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+    await resetSharedBrowser();
+    return null;
+  } finally {
+    if (page) {
+      await page.close().catch(() => {
+      });
+    }
+    scheduleSharedBrowserClose();
+  }
+}
+async function fetchPage(url, timeoutMs = 2e4, runtimeOptions) {
+  throwIfCrawlShouldStop(runtimeOptions);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  const stopCheckId = setInterval(() => {
+    if (runtimeOptions?.shouldStop?.()) {
+      controller.abort();
+    }
+  }, 150);
+  try {
+    let response = null;
+    let lastError = null;
+    const retryableStatuses = /* @__PURE__ */ new Set([429, 500, 502, 503, 504]);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await fetch(url, {
+          redirect: "follow",
+          signal: controller.signal,
+          headers: {
+            "User-Agent": CRAWLER_USER_AGENT,
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache"
+          },
+          cache: "no-store"
+        });
+        if (!retryableStatuses.has(response.status) || attempt === 2) {
+          break;
+        }
+      } catch (error) {
+        lastError = error;
+        if (attempt === 2) {
+          throw error;
+        }
+      }
+      throwIfCrawlShouldStop(runtimeOptions);
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+      if (controller.signal.aborted) {
+        throw lastError instanceof Error ? lastError : new Error("fetch aborted");
+      }
+    }
+    if (!response) {
+      throw lastError instanceof Error ? lastError : new Error("\u30DA\u30FC\u30B8\u53D6\u5F97\u306B\u5931\u6557\u3057\u307E\u3057\u305F");
+    }
+    throwIfCrawlShouldStop(runtimeOptions);
+    if (!response.ok) {
+      return await fetchPageWithBrowser(url, timeoutMs, runtimeOptions);
+    }
+    const finalUrl = response.url || url;
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.toLowerCase().includes("application/pdf") || PDF_PAGE_REGEX.test(finalUrl)) {
+      const pdfBuffer = await response.arrayBuffer();
+      throwIfCrawlShouldStop(runtimeOptions);
+      const pdfText = await extractPdfTextFromArrayBuffer(pdfBuffer);
+      if (pdfText) {
+        return buildPdfPageData(url, finalUrl, pdfText);
+      }
+      return await fetchPageWithBrowser(finalUrl, timeoutMs, runtimeOptions);
+    }
+    if (!contentType.toLowerCase().includes("text/html") && !contentType.toLowerCase().includes("application/xhtml+xml")) {
+      return await fetchPageWithBrowser(finalUrl, timeoutMs, runtimeOptions);
+    }
+    const htmlBuffer = await response.arrayBuffer();
+    throwIfCrawlShouldStop(runtimeOptions);
+    const html = decodeHtmlFromArrayBuffer(htmlBuffer, contentType);
+    const rawPageData = buildPageData(url, finalUrl, html);
+    if (shouldUseBrowserRenderedHtml(html, finalUrl)) {
+      const browserPageData = await fetchPageWithBrowser(
+        finalUrl,
+        timeoutMs,
+        runtimeOptions
+      );
+      if (browserPageData) {
+        return browserPageData;
+      }
+    }
+    return rawPageData;
+  } catch (error) {
+    if (runtimeOptions?.shouldStop?.()) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+    if (error instanceof Error && error.name === "AbortError" && runtimeOptions?.shouldStop?.()) {
+      throw new Error(CRAWL_PAUSED_ERROR_MESSAGE);
+    }
+    return await fetchPageWithBrowser(url, timeoutMs, runtimeOptions);
+  } finally {
+    clearTimeout(timeoutId);
+    clearInterval(stopCheckId);
+  }
+}
+var PAGE_FETCH_CONCURRENCY = 3;
+async function fetchPagesConcurrently(urls, timeoutMs, runtimeOptions, concurrency = PAGE_FETCH_CONCURRENCY) {
+  const seen = /* @__PURE__ */ new Set();
+  const dedupedUrls = urls.filter((url) => {
+    const key = normalizeUrlWithoutHash(url);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const results = new Array(dedupedUrls.length).fill(
+    null
+  );
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < dedupedUrls.length) {
+      throwIfCrawlShouldStop(runtimeOptions);
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await fetchPage(
+        dedupedUrls[currentIndex],
+        timeoutMs,
+        runtimeOptions
+      );
+    }
+  };
+  const workerCount = Math.min(concurrency, dedupedUrls.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker())
+  );
+  return results.filter((page) => page !== null);
+}
+async function fetchTopPage(seedUrl, timeoutMs = 2e4, runtimeOptions) {
+  throwIfCrawlShouldStop(runtimeOptions);
+  const normalized = normalizeSeedUrl(seedUrl);
+  if (!normalized) return null;
+  const candidates = Array.from(
+    new Set(
+      /^https:\/\//i.test(normalized) ? [normalized, normalized.replace(/^https:\/\//i, "http://")] : /^http:\/\//i.test(normalized) ? [normalized, normalized.replace(/^http:\/\//i, "https://")] : [normalized]
+    )
+  );
+  for (const candidate of candidates) {
+    const page = await fetchPage(candidate, timeoutMs, runtimeOptions);
+    if (page) return page;
+  }
+  return null;
+}
+function hasAnySelectedFields(selectedFieldSet, fields) {
+  return fields.some((field) => hasSelectedCrawlField(selectedFieldSet, field));
+}
+function getEnabledCrawlPageFocuses(selectedFieldSet) {
+  const focuses = [];
+  if (hasAnySelectedFields(selectedFieldSet, [
+    "company",
+    "website_url",
+    "established_date",
+    "capital"
+  ])) {
+    focuses.push("company_core");
+  }
+  if (hasSelectedOfficeFields(selectedFieldSet) || hasSelectedCrawlField(selectedFieldSet, "form_url")) {
+    focuses.push("contact");
+  }
+  if (hasSelectedCrawlField(selectedFieldSet, "representative_name")) {
+    focuses.push("representative");
+  }
+  if (hasSelectedCrawlField(selectedFieldSet, "employee_count")) {
+    focuses.push("employee_count");
+  }
+  if (hasSelectedCrawlField(selectedFieldSet, "business_content")) {
+    focuses.push("business_content");
+  }
+  if (hasSelectedPermitFields(selectedFieldSet)) {
+    focuses.push("permit");
+  }
+  return focuses;
+}
+function shouldProcessFieldInFocus(selectedFieldSet, field, focus) {
+  if (!hasSelectedCrawlField(selectedFieldSet, field)) return false;
+  if (!focus) return true;
+  switch (focus) {
+    case "company_core":
+      return field === "company" || field === "website_url" || field === "established_date" || field === "capital";
+    case "contact":
+      return field === "form_url" || field === "phone" || field === "fax" || field === "email" || field === "zipcode" || field === "address";
+    case "representative":
+      return field === "representative_name";
+    case "employee_count":
+      return field === "employee_count";
+    case "business_content":
+      return field === "business_content";
+    default:
+      return false;
+  }
+}
+function shouldProcessPermitInFocus(selectedFieldSet, focus) {
+  if (!hasSelectedPermitFields(selectedFieldSet)) return false;
+  if (!focus) return true;
+  return focus === "permit";
+}
+function getFocusScoreThreshold(focus) {
+  switch (focus) {
+    case "representative":
+      return -220;
+    case "employee_count":
+      return 80;
+    case "permit":
+      return -120;
+    default:
+      return -20;
+  }
+}
+function getFocusCandidatePageLimit(focus) {
+  switch (focus) {
+    case "representative":
+      return 140;
+    case "employee_count":
+      return 160;
+    case "business_content":
+      return 30;
+    case "contact":
+      return 18;
+    case "permit":
+      return 100;
+    case "company_core":
+    default:
+      return 18;
+  }
+}
+function getFocusNestedCandidateLimit(focus) {
+  switch (focus) {
+    case "representative":
+      return 80;
+    case "employee_count":
+      return 120;
+    case "business_content":
+      return 12;
+    case "contact":
+      return 10;
+    case "permit":
+      return 80;
+    case "company_core":
+    default:
+      return 10;
+  }
+}
+function getStrongCandidatePathsForFocus(focus) {
+  switch (focus) {
+    case "representative":
+      return [
+        "/company/",
+        "/group/",
+        "/group/index.html",
+        "/company.html",
+        "/company/index.html",
+        "/company/outline.html",
+        "/company/profile.html",
+        "/company/overview.html",
+        "/company/message.html",
+        "/company/greeting.html",
+        "/company-profile/",
+        "/company-profile.html",
+        "/company-profile/index.html",
+        "/message.html",
+        "/greeting.html",
+        "/president.html",
+        "/topmessage.html"
+      ];
+    case "employee_count":
+      return [
+        "/company/",
+        "/company",
+        "/company/index.html",
+        "/company.html",
+        "/company/outline.html",
+        "/company/profile.html",
+        "/company/overview.html",
+        "/company/outline/",
+        "/company/profile/",
+        "/company/overview/",
+        "/company/data/",
+        "/company/data.html",
+        "/company/numbers/",
+        "/company/numbers.html",
+        "/company/info/",
+        "/company/info.html",
+        "/company-profile/",
+        "/company-profile.html",
+        "/company-profile/index.html",
+        "/about/",
+        "/about.html",
+        "/about/company/",
+        "/profile/",
+        "/profile.html",
+        "/profile/index.html",
+        "/outline.html",
+        "/overview.html",
+        "/numbers/",
+        "/numbers/index.html",
+        "/data/",
+        "/data/index.html"
+      ];
+    case "business_content":
+      return [
+        "/business/",
+        "/business.html",
+        "/service/",
+        "/service.html",
+        "/company/",
+        "/company/profile.html",
+        "/company/overview.html",
+        "/about/"
+      ];
+    case "contact":
+      return [
+        "/contact/",
+        "/contact.html",
+        "/inquiry/",
+        "/inquiry.html",
+        "/access/",
+        "/access.html",
+        "/company/access.html",
+        "/company/profile.html",
+        "/company/overview.html"
+      ];
+    case "permit":
+      return [
+        "/company/",
+        "/company/profile.html",
+        "/company/overview.html",
+        "/company/info/",
+        "/license/",
+        "/license.html",
+        "/licence/",
+        "/licence.html",
+        "/permit/",
+        "/permit.html",
+        "/permission/",
+        "/permission.html",
+        "/company/license/",
+        "/company/license.html",
+        "/company/permit/",
+        "/company/permit.html",
+        "/company/profile/",
+        "/company/profile.html",
+        "/company/outline/",
+        "/company/outline.html",
+        "/about/license/",
+        "/about/license.html",
+        "/about/permit/",
+        "/about/permit.html",
+        "/service/haken/",
+        "/service/haken.html",
+        "/service/jinzai/",
+        "/service/jinzai.html",
+        "/temporary-staffing/",
+        "/temporary-staffing.html",
+        "/recruitment/",
+        "/recruitment.html",
+        "/haken/",
+        "/haken.html",
+        "/jinzai/",
+        "/jinzai.html"
+      ];
+    case "company_core":
+    default:
+      return [
+        "/company/",
+        "/company/index.html",
+        "/company/outline.html",
+        "/company/profile.html",
+        "/company/overview.html",
+        "/about/",
+        "/about.html",
+        "/profile/",
+        "/profile.html",
+        "/outline.html",
+        "/overview.html"
+      ];
+  }
+}
+function shouldPreferActualLinksFirst(focus) {
+  return focus === "representative" || focus === "employee_count" || focus === "contact" || focus === "business_content" || focus === "permit";
+}
+function getCandidateLinkScore(link, selectedFieldSet, focus) {
+  const target = decodeURIComponent(`${link.text} ${link.url}`);
+  let score = 0;
+  if (focus === "company_core") {
+    if (COMPANY_KEYWORDS.test(target)) score += 220;
+    if (/(会社概要|会社情報|企業情報|法人概要|企業概要|会社データ|会社基本情報|basic|outline|profile|company|corporate|about|gaiyou|overview|information)/i.test(
+      target
+    )) {
+      score += 260;
+    }
+    if (BUSINESS_KEYWORDS.test(target)) score += 60;
+    if (CONTACT_KEYWORDS.test(target)) score += 30;
+  }
+  if (focus === "contact") {
+    if (CONTACT_KEYWORDS.test(target)) score += 280;
+    if (/(access|所在地|住所|本社|本店|支店|営業所|事業所|office|map)/i.test(
+      target
+    )) {
+      score += 220;
+    }
+    if (COMPANY_KEYWORDS.test(target)) score += 120;
+  }
+  if (focus === "representative") {
+    if (COMPANY_KEYWORDS.test(target)) score += 140;
+    if (STAFF_KEYWORDS.test(target)) score += 180;
+    if (/(会社概要|会社情報|企業情報|法人概要|about|company|corporate|outline|profile|gaiyou|overview|information)/i.test(
+      target
+    )) {
+      score += 220;
+    }
+    if (/(代表挨拶|社長挨拶|理事長挨拶|所長挨拶|トップメッセージ|topmessage|greeting|message|president)/i.test(
+      target
+    )) {
+      score += 260;
+    }
+    if (isRepresentativeOverviewPageTarget(target)) {
+      score += 520;
+    }
+    if (/\/group\/?(?:$|\?)|\/group\/index\.html/i.test(target)) {
+      score += 260;
+    }
+    if (/(役員一覧|officer|executive)/i.test(target)) {
+      score += 180;
+    }
+    if (/(代表|代表者|社長|会長|理事長|所長|センター長|学院長|校長|学長|施設長|室長|president|director|chief)/i.test(
+      target
+    )) {
+      score += 180;
+    }
+    if (/(staff|member|members|社員紹介|社員インタビュー|経営者略歴)/i.test(
+      target
+    ) && !/(代表|代表者|社長|会長|理事長|president|director|chief|挨拶|メッセージ)/i.test(
+      target
+    )) {
+      score -= 120;
+    }
+    if (/(recruit|career|job|jobs|entry|新卒|中途|採用|shop|shopinfo|campus|店舗|商品|製品|service|faq)/i.test(
+      target
+    )) {
+      score -= 220;
+    }
+    if (/(blog|news|topics|column|interview|voice|story|success|diary)/i.test(
+      target
+    ) && !/(代表|代表者|社長|会長|理事長|president|director|chief|挨拶|メッセージ)/i.test(
+      target
+    )) {
+      score -= 120;
+    }
+    if (/(?:当社|弊社|私たち|わたしたち|会社|企業|法人|事務所|株式会社[^\s　/]{0,30}|有限会社[^\s　/]{0,30}|合同会社[^\s　/]{0,30})について/i.test(
+      target
+    )) {
+      score += 300;
+    }
+  }
+  if (focus === "employee_count") {
+    if (!link.sameOrigin) {
+      score -= 500;
+    }
+    if (EMPLOYEE_COUNT_OVERVIEW_PAGE_KEYWORDS.test(target)) score += 320;
+    if (EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) score += 300;
+    if (COMPANY_KEYWORDS.test(target)) score += 120;
+    if (BUSINESS_KEYWORDS.test(target)) score += 40;
+    if (RECRUIT_KEYWORDS.test(target) && !EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) {
+      score -= 250;
+    }
+    if (CONTACT_KEYWORDS.test(target)) {
+      score -= 200;
+    }
+    if (NEWS_BLOG_KEYWORDS.test(target)) {
+      score -= 250;
+    }
+    if (PDF_PAGE_REGEX.test(link.url)) {
+      if (EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) {
+        score += 140;
+      } else {
+        score -= 200;
+      }
+    }
+  }
+  if (focus === "business_content") {
+    if (BUSINESS_KEYWORDS.test(target)) score += 320;
+    if (/(service|services|business|事業|業務|サービス|営業内容|事業内容)/i.test(
+      target
+    )) {
+      score += 240;
+    }
+    if (COMPANY_KEYWORDS.test(target)) score += 140;
+  }
+  if (focus === "permit") {
+    if (/(労働者派遣|一般労働者派遣|人材派遣|派遣事業|派遣許可|有料職業紹介|職業紹介事業|紹介事業|許可番号|事業許可|派遣|職業紹介|license|licence|permit|haken|jinzai|staffing|recruitment)/i.test(
+      target
+    )) {
+      score += 340;
+    }
+    if (COMPANY_KEYWORDS.test(target)) score += 140;
+    if (CONTACT_KEYWORDS.test(target)) score += 80;
+  }
+  if (focus !== "permit" && NEWS_BLOG_KEYWORDS.test(target)) score -= 120;
+  if (focus !== "employee_count" && RECRUIT_KEYWORDS.test(target)) score -= 80;
+  if (PDF_PAGE_REGEX.test(link.url)) {
+    if (focus === "employee_count" && EMPLOYEE_COUNT_PAGE_KEYWORDS.test(target)) {
+      score += 140;
+    } else if (focus === "representative") {
+      score += 20;
+    } else {
+      score -= 40;
+    }
+  }
+  return score;
+}
+function pickCandidatePageUrls(topPage, selectedFieldSet, focus) {
+  const urls = [];
+  const seen = /* @__PURE__ */ new Set();
+  const base = new URL(topPage.finalUrl);
+  const pushIfValid = (url) => {
+    if (seen.has(url)) return;
+    if (HTML_PAGE_DENY_EXT.test(url)) return;
+    try {
+      const parsed = new URL(url);
+      if (parsed.origin !== base.origin) return;
+      seen.add(url);
+      urls.push(url);
+    } catch {
+      return;
+    }
+  };
+  const strongPaths = getStrongCandidatePathsForFocus(focus);
+  const sortedLinks = [...topPage.links].map((link) => ({
+    url: link.url,
+    score: getCandidateLinkScore(link, selectedFieldSet, focus)
+  })).filter((item) => item.score > getFocusScoreThreshold(focus)).sort((a, b) => b.score - a.score);
+  const scoredCommonPaths = [...COMMON_CANDIDATE_PATHS, ...strongPaths].map((path2) => {
+    try {
+      const url = new URL(path2, base).toString();
+      return {
+        url,
+        score: getCandidateLinkScore(
+          {
+            url,
+            text: path2,
+            sameOrigin: true
+          },
+          selectedFieldSet,
+          focus
+        )
+      };
+    } catch {
+      return null;
+    }
+  }).filter((item) => item !== null).sort((a, b) => b.score - a.score);
+  if (shouldPreferActualLinksFirst(focus)) {
+    for (const item of sortedLinks) {
+      pushIfValid(item.url);
+    }
+    for (const item of scoredCommonPaths) {
+      pushIfValid(item.url);
+    }
+  } else {
+    for (const item of scoredCommonPaths) {
+      pushIfValid(item.url);
+    }
+    for (const item of sortedLinks) {
+      pushIfValid(item.url);
+    }
+  }
+  return urls.slice(0, getFocusCandidatePageLimit(focus));
+}
+function hasSelectedOfficeFields(selectedFieldSet) {
+  return hasSelectedCrawlField(selectedFieldSet, "phone") || hasSelectedCrawlField(selectedFieldSet, "fax") || hasSelectedCrawlField(selectedFieldSet, "email") || hasSelectedCrawlField(selectedFieldSet, "zipcode") || hasSelectedCrawlField(selectedFieldSet, "address");
+}
+function getRepresentativeEnoughScore(_selectedFieldSet) {
+  return 980;
+}
+function canStopFetchingAdditionalPages(best, selectedFieldSet, focus) {
+  switch (focus) {
+    case "company_core":
+      return (!hasSelectedCrawlField(selectedFieldSet, "company") || !!best.company?.value) && (!hasSelectedCrawlField(selectedFieldSet, "website_url") || !!best.website_url?.value) && (!hasSelectedCrawlField(selectedFieldSet, "established_date") || !!best.established_date?.value) && (!hasSelectedCrawlField(selectedFieldSet, "capital") || !!best.capital?.value);
+    case "contact":
+      return (!hasSelectedCrawlField(selectedFieldSet, "form_url") || !!best.form_url?.value) && (!hasSelectedCrawlField(selectedFieldSet, "phone") || !!best.phone?.value) && (!hasSelectedCrawlField(selectedFieldSet, "fax") || !!best.fax?.value) && (!hasSelectedCrawlField(selectedFieldSet, "email") || !!best.email?.value) && (!hasSelectedCrawlField(selectedFieldSet, "zipcode") || !!best.zipcode?.value) && (!hasSelectedCrawlField(selectedFieldSet, "address") || !!best.address?.value);
+    case "representative":
+      return false;
+    case "employee_count":
+      return false;
+    case "permit":
+      return false;
+    case "business_content":
+      return !hasSelectedCrawlField(selectedFieldSet, "business_content") || !!best.business_content?.value;
+    default:
+      return false;
+  }
+}
+function pickNestedCandidatePageUrls(page, selectedFieldSet, focus) {
+  const urls = [];
+  const seen = /* @__PURE__ */ new Set();
+  const base = new URL(page.finalUrl);
+  const sortedLinks = [...page.links].map((link) => ({
+    url: link.url,
+    score: getCandidateLinkScore(link, selectedFieldSet, focus)
+  })).filter((item) => item.score > getFocusScoreThreshold(focus)).sort((a, b) => b.score - a.score);
+  for (const item of sortedLinks) {
+    if (seen.has(item.url)) continue;
+    if (HTML_PAGE_DENY_EXT.test(item.url)) continue;
+    if (focus === "employee_count") {
+      try {
+        const parsed = new URL(item.url);
+        if (parsed.origin !== base.origin) continue;
+      } catch {
+        continue;
+      }
+    }
+    seen.add(item.url);
+    urls.push(item.url);
+  }
+  return urls.slice(0, getFocusNestedCandidateLimit(focus));
+}
+function pageBoost(url) {
+  const target = decodeURIComponent(url);
+  let score = 0;
+  if (COMPANY_KEYWORDS.test(target)) score += 40;
+  if (BUSINESS_KEYWORDS.test(target)) score += 30;
+  if (CONTACT_KEYWORDS.test(target)) score += 20;
+  if (STAFF_KEYWORDS.test(target)) score += 25;
+  if (NEWS_BLOG_KEYWORDS.test(target)) score -= 50;
+  if (RECRUIT_KEYWORDS.test(target)) score -= 40;
+  return score;
+}
+function processPage(page, best, selectedFieldSet, sourceContext, focus) {
+  const boost = pageBoost(page.finalUrl);
+  const pairs = extractPairs(page.html);
+  if (shouldProcessFieldInFocus(selectedFieldSet, "website_url", focus)) {
+    addBest(best, "website_url", page.finalUrl, 200);
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "company", focus)) {
+    const textCompanyName = extractCompanyNameFromText(page.structuredText);
+    const ogSiteName = cleanCompanyName(extractOgSiteName(page.html));
+    const jsonLdName = cleanCompanyName(extractJsonLdOrganizationName(page.html));
+    const h1Name = cleanCompanyName(page.h1);
+    const titleName = cleanCompanyName(page.title);
+    addBest(best, "company", ogSiteName, 120 + boost);
+    addBest(best, "company", jsonLdName, 115 + boost);
+    addBest(best, "company", h1Name, 110 + boost);
+    addBest(best, "company", titleName, 90 + boost);
+    addBest(best, "company", textCompanyName, 105 + boost);
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "form_url", focus)) {
+    const formLink = page.links.find((link) => {
+      const target = `${link.text} ${link.url}`;
+      return CONTACT_KEYWORDS.test(target) && !HTML_PAGE_DENY_EXT.test(link.url);
+    });
+    if (hasHtmlForm(page.html) && CONTACT_KEYWORDS.test(page.finalUrl)) {
+      addBest(best, "form_url", page.finalUrl, 150);
+    }
+    addBest(best, "form_url", formLink?.url ?? null, 120 + boost);
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "email", focus)) {
+    const mailtoMatch = page.html.match(/mailto:([^"'?\s>]+)/i);
+    addBest(
+      best,
+      "email",
+      normalizeEmail(decodeURIComponent(mailtoMatch?.[1] || "")),
+      150 + boost
+    );
+    addBest(best, "email", normalizeEmail(page.text), 80 + boost);
+  }
+  const telMatch = page.html.match(/tel:([^"'?\s>]+)/i);
+  const phonePairValue = pickPairValue(pairs, PHONE_LABELS) ?? "";
+  const faxPairValue = pickPairValue(pairs, FAX_LABELS) ?? "";
+  const contactPairValue = pickPairValue(pairs, CONTACT_INFO_LABELS) ?? "";
+  if (shouldProcessFieldInFocus(selectedFieldSet, "phone", focus)) {
+    addBest(best, "phone", normalizePhone(phonePairValue), 220 + boost);
+    addBest(best, "phone", normalizePhone(contactPairValue), 210 + boost);
+    addBest(
+      best,
+      "phone",
+      normalizePhone(decodeURIComponent(telMatch?.[1] || "")),
+      150 + boost
+    );
+    addBest(best, "phone", normalizePhone(page.text), 40 + boost);
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "fax", focus)) {
+    addBest(best, "fax", normalizeFax(faxPairValue), 220 + boost);
+    addBest(best, "fax", normalizeFax(contactPairValue), 210 + boost);
+  }
+  const addressPairValue = pickPairValue(pairs, ADDRESS_LABELS) ?? "";
+  const zipcodePairValue = pickPairValue(pairs, ZIPCODE_LABELS) ?? addressPairValue;
+  const detectedAddress = extractAddressFromText(
+    [addressPairValue, zipcodePairValue, page.text].filter(Boolean).join(" ")
+  );
+  if (shouldProcessFieldInFocus(selectedFieldSet, "zipcode", focus)) {
+    addBest(best, "zipcode", normalizeZipcode(zipcodePairValue), 220 + boost);
+    addBest(best, "zipcode", normalizeZipcode(addressPairValue), 210 + boost);
+    addBest(best, "zipcode", normalizeZipcode(page.text), 40 + boost);
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "address", focus)) {
+    addBest(best, "address", normalizeAddress(addressPairValue), 220 + boost);
+    addBest(best, "address", detectedAddress, 215 + boost);
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "established_date", focus)) {
+    const establishedPairValue = pickPairValue(pairs, ESTABLISHED_LABELS) ?? "";
+    const establishedTextValue = extractSingleLineLabeledValue(page.structuredText, ESTABLISHED_LABELS) ?? "";
+    addBest(
+      best,
+      "established_date",
+      normalizeEstablished(establishedPairValue),
+      170 + boost
+    );
+    addBest(
+      best,
+      "established_date",
+      normalizeEstablished(establishedTextValue),
+      165 + boost
+    );
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "representative_name", focus)) {
+    const representativeCandidates = collectRepresentativeCandidates(page);
+    for (const candidate of representativeCandidates) {
+      addBest(
+        best,
+        "representative_name",
+        candidate.value,
+        candidate.score + boost
+      );
+    }
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "capital", focus)) {
+    const capitalPairValue = pickPairValue(pairs, CAPITAL_LABELS) ?? "";
+    const capitalTextValue = extractSingleLineLabeledValue(page.structuredText, CAPITAL_LABELS) ?? "";
+    addBest(
+      best,
+      "capital",
+      normalizeCapital(capitalPairValue),
+      200 + boost
+    );
+    addBest(
+      best,
+      "capital",
+      normalizeCapital(capitalTextValue),
+      195 + boost
+    );
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "employee_count", focus)) {
+    const employeeCountCandidate = extractEmployeeCountFromPage(
+      page,
+      sourceContext?.company ?? null,
+      sourceContext?.address ?? null
+    );
+    addBest(
+      best,
+      "employee_count",
+      employeeCountCandidate?.value ?? null,
+      employeeCountCandidate?.sourceScore ?? 0
+    );
+  }
+  if (shouldProcessFieldInFocus(selectedFieldSet, "business_content", focus)) {
+    const businessPairValue = pickPairValue(pairs, BUSINESS_CONTENT_LABELS) ?? "";
+    const businessSectionValue = extractLabeledSectionText(page.text, BUSINESS_CONTENT_LABELS, 600) ?? "";
+    const businessMetaValue = extractMetaDescription(page.html);
+    addBest(
+      best,
+      "business_content",
+      normalizeBusinessContent(businessPairValue),
+      220 + boost
+    );
+    addBest(
+      best,
+      "business_content",
+      normalizeBusinessContent(businessSectionValue),
+      210 + boost
+    );
+    addBest(
+      best,
+      "business_content",
+      normalizeBusinessContent(businessMetaValue),
+      90 + boost
+    );
+  }
+  if (shouldProcessPermitInFocus(selectedFieldSet, focus)) {
+    const permitCategory = extractPermitNumberCategory(
+      [page.structuredText, page.text, page.title, page.h1].join("\n")
+    );
+    addBest(best, "permit_number", permitCategory, 230 + boost);
+  }
+}
+async function crawlCompanyWebsite(websiteUrl, selectedFields = DEFAULT_CRAWL_SELECTABLE_FIELDS, sourceContext, runtimeOptions) {
+  const selectedFieldSet = new Set(selectedFields);
+  if (selectedFieldSet.size === 0) {
+    return {
+      company: null,
+      website_url: null,
+      form_url: null,
+      phone: null,
+      fax: null,
+      email: null,
+      zipcode: null,
+      address: null,
+      established_date: null,
+      representative_name: null,
+      representative_name_raw: null,
+      representative_name_reason: null,
+      representative_title: null,
+      capital: null,
+      employee_count: null,
+      business_content: null,
+      permit_number: null,
+      offices: []
+    };
+  }
+  const best = {};
+  const shouldExtractOffices = hasSelectedOfficeFields(selectedFieldSet);
+  const collectedPages = [];
+  const representativeEnoughScore = getRepresentativeEnoughScore(selectedFieldSet);
+  const pageFetchTimeoutMs = 1e4;
+  throwIfCrawlShouldStop(runtimeOptions);
+  const topPage = await fetchTopPage(
+    websiteUrl,
+    pageFetchTimeoutMs,
+    runtimeOptions
+  );
+  if (!topPage) {
+    return {
+      company: null,
+      website_url: hasSelectedCrawlField(selectedFieldSet, "website_url") ? normalizeSeedUrl(websiteUrl) : null,
+      form_url: null,
+      phone: null,
+      fax: null,
+      email: null,
+      zipcode: null,
+      address: null,
+      established_date: null,
+      representative_name: null,
+      representative_name_raw: null,
+      representative_name_reason: null,
+      representative_title: null,
+      capital: null,
+      employee_count: null,
+      business_content: null,
+      permit_number: null,
+      offices: []
+    };
+  }
+  if (shouldExtractOffices) {
+    pushOfficePageSnapshotIfNeeded(collectedPages, topPage);
+  }
+  processPage(topPage, best, selectedFieldSet, sourceContext);
+  const focusList = getEnabledCrawlPageFocuses(selectedFieldSet);
+  const fetchFocusPages = async (focus, urls, fetchedUrlSet, nestedCandidateUrls, ignoreInitialStop = false) => {
+    let fetchedOnePage = false;
+    for (const candidateUrl of urls) {
+      throwIfCrawlShouldStop(runtimeOptions);
+      if ((!ignoreInitialStop || fetchedOnePage) && canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+        break;
+      }
+      const page = await fetchPage(
+        candidateUrl,
+        pageFetchTimeoutMs,
+        runtimeOptions
+      );
+      if (!page) continue;
+      if (fetchedUrlSet.has(page.finalUrl)) continue;
+      fetchedUrlSet.add(page.finalUrl);
+      if (shouldExtractOffices && focus === "contact") {
+        pushOfficePageSnapshotIfNeeded(collectedPages, page);
+      }
+      processPage(page, best, selectedFieldSet, sourceContext, focus);
+      fetchedOnePage = true;
+      throwIfCrawlShouldStop(runtimeOptions);
+      if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+        const nestedUrls = pickNestedCandidatePageUrls(
+          page,
+          selectedFieldSet,
+          focus
+        );
+        for (const nestedUrl of nestedUrls) {
+          if (nestedCandidateUrls.includes(nestedUrl)) continue;
+          nestedCandidateUrls.push(nestedUrl);
+        }
+      }
+    }
+  };
+  for (const focus of focusList) {
+    const fetchedUrlSet = /* @__PURE__ */ new Set([topPage.finalUrl]);
+    const nestedCandidateUrls = [];
+    const rawCandidateUrls = pickCandidatePageUrls(
+      topPage,
+      selectedFieldSet,
+      focus
+    );
+    if (focus === "representative") {
+      const overviewCandidateUrls = rawCandidateUrls.filter(
+        (url) => isRepresentativeOverviewPageTarget(url)
+      );
+      const fallbackCandidateUrls = rawCandidateUrls.filter(
+        (url) => !isRepresentativeOverviewPageTarget(url)
+      );
+      const fetchAndProcessRepresentativePages = async (candidateUrls) => {
+        const pages = await fetchPagesConcurrently(
+          candidateUrls,
+          pageFetchTimeoutMs,
+          runtimeOptions
+        );
+        for (const page of pages) {
+          throwIfCrawlShouldStop(runtimeOptions);
+          if (fetchedUrlSet.has(page.finalUrl)) continue;
+          if (!shouldProcessRepresentativePage(page)) continue;
+          fetchedUrlSet.add(page.finalUrl);
+          processPage(page, best, selectedFieldSet, sourceContext, focus);
+          const nestedUrls = pickNestedCandidatePageUrls(
+            page,
+            selectedFieldSet,
+            focus
+          );
+          for (const nestedUrl of nestedUrls) {
+            if (nestedCandidateUrls.includes(nestedUrl)) continue;
+            nestedCandidateUrls.push(nestedUrl);
+          }
+        }
+      };
+      await fetchAndProcessRepresentativePages(overviewCandidateUrls);
+      const shouldFetchFallbackRepresentativePages = true;
+      if (shouldFetchFallbackRepresentativePages) {
+        await fetchAndProcessRepresentativePages(fallbackCandidateUrls);
+      }
+    } else {
+      await fetchFocusPages(
+        focus,
+        rawCandidateUrls,
+        fetchedUrlSet,
+        nestedCandidateUrls
+      );
+    }
+    if (!canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+      const limitedNestedCandidateUrls = nestedCandidateUrls.slice(
+        0,
+        getFocusNestedCandidateLimit(focus)
+      );
+      if (focus === "representative") {
+        const nestedPages = await fetchPagesConcurrently(
+          limitedNestedCandidateUrls,
+          pageFetchTimeoutMs,
+          runtimeOptions
+        );
+        for (const nestedPage of nestedPages) {
+          throwIfCrawlShouldStop(runtimeOptions);
+          if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
+          fetchedUrlSet.add(nestedPage.finalUrl);
+          processPage(
+            nestedPage,
+            best,
+            selectedFieldSet,
+            sourceContext,
+            focus
+          );
+        }
+      } else {
+        for (const nestedUrl of limitedNestedCandidateUrls) {
+          throwIfCrawlShouldStop(runtimeOptions);
+          if (canStopFetchingAdditionalPages(best, selectedFieldSet, focus)) {
+            break;
+          }
+          const nestedPage = await fetchPage(
+            nestedUrl,
+            pageFetchTimeoutMs,
+            runtimeOptions
+          );
+          if (!nestedPage) continue;
+          if (fetchedUrlSet.has(nestedPage.finalUrl)) continue;
+          fetchedUrlSet.add(nestedPage.finalUrl);
+          if (shouldExtractOffices && focus === "contact") {
+            pushOfficePageSnapshotIfNeeded(collectedPages, nestedPage);
+          }
+          processPage(
+            nestedPage,
+            best,
+            selectedFieldSet,
+            sourceContext,
+            focus
+          );
+        }
+      }
+    }
+  }
+  const offices = shouldExtractOffices ? extractOfficeResults(collectedPages, best.company?.value ?? null, {
+    phone: best.phone?.value ?? null,
+    fax: best.fax?.value ?? null,
+    email: best.email?.value ?? null,
+    zipcode: best.zipcode?.value ?? null,
+    address: best.address?.value ?? null
+  }) : [];
+  const representativeRawValue = hasSelectedCrawlField(
+    selectedFieldSet,
+    "representative_name"
+  ) ? best.representative_name?.value ?? null : null;
+  return {
+    company: hasSelectedCrawlField(selectedFieldSet, "company") ? best.company?.value ?? null : null,
+    website_url: hasSelectedCrawlField(selectedFieldSet, "website_url") ? best.website_url?.value ?? null : null,
+    form_url: hasSelectedCrawlField(selectedFieldSet, "form_url") ? best.form_url?.value ?? null : null,
+    phone: hasSelectedCrawlField(selectedFieldSet, "phone") ? best.phone?.value ?? null : null,
+    fax: hasSelectedCrawlField(selectedFieldSet, "fax") ? best.fax?.value ?? null : null,
+    email: hasSelectedCrawlField(selectedFieldSet, "email") ? best.email?.value ?? null : null,
+    zipcode: hasSelectedCrawlField(selectedFieldSet, "zipcode") ? best.zipcode?.value ?? null : null,
+    address: hasSelectedCrawlField(selectedFieldSet, "address") ? best.address?.value ?? null : null,
+    established_date: hasSelectedCrawlField(selectedFieldSet, "established_date") ? best.established_date?.value ?? null : null,
+    representative_name: hasSelectedCrawlField(
+      selectedFieldSet,
+      "representative_name"
+    ) ? best.representative_name?.value ?? null : null,
+    representative_name_raw: representativeRawValue,
+    representative_name_reason: null,
+    representative_title: null,
+    capital: hasSelectedCrawlField(selectedFieldSet, "capital") ? best.capital?.value ?? null : null,
+    employee_count: hasSelectedCrawlField(selectedFieldSet, "employee_count") ? best.employee_count?.value ?? null : null,
+    business_content: hasSelectedCrawlField(selectedFieldSet, "business_content") ? best.business_content?.value ?? null : null,
+    permit_number: best.permit_number?.value ?? null,
+    offices
+  };
+}
+
+// scripts/crawl-worker.ts
+process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || "0";
+var appDir = typeof process.pkg !== "undefined" ? import_node_path.default.dirname(process.execPath) : process.cwd();
+var configPath = import_node_path.default.join(appDir, "worker-config.json");
+var workerIdPath = import_node_path.default.join(appDir, "worker-id.txt");
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function loadConfig() {
+  if (!import_node_fs.default.existsSync(configPath)) {
+    const sample = {
+      apiBaseUrl: "https://master-view-app-ruby.vercel.app",
+      workerToken: "\u3053\u3053\u306BVercel\u3068\u540C\u3058MASTER_CRAWL_WORKER_TOKEN\u3092\u5165\u308C\u3066\u304F\u3060\u3055\u3044",
+      workerName: import_node_os.default.hostname(),
+      localPort: 39281,
+      pollIntervalMs: 3e3
+    };
+    import_node_fs.default.writeFileSync(configPath, JSON.stringify(sample, null, 2), "utf8");
+    console.error("worker-config.json \u3092\u4F5C\u6210\u3057\u307E\u3057\u305F\u3002workerToken \u3092\u8A2D\u5B9A\u3057\u3066\u304B\u3089\u518D\u8D77\u52D5\u3057\u3066\u304F\u3060\u3055\u3044\u3002");
+    process.exit(1);
+  }
+  const raw = import_node_fs.default.readFileSync(configPath, "utf8");
+  const config2 = JSON.parse(raw);
+  if (!config2.apiBaseUrl || !config2.workerToken) {
+    throw new Error("worker-config.json \u306E apiBaseUrl \u307E\u305F\u306F workerToken \u304C\u7A7A\u3067\u3059\u3002");
+  }
+  return {
+    ...config2,
+    apiBaseUrl: config2.apiBaseUrl.replace(/\/+$/, ""),
+    workerName: config2.workerName || import_node_os.default.hostname(),
+    localPort: config2.localPort || 39281,
+    pollIntervalMs: config2.pollIntervalMs || 3e3
+  };
+}
+function loadOrCreateWorkerId() {
+  if (import_node_fs.default.existsSync(workerIdPath)) {
+    const existing = import_node_fs.default.readFileSync(workerIdPath, "utf8").trim();
+    if (existing) return existing;
+  }
+  const id = `worker-${import_node_os.default.hostname()}-${import_node_crypto.default.randomUUID()}`;
+  import_node_fs.default.writeFileSync(workerIdPath, id, "utf8");
+  return id;
+}
+var config = loadConfig();
+var workerId = loadOrCreateWorkerId();
+var status = {
+  ok: true,
+  workerId,
+  workerName: config.workerName || import_node_os.default.hostname(),
+  apiBaseUrl: config.apiBaseUrl,
+  running: false,
+  currentJobId: null,
+  currentCompany: null,
+  lastMessage: "worker\u8D77\u52D5\u4E2D",
+  lastError: null,
+  startedAt: (/* @__PURE__ */ new Date()).toISOString()
+};
+async function callApi(body) {
+  const res = await fetch(`${config.apiBaseUrl}/api/master_data/crawl`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-master-crawl-worker-token": config.workerToken
+    },
+    body: JSON.stringify({
+      ...body,
+      workerId,
+      workerName: config.workerName
+    })
+  });
+  const data = await res.json();
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error || `API\u30A8\u30E9\u30FC: ${res.status}`);
+  }
+  return data;
+}
+function startLocalStatusServer() {
+  const port = config.localPort || 39281;
+  const server = import_node_http.default.createServer((req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "https://master-view-app-ruby.vercel.app");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    if (req.url === "/status") {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(status));
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ ok: false, error: "not found" }));
+  });
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`Local worker status server: http://127.0.0.1:${port}/status`);
+  });
+}
+async function runWithTimeout(task, timeoutMs) {
+  let timeoutId = null;
+  try {
+    return await Promise.race([
+      task,
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`1\u793E\u3042\u305F\u308A\u306E\u6700\u5927\u51E6\u7406\u6642\u9593\uFF08${Math.round(timeoutMs / 1e3)}\u79D2\uFF09\u3092\u8D85\u3048\u307E\u3057\u305F`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+async function registerWorker() {
+  await callApi({
+    action: "worker_register"
+  });
+  status.lastMessage = "worker\u767B\u9332\u5B8C\u4E86";
+}
+async function sendHeartbeat() {
+  await callApi({
+    action: "worker_heartbeat"
+  });
+}
+async function claimJob() {
+  return await callApi({
+    action: "worker_claim_job"
+  });
+}
+async function claimTarget(jobId) {
+  return await callApi({
+    action: "worker_claim_target",
+    jobId
+  });
+}
+async function reportTarget(params) {
+  await callApi({
+    action: "worker_report_target",
+    jobId: params.jobId,
+    targetIndex: params.targetIndex,
+    targetStatus: params.targetStatus,
+    statusReason: params.statusReason ?? null,
+    extracted: params.extracted ?? null
+  });
+}
+async function processJob(jobId) {
+  status.currentJobId = jobId;
+  status.running = true;
+  status.lastMessage = `\u30B8\u30E7\u30D6\u51E6\u7406\u958B\u59CB: ${jobId}`;
+  while (true) {
+    await sendHeartbeat();
+    const targetRes = await claimTarget(jobId);
+    if (targetRes.completed) {
+      status.lastMessage = `\u30B8\u30E7\u30D6\u5B8C\u4E86: ${jobId}`;
+      break;
+    }
+    if (targetRes.paused) {
+      status.lastMessage = `\u30B8\u30E7\u30D6\u4E2D\u65AD: ${jobId}`;
+      break;
+    }
+    const target = targetRes.target;
+    if (!target) {
+      status.lastMessage = "\u51E6\u7406\u5BFE\u8C61\u306A\u3057";
+      break;
+    }
+    status.currentCompany = target.company;
+    status.lastMessage = `\u53D6\u5F97\u4E2D: ${target.company || target.websiteUrl || target.rowId}`;
+    if (!target.websiteUrl) {
+      await reportTarget({
+        jobId,
+        targetIndex: target.targetIndex,
+        targetStatus: "skipped",
+        statusReason: "\u4F01\u696D\u30B5\u30A4\u30C8URL\u304C\u7A7A\u3067\u3059"
+      });
+      continue;
+    }
+    try {
+      const extracted = await runWithTimeout(
+        crawlCompanyWebsite(
+          target.websiteUrl,
+          target.selectedFields,
+          {
+            company: target.company,
+            address: target.address
+          },
+          {
+            shouldStop: () => false
+          }
+        ),
+        90 * 1e3
+      );
+      await reportTarget({
+        jobId,
+        targetIndex: target.targetIndex,
+        targetStatus: "done",
+        extracted
+      });
+    } catch (error) {
+      await reportTarget({
+        jobId,
+        targetIndex: target.targetIndex,
+        targetStatus: "failed",
+        statusReason: error instanceof Error ? error.message : "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC"
+      });
+    }
+  }
+  status.running = false;
+  status.currentJobId = null;
+  status.currentCompany = null;
+}
+async function mainLoop() {
+  startLocalStatusServer();
+  await registerWorker();
+  console.log(`Crawl worker started: ${workerId}`);
+  console.log(`Worker name: ${config.workerName}`);
+  console.log(`API: ${config.apiBaseUrl}`);
+  while (true) {
+    try {
+      await sendHeartbeat();
+      const job = await claimJob();
+      if (!job.jobId) {
+        status.lastMessage = "\u5F85\u6A5F\u4E2D";
+        await sleep(config.pollIntervalMs || 3e3);
+        continue;
+      }
+      await processJob(job.jobId);
+    } catch (error) {
+      status.running = false;
+      status.currentJobId = null;
+      status.currentCompany = null;
+      status.lastError = error instanceof Error ? error.message : "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC";
+      status.lastMessage = "\u30A8\u30E9\u30FC\u767A\u751F\u3002\u6570\u79D2\u5F8C\u306B\u518D\u8A66\u884C\u3057\u307E\u3059\u3002";
+      console.error(status.lastError);
+      await sleep(5e3);
+    }
+  }
+}
+mainLoop().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

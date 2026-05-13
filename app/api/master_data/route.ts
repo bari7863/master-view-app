@@ -978,6 +978,221 @@ const REPRESENTATIVE_NON_NAME_EXACT_VALUES = new Set([
   "各位",
   "御中",
   "一同",
+
+  "あいさつ",
+  "ごあいさつ",
+  "御挨拶",
+  "挨拶",
+  "問候",
+  "致辞",
+  "あいさつ MESSAGE",
+  "あいさつ message",
+  "あいさつ 企業理念",
+  "あいさつ 概要",
+  "あいさつ 理念",
+  "あいさつ 経営理念",
+  "あいさつ 経営理念 年間スローガン",
+  "あいさつ全文を見る",
+  "ごあいさつ CEO MESSAGE",
+  "ごあいさつ GREETING",
+  "ごあいさつ MESSAGE",
+  "ご挨拶 Message",
+  "ご挨拶 Message From The",
+  "ご挨拶 of 社会福祉法人寿康会",
+  "ご挨拶 沿 革",
+  "ご挨拶 企業理念 行動指針",
+  "挨拶 GREETING",
+  "挨拶 Greetings",
+  "挨拶 MESSAGE",
+  "挨拶 Message",
+  "挨拶 新時代への挑戦",
+  "挨拶 企業理念",
+  "挨拶 学院理念",
+  "挨拶 概要",
+  "挨拶 沿革",
+  "挨拶 理念",
+  "挨拶 理念 沿革",
+  "挨拶 社是",
+  "挨拶 社訓",
+  "挨拶 組織図 役員",
+  "挨拶 経営理念",
+  "挨拶 経営理念 方針",
+  "挨拶 経営理念 行動指針",
+  "挨拶 設立趣旨",
+  "院長挨拶",
+  "変更 挨拶",
+  "交代の挨拶",
+  "交代のご挨拶",
+  "退任 就任のご挨拶",
+  "就任のご挨拶",
+  "就任のお知らせ",
+  "交代のお知らせ",
+  "交代",
+  "就任",
+
+  "所在地",
+  "本社所在地",
+  "本社住所",
+  "本社",
+  "本店所在地",
+  "住所",
+  "電話",
+  "電話 受付時間変更のお知らせ",
+  "TEL",
+  "TEL FAX",
+  "FAX",
+  "メール",
+  "アドレス",
+  "営業時間",
+  "資本金",
+  "従業員数",
+  "従業員",
+  "社員数",
+  "社員",
+  "業種",
+  "業務内容",
+  "社名",
+  "採用担当者名",
+  "記入担当者",
+  "出店地域",
+  "仕様",
+  "約款",
+  "適用範囲",
+  "管理本部",
+  "監査等",
+  "研修",
+  "認定等",
+  "株式上場",
+  "株主総会",
+  "上場",
+  "創立",
+  "所信",
+  "グループ",
+  "ハローGグループの組織図",
+  "職名 理事長 氏名",
+  "職名 代表取締役 氏名",
+  "最高経営責任者",
+  "Chief executive officer",
+  "運営責任者",
+  "取缔役社长",
+  "取缔役 社长",
+
+  "NEWS",
+  "Home",
+  "home",
+  "HOME",
+  "ホーム",
+  "TOP",
+  "総合TOP",
+  "BLOG",
+  "Blog",
+  "ブログ",
+  "ブログを見る",
+  "ブログを読む",
+  "COMPANY",
+  "Company",
+  "COMPANY PROFILE",
+  "Company overview",
+  "HISTORY",
+  "OUTLINE",
+  "PRODUCTS",
+  "PRESIDENT",
+  "Presidente",
+  "GREETING",
+  "MESSAGE",
+  "Message",
+  "Time Table",
+  "CONTACT US お問い合わせ",
+  "サイトマップ",
+  "ページの先頭へ戻る",
+  "ボタンテキスト",
+  "テキスト",
+  "タイトルイメージ",
+  "レックフッター",
+  "関西ペイントTOP",
+  "プロフィール",
+  "プロフィール 代表者プロフィール",
+  "経歴",
+  "インタビュー",
+  "コメント",
+  "資格",
+  "メッセージ Message",
+  "メッセージ Top Message",
+  "メッセージと企業ビジョン",
+  "メッセージを見る",
+  "メッセージ タンガロイウェイ",
+  "メッセージ 役員紹介",
+  "メッセージ 経営理念",
+  "副社長メッセージ",
+
+  "応急危険度判定士",
+  "備前市前教育長",
+  "総合職採用",
+  "室直行メール",
+  "インタープリター",
+  "医師",
+  "博士",
+  "症例",
+  "質問",
+  "未来",
+  "正直",
+  "達人",
+  "ステキ",
+  "入社",
+  "出身地",
+  "親族",
+  "実印 角印",
+  "及びスタッフ一同",
+  "社員一同",
+  "および全ての職員が 介指定基準における",
+  "および運営責任者",
+  "などの管理者",
+  "その他のお問い合わせは 明日見らいふ南大沢",
+  "又は管理人の定",
+  "連絡会の開催",
+  "第四日野小学校 町工場見学 受け入れ",
+  "現在 フェローズ プロモーション",
+  "私たちの価値観",
+  "誠実な商いを社訓として",
+  "色のみ表示",
+  "捕獲リーチ",
+  "捕獲リーチ 信頼度",
+  "審議予告 信頼度",
+  "報恩感謝とともに",
+  "的な応用例",
+  "的なのは 緑色水 と",
+  "TOAを知る",
+
+  "POMODORO",
+  "POKO",
+  "nicoe",
+  "クラス",
+  "銘菓",
+  "銘菓 鶴吉羊羹",
+  "悠雲寮",
+  "ゆうゆう舎",
+  "ぷらっと食堂",
+  "NPO法人となりのかいご",
+  "医療法人 清仁会",
+  "医療法人社団 拓己会",
+  "社会福祉法人ハルモニア",
+  "うしお霊園 村田石材",
+  "フローリスト花咲",
+  "サイクルユートピアうみの",
+  "シラス販売サイト運営の密かな楽しみ メガしらす丼",
+  "土木 建築 水回り工事 プロパンガス販売",
+  "新築 リフォームの設計と監理",
+  "足場の組み立て",
+  "ハウスクリーニング全般",
+  "動画で知る松浦スチロール",
+  "機種シリーズ",
+  "ショートステイ担当",
+  "ソーシャルワーカー",
+  "生活相談員",
+  "照明コンサルタント",
+  "宅地建物取引主任者",
+  "増改築相談士",
+  "経営コンサルタント 作家",
 ]);
 
 const REPRESENTATIVE_AREA_NAME_TOKENS = new Set<string>([
@@ -1552,13 +1767,15 @@ function looksLikeNonNameToken(value: string) {
   const text = trimRepresentativeAffixes(value.trim());
   if (!text) return true;
 
-  if (looksLikeProtectedRepresentativeName(text)) return false;
   if (REPRESENTATIVE_NON_NAME_EXACT_VALUES.has(text)) return true;
+  if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
+  if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
+
+  if (looksLikeProtectedRepresentativeName(text)) return false;
+
   if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(text.normalize("NFKC"))) {
     return true;
   }
-  if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
-  if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
 
   if (
     REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text) &&
@@ -1587,7 +1804,8 @@ function shouldAutoDeleteRepresentativeName(value: string) {
 
   return (
     REPRESENTATIVE_NON_NAME_EXACT_VALUES.has(normalizedSource) ||
-    REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(normalizedSource)
+    REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(normalizedSource) ||
+    looksLikeNonNameToken(normalizedSource)
   );
 }
 
@@ -1760,6 +1978,16 @@ function inspectRepresentativeNameValue(value: string | null) {
       shouldDelete: false,
       shouldReview: false,
       reason: "",
+    };
+  }
+
+  if (shouldAutoDeleteRepresentativeName(original)) {
+    return {
+      cleanedValue: null,
+      shouldUpdate: false,
+      shouldDelete: true,
+      shouldReview: false,
+      reason: "氏名ではない文字列のため削除候補",
     };
   }
 
@@ -2703,7 +2931,9 @@ export async function POST(req: NextRequest) {
           return record;
         });
 
-      records.push(...fileRecords);
+      for (const fileRecord of fileRecords) {
+        records.push(fileRecord);
+      }
     }
 
     if (invalidHeaderFiles.length > 0) {

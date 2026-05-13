@@ -304,6 +304,9 @@ type ApiResponse = {
   remainingCount?: number;
   paused?: boolean;
   completed?: boolean;
+  elapsedMs?: number;
+  elapsedSeconds?: number;
+  averageSecondsPerItem?: number;
 
   mynaviTotalPages?: number;
   mynaviSelectedPageCount?: number;
@@ -414,6 +417,21 @@ const ITEM_INSPECTION_PREVIEW_PAGE_SIZE = 20;
 
 const ACTIVE_CRAWL_JOB_STORAGE_KEY = "master-data-active-crawl-job-id";
 
+const LOCAL_CRAWL_WORKER_STATUS_URL = "http://127.0.0.1:39281/status";
+
+type LocalCrawlWorkerStatus = {
+  ok: boolean;
+  workerId: string;
+  workerName: string;
+  apiBaseUrl: string;
+  running: boolean;
+  currentJobId: string | null;
+  currentCompany: string | null;
+  lastMessage: string;
+  lastError: string | null;
+  startedAt: string;
+};
+
 function saveActiveCrawlJobId(jobId: string | null) {
   if (typeof window === "undefined") return;
 
@@ -427,6 +445,89 @@ function saveActiveCrawlJobId(jobId: string | null) {
 function loadActiveCrawlJobId() {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(ACTIVE_CRAWL_JOB_STORAGE_KEY);
+}
+
+const CRAWL_ELAPSED_STORAGE_PREFIX = "master-data-crawl-elapsed-ms:";
+const CRAWL_ELAPSED_LAST_SEEN_STORAGE_PREFIX =
+  "master-data-crawl-elapsed-last-seen-at:";
+const CRAWL_ELAPSED_RUNNING_STORAGE_PREFIX =
+  "master-data-crawl-elapsed-was-running:";
+
+function saveCrawlElapsedMs(jobId: string | null, elapsedMs: number) {
+  if (typeof window === "undefined" || !jobId) return;
+
+  window.localStorage.setItem(
+    `${CRAWL_ELAPSED_STORAGE_PREFIX}${jobId}`,
+    String(Math.max(Math.floor(elapsedMs), 0))
+  );
+}
+
+function saveCrawlElapsedSnapshot(
+  jobId: string | null,
+  elapsedMs: number,
+  isRunning: boolean
+) {
+  if (typeof window === "undefined" || !jobId) return;
+
+  saveCrawlElapsedMs(jobId, elapsedMs);
+
+  window.localStorage.setItem(
+    `${CRAWL_ELAPSED_LAST_SEEN_STORAGE_PREFIX}${jobId}`,
+    String(Date.now())
+  );
+
+  window.localStorage.setItem(
+    `${CRAWL_ELAPSED_RUNNING_STORAGE_PREFIX}${jobId}`,
+    isRunning ? "1" : "0"
+  );
+}
+
+function loadCrawlElapsedMs(jobId: string | null) {
+  if (typeof window === "undefined" || !jobId) return 0;
+
+  const value = Number(
+    window.localStorage.getItem(`${CRAWL_ELAPSED_STORAGE_PREFIX}${jobId}`)
+  );
+
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+function loadCrawlElapsedSnapshotMs(jobId: string | null) {
+  if (typeof window === "undefined" || !jobId) return 0;
+
+  const savedElapsedMs = loadCrawlElapsedMs(jobId);
+  const wasRunning =
+    window.localStorage.getItem(
+      `${CRAWL_ELAPSED_RUNNING_STORAGE_PREFIX}${jobId}`
+    ) === "1";
+
+  const lastSeenAt = Number(
+    window.localStorage.getItem(
+      `${CRAWL_ELAPSED_LAST_SEEN_STORAGE_PREFIX}${jobId}`
+    )
+  );
+
+  if (!wasRunning || !Number.isFinite(lastSeenAt) || lastSeenAt <= 0) {
+    return savedElapsedMs;
+  }
+
+  return Math.max(
+    savedElapsedMs + Math.max(Date.now() - lastSeenAt, 0),
+    savedElapsedMs,
+    0
+  );
+}
+
+function deleteCrawlElapsedMs(jobId: string | null) {
+  if (typeof window === "undefined" || !jobId) return;
+
+  window.localStorage.removeItem(`${CRAWL_ELAPSED_STORAGE_PREFIX}${jobId}`);
+  window.localStorage.removeItem(
+    `${CRAWL_ELAPSED_LAST_SEEN_STORAGE_PREFIX}${jobId}`
+  );
+  window.localStorage.removeItem(
+    `${CRAWL_ELAPSED_RUNNING_STORAGE_PREFIX}${jobId}`
+  );
 }
 
 const GRID_TEMPLATE = `
@@ -1736,6 +1837,11 @@ export default function Home() {
   const [importError, setImportError] = useState("");
 
   const [crawlConfirmOpen, setCrawlConfirmOpen] = useState(false);
+
+  const [localCrawlWorker, setLocalCrawlWorker] =
+    useState<LocalCrawlWorkerStatus | null>(null);
+  const [localCrawlWorkerError, setLocalCrawlWorkerError] = useState("");
+
   const [crawlFieldSelections, setCrawlFieldSelections] = useState<
     Record<CrawlFieldKey, boolean>
   >(() => createInitialCrawlFieldSelections());
@@ -2288,6 +2394,43 @@ export default function Home() {
   useEffect(() => {
     fetchData();
   }, [page, limit, appliedColumnStates, appliedAdvancedFilters]);
+
+  const checkLocalCrawlWorker = async () => {
+    try {
+      const res = await fetch(LOCAL_CRAWL_WORKER_STATUS_URL, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const data = (await res.json()) as LocalCrawlWorkerStatus;
+
+      if (!res.ok || !data.ok || !data.workerId) {
+        throw new Error("workerが起動していません");
+      }
+
+      setLocalCrawlWorker(data);
+      setLocalCrawlWorkerError("");
+      return data;
+    } catch {
+      setLocalCrawlWorker(null);
+      setLocalCrawlWorkerError(
+        "このPCのworkerが起動していません。master-crawl-worker.exe を起動してください。"
+      );
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    void checkLocalCrawlWorker();
+
+    const timer = window.setInterval(() => {
+      void checkLocalCrawlWorker();
+    }, 5000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -5101,17 +5244,45 @@ const handlePreviewCsvExport = async () => {
         ? Date.now() - crawlStartedAtRef.current
         : 0;
 
-    setCrawlElapsedMs(crawlElapsedBaseMsRef.current + runningMs);
+    const nextElapsedMs = Math.max(
+      Math.floor(crawlElapsedBaseMsRef.current + runningMs),
+      0
+    );
+
+    const activeJobId = crawlJobId ?? loadActiveCrawlJobId();
+    const isRunning =
+      crawlJobStatus === "running" ||
+      crawling ||
+      crawlStartedAtRef.current !== null;
+
+    setCrawlElapsedMs(nextElapsedMs);
+    saveCrawlElapsedSnapshot(activeJobId, nextElapsedMs, isRunning);
   };
 
   const startCrawlElapsedTracking = (reset = false) => {
+    const activeJobId = crawlJobId ?? loadActiveCrawlJobId();
+
     if (reset) {
       crawlElapsedBaseMsRef.current = 0;
       setCrawlElapsedMs(0);
+      saveCrawlElapsedSnapshot(activeJobId, 0, true);
+    } else {
+      const savedElapsedMs = loadCrawlElapsedSnapshotMs(activeJobId);
+
+      crawlElapsedBaseMsRef.current = Math.max(
+        crawlElapsedBaseMsRef.current,
+        savedElapsedMs,
+        crawlElapsedMs,
+        0
+      );
     }
 
     crawlStartedAtRef.current = Date.now();
-    updateCrawlElapsedMs();
+
+    const nextElapsedMs = Math.max(Math.floor(crawlElapsedBaseMsRef.current), 0);
+    setCrawlElapsedMs(nextElapsedMs);
+    saveCrawlElapsedSnapshot(activeJobId, nextElapsedMs, true);
+
     clearCrawlElapsedTimer();
     crawlElapsedTimerRef.current = window.setInterval(updateCrawlElapsedMs, 1000);
   };
@@ -5122,7 +5293,80 @@ const handlePreviewCsvExport = async () => {
       crawlStartedAtRef.current = null;
     }
 
-    updateCrawlElapsedMs();
+    const activeJobId = crawlJobId ?? loadActiveCrawlJobId();
+    const savedElapsedMs = loadCrawlElapsedSnapshotMs(activeJobId);
+
+    const nextElapsedMs = Math.max(
+      Math.floor(crawlElapsedBaseMsRef.current),
+      crawlElapsedMs,
+      savedElapsedMs,
+      0
+    );
+
+    crawlElapsedBaseMsRef.current = nextElapsedMs;
+    setCrawlElapsedMs(nextElapsedMs);
+    saveCrawlElapsedSnapshot(activeJobId, nextElapsedMs, false);
+    clearCrawlElapsedTimer();
+  };
+
+  const getCrawlElapsedMsFromApi = (data: ApiResponse) => {
+    const elapsedMs = Number(data.elapsedMs);
+
+    if (Number.isFinite(elapsedMs) && elapsedMs >= 0) {
+      return Math.floor(elapsedMs);
+    }
+
+    const elapsedSeconds = Number(data.elapsedSeconds);
+
+    if (Number.isFinite(elapsedSeconds) && elapsedSeconds >= 0) {
+      return Math.floor(elapsedSeconds * 1000);
+    }
+
+    return null;
+  };
+
+  const syncCrawlElapsedFromApi = (data: ApiResponse) => {
+    const activeJobId = data.jobId ?? crawlJobId ?? loadActiveCrawlJobId();
+    const serverElapsedMs = getCrawlElapsedMsFromApi(data);
+    const savedElapsedMs = loadCrawlElapsedSnapshotMs(activeJobId);
+
+    const currentRunningMs =
+      crawlStartedAtRef.current !== null
+        ? Date.now() - crawlStartedAtRef.current
+        : 0;
+
+    const currentClientElapsedMs = Math.max(
+      Math.floor(crawlElapsedBaseMsRef.current + currentRunningMs),
+      crawlElapsedMs,
+      0
+    );
+
+    const nextElapsedMs = Math.max(
+      serverElapsedMs ?? 0,
+      savedElapsedMs,
+      currentClientElapsedMs,
+      0
+    );
+
+    const isRunning = data.jobStatus === "running";
+
+    crawlElapsedBaseMsRef.current = nextElapsedMs;
+    crawlStartedAtRef.current = isRunning ? Date.now() : null;
+
+    setCrawlElapsedMs(nextElapsedMs);
+    saveCrawlElapsedSnapshot(activeJobId, nextElapsedMs, isRunning);
+
+    if (isRunning) {
+      if (crawlElapsedTimerRef.current === null) {
+        crawlElapsedTimerRef.current = window.setInterval(
+          updateCrawlElapsedMs,
+          1000
+        );
+      }
+
+      return;
+    }
+
     clearCrawlElapsedTimer();
   };
 
@@ -5171,6 +5415,17 @@ const handlePreviewCsvExport = async () => {
   const tryRestoreCrawlJob = async (targetJobId?: string | null) => {
   const restoreJobId = targetJobId ?? crawlJobId ?? loadActiveCrawlJobId();
   if (!restoreJobId || crawlRecoveringRef.current) return false;
+
+  const savedElapsedMs = loadCrawlElapsedSnapshotMs(restoreJobId);
+  if (savedElapsedMs > 0) {
+    crawlElapsedBaseMsRef.current = Math.max(
+      crawlElapsedBaseMsRef.current,
+      savedElapsedMs,
+      crawlElapsedMs,
+      0
+    );
+    setCrawlElapsedMs(crawlElapsedBaseMsRef.current);
+  }
 
   crawlRecoveringRef.current = true;
 
@@ -5265,7 +5520,6 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
   clearCrawlStatusPolling();
   clearCrawlRestoreTimer();
-  stopCrawlElapsedTracking();
 
   setCrawling(false);
   setCrawlProgressOpen(true);
@@ -5302,6 +5556,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     setCrawlCurrentWebsiteUrl(data.currentWebsiteUrl ?? null);
     setCrawlCurrentFields(data.currentFields ?? []);
     setCrawlRemainingCount(data.remainingCount ?? 0);
+
+    syncCrawlElapsedFromApi(data);
   };
 
   const startCrawlStatusPolling = (jobId: string) => {
@@ -5462,7 +5718,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   }, [crawlJobId]);
 
   useEffect(() => {
+    const saveBeforeClose = () => {
+      updateCrawlElapsedMs();
+    };
+
+    window.addEventListener("pagehide", saveBeforeClose);
+    window.addEventListener("beforeunload", saveBeforeClose);
+
     return () => {
+      saveBeforeClose();
+      window.removeEventListener("pagehide", saveBeforeClose);
+      window.removeEventListener("beforeunload", saveBeforeClose);
       clearCrawlStatusPolling();
       clearCrawlElapsedTimer();
       clearItemInspectionStatusPolling();
@@ -5556,13 +5822,20 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     setCrawlPreviewRows([]);
     setCrawlPreviewTotalCount(0);
     setCrawlMessage("");
-    stopCrawlElapsedTracking();
     setCrawlError("");
     setCrawling(true);
     setCrawlProgressOpen(true);
-    startCrawlElapsedTracking(false);
 
     try {
+
+      const worker = await checkLocalCrawlWorker();
+
+      if (!worker) {
+        throw new Error(
+          "このPCのworkerが起動していません。master-crawl-worker.exe を起動してから再度実行してください。"
+        );
+      }
+
       const res = await fetch("/api/master_data/crawl", {
         method: "POST",
         headers: {
@@ -5571,6 +5844,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         body: JSON.stringify({
           action: "resume_job",
           jobId: crawlJobId,
+          assignedWorkerId: worker.workerId,
         }),
       });
 
@@ -5595,8 +5869,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   const handleCrawl = async () => {
     if (!crawlTargetScope) return;
 
+    const previousCrawlJobId = crawlJobId ?? loadActiveCrawlJobId();
+
     stopCrawlElapsedTracking();
     clearCrawlStatusPolling();
+    deleteCrawlElapsedMs(previousCrawlJobId);
     setCrawling(true);
     setCrawlConfirmOpen(false);
     setCrawlPreviewOpen(false);
@@ -5624,10 +5901,20 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     startCrawlElapsedTracking(true);
 
     try {
+      
+      const worker = await checkLocalCrawlWorker();
+
+      if (!worker) {
+        throw new Error(
+          "このPCのworkerが起動していません。master-crawl-worker.exe を起動してから再度実行してください。"
+        );
+      }
+
       const body: Record<string, unknown> = {
         action: "start_preview_job",
         targetScope: crawlTargetScope,
         selectedFields: getSelectedCrawlFields(crawlFieldSelections),
+        assignedWorkerId: worker.workerId,
       };
 
       if (crawlTargetScope === "filtered") {
@@ -5673,6 +5960,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
       setCrawlJobId(data.jobId);
       saveActiveCrawlJobId(data.jobId);
+      saveCrawlElapsedMs(data.jobId, 0);
       applyCrawlStatus(data);
       startCrawlStatusPolling(data.jobId);
     } catch (e) {
@@ -9096,7 +9384,20 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                       <button
                         type="button"
-                        onClick={() => setCrawlPreviewOpen(false)}
+                        onClick={() => {
+                          const dismissedJobId = crawlJobId ?? loadActiveCrawlJobId();
+
+                          setCrawlPreviewOpen(false);
+                          setCrawlResumeConfirmOpen(false);
+                          setCrawlPreviewRows([]);
+                          setCrawlPreviewTotalCount(0);
+                          setCrawlPreviewPage(1);
+                          setCrawlSelectedChanges({});
+                          setCrawlJobId(null);
+                          saveActiveCrawlJobId(null);
+                          deleteCrawlElapsedMs(dismissedJobId);
+                          setCrawlJobStatus("idle");
+                        }}
                         disabled={crawling}
                         className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                       >

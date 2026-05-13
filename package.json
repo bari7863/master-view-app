@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:worker": "esbuild scripts/crawl-worker.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/worker/crawl-worker.cjs --external:playwright --external:playwright-core --external:pdf-parse",
+    "package:worker:win": "pkg dist/worker/crawl-worker.cjs --targets node20-win-x64 --output release/MasterCrawlWorker/master-crawl-worker.exe"
   },
   "dependencies": {
     "next": "16.1.6",
@@ -22,6 +24,8 @@
     "@types/pg": "^8.18.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@yao-pkg/pkg": "^6.19.0",
+    "esbuild": "^0.28.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4.2.1",

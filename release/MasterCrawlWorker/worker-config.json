@@ -1,0 +1,7 @@
+{
+  "apiBaseUrl": "https://master-view-app-ruby.vercel.app",
+  "workerToken": "d567a21a1772cd8c23be84471166be2bf729a6f8282b975ebe423778ac81a4e7",
+  "workerName": "担当者名またはPC名",
+  "localPort": 39281,
+  "pollIntervalMs": 3000
+}

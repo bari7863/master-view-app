@@ -952,7 +952,7 @@ function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
 }
 
 const REPRESENTATIVE_TITLE_REGEX =
-  /代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー|CEO|COO|CFO|CTO|CMO/gu;
+  /代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|代表理事|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー|CEO|COO|CFO|CTO|CMO/gu;
 
 const REPRESENTATIVE_STOPWORDS = [
   "営業",
@@ -997,6 +997,291 @@ const REPRESENTATIVE_NON_NAME_EXACT_VALUES = new Set([
   "各位",
   "御中",
   "一同",
+  "あいさつ",
+  "ごあいさつ",
+  "御挨拶",
+  "挨拶",
+  "問候",
+  "致辞",
+  "あいさつ MESSAGE",
+  "あいさつ message",
+  "あいさつ 企業理念",
+  "あいさつ 概要",
+  "あいさつ 理念",
+  "あいさつ 経営理念",
+  "あいさつ 経営理念 年間スローガン",
+  "あいさつ全文を見る",
+  "ごあいさつ CEO MESSAGE",
+  "ごあいさつ GREETING",
+  "ごあいさつ MESSAGE",
+  "ご挨拶 Message",
+  "ご挨拶 Message From The",
+  "ご挨拶 of 社会福祉法人寿康会",
+  "ご挨拶 沿 革",
+  "ご挨拶 企業理念 行動指針",
+  "挨拶 GREETING",
+  "挨拶 Greetings",
+  "挨拶 MESSAGE",
+  "挨拶 Message",
+  "挨拶 新時代への挑戦",
+  "挨拶 企業理念",
+  "挨拶 学院理念",
+  "挨拶 概要",
+  "挨拶 沿革",
+  "挨拶 理念",
+  "挨拶 理念 沿革",
+  "挨拶 社是",
+  "挨拶 社訓",
+  "挨拶 組織図 役員",
+  "挨拶 経営理念",
+  "挨拶 経営理念 方針",
+  "挨拶 経営理念 行動指針",
+  "挨拶 設立趣旨",
+  "院長挨拶",
+  "変更 挨拶",
+  "交代の挨拶",
+  "交代のご挨拶",
+  "退任 就任のご挨拶",
+  "就任のご挨拶",
+  "就任のお知らせ",
+  "交代のお知らせ",
+  "交代",
+  "就任",
+  "所在地",
+  "本社所在地",
+  "本社住所",
+  "本社",
+  "本店所在地",
+  "住所",
+  "電話",
+  "電話 受付時間変更のお知らせ",
+  "TEL",
+  "TEL FAX",
+  "FAX",
+  "メール",
+  "アドレス",
+  "営業時間",
+  "資本金",
+  "従業員数",
+  "従業員",
+  "社員数",
+  "社員",
+  "業種",
+  "業務内容",
+  "社名",
+  "採用担当者名",
+  "記入担当者",
+  "出店地域",
+  "仕様",
+  "約款",
+  "適用範囲",
+  "管理本部",
+  "監査等",
+  "研修",
+  "認定等",
+  "株式上場",
+  "株主総会",
+  "上場",
+  "創立",
+  "所信",
+  "グループ",
+  "ハローGグループの組織図",
+  "職名 理事長 氏名",
+  "職名 代表取締役 氏名",
+  "最高経営責任者",
+  "Chief executive officer",
+  "運営責任者",
+  "取缔役社长",
+  "取缔役 社长",
+  "NEWS",
+  "Home",
+  "home",
+  "HOME",
+  "ホーム",
+  "TOP",
+  "総合TOP",
+  "BLOG",
+  "Blog",
+  "ブログ",
+  "ブログを見る",
+  "ブログを読む",
+  "COMPANY",
+  "Company",
+  "COMPANY PROFILE",
+  "Company overview",
+  "HISTORY",
+  "OUTLINE",
+  "PRODUCTS",
+  "PRESIDENT",
+  "Presidente",
+  "GREETING",
+  "MESSAGE",
+  "Message",
+  "Time Table",
+  "CONTACT US お問い合わせ",
+  "サイトマップ",
+  "ページの先頭へ戻る",
+  "ボタンテキスト",
+  "テキスト",
+  "タイトルイメージ",
+  "レックフッター",
+  "関西ペイントTOP",
+  "プロフィール",
+  "プロフィール 代表者プロフィール",
+  "経歴",
+  "インタビュー",
+  "コメント",
+  "資格",
+  "メッセージ Message",
+  "メッセージ Top Message",
+  "メッセージと企業ビジョン",
+  "メッセージを見る",
+  "メッセージ タンガロイウェイ",
+  "メッセージ 役員紹介",
+  "メッセージ 経営理念",
+  "副社長メッセージ",
+  "応急危険度判定士",
+  "備前市前教育長",
+  "総合職採用",
+  "室直行メール",
+  "インタープリター",
+  "医師",
+  "博士",
+  "症例",
+  "質問",
+  "未来",
+  "正直",
+  "達人",
+  "ステキ",
+  "入社",
+  "出身地",
+  "親族",
+  "実印 角印",
+  "及びスタッフ一同",
+  "社員一同",
+  "および全ての職員が 介指定基準における",
+  "および運営責任者",
+  "などの管理者",
+  "その他のお問い合わせは 明日見らいふ南大沢",
+  "又は管理人の定",
+  "連絡会の開催",
+  "第四日野小学校 町工場見学 受け入れ",
+  "現在 フェローズ プロモーション",
+  "私たちの価値観",
+  "誠実な商いを社訓として",
+  "色のみ表示",
+  "捕獲リーチ",
+  "捕獲リーチ 信頼度",
+  "審議予告 信頼度",
+  "報恩感謝とともに",
+  "的な応用例",
+  "的なのは 緑色水 と",
+  "TOAを知る",
+  "POMODORO",
+  "POKO",
+  "nicoe",
+  "クラス",
+  "銘菓",
+  "銘菓 鶴吉羊羹",
+  "悠雲寮",
+  "ゆうゆう舎",
+  "ぷらっと食堂",
+  "NPO法人となりのかいご",
+  "医療法人 清仁会",
+  "医療法人社団 拓己会",
+  "社会福祉法人ハルモニア",
+  "うしお霊園 村田石材",
+  "フローリスト花咲",
+  "サイクルユートピアうみの",
+  "シラス販売サイト運営の密かな楽しみ メガしらす丼",
+  "土木 建築 水回り工事 プロパンガス販売",
+  "新築 リフォームの設計と監理",
+  "足場の組み立て",
+  "ハウスクリーニング全般",
+  "動画で知る松浦スチロール",
+  "機種シリーズ",
+  "ショートステイ担当",
+  "ソーシャルワーカー",
+  "生活相談員",
+  "照明コンサルタント",
+  "宅地建物取引主任者",
+  "増改築相談士",
+  "経営コンサルタント 作家",
+  "報告",
+  "メッセ ー ジ",
+  "コミットメント",
+  "一筆",
+  "略歴",
+  "経営会議",
+  "就任のきっかけとその当時",
+  "テクパル本店所在地",
+  "環境管理責任者",
+  "カナ",
+  "静岡県文化財建造物監理士",
+  "伝統再築士",
+  "電気亜鉛めっきとは",
+  "性状",
+  "構成員",
+  "委員",
+  "自販機を設置したい",
+  "コラム",
+  "コラム 石のことば",
+  "日記",
+  "釣り日誌",
+  "曲は自身のバンド",
+  "あいさつ 経営理念 年間スローガン",
+  "および運営責任者",
+  "さんのアイデアを",
+  "インタビュー",
+  "インタープリター",
+  "グループ",
+  "兼グループ",
+  "サイクルユートピアうみの",
+  "ショートステイ担当",
+  "ソーシャルワーカー",
+  "タイトルイメージ",
+  "ハウスクリーニング全般",
+  "ハローGグループの組織図",
+  "プロフィール",
+  "プロフィール 代表者プロフィール",
+  "ページの先頭へ戻る",
+  "ホーム",
+  "メッセ ー ジ",
+  "メッセージ Message",
+  "メッセージ Top Message",
+  "メッセージと企業ビジョン",
+  "メッセージを見る",
+  "メッセージ タンガロイウェイ",
+  "メッセージ 役員紹介",
+  "メッセージ 経営理念",
+  "メール",
+  "レックフッター",
+  "捕獲リーチ",
+  "捕獲リーチ 信頼度",
+  "運営責任者",
+  "室直行メール",
+  "最高経営責任者",
+  "環境管理責任者",
+  "フローリスト花咲",
+  "新築 リフォームの設計と監理",
+  "現在 フェローズ プロモーション",
+  "動画で知る松浦スチロール",
+  "仕様",
+  "機種シリーズ",
+  "記入担当者",
+  "下田営業",
+  "的な 福利厚生プラン",
+  "営業登録 Vivace",
+  "メッセージ・タンガロイウェイ",
+  "メッセージ・役員紹介",
+  "メッセージ・経営理念",
+  "あいさつ・経営理念",
+  "あいさつ・経営理念・年間スローガン",
+  "メッセージと企業ビジョン",
+  "副社長メッセージ",
+  "島田市",
+  "三代目",
+  "问候",
 ]);
 
 const REPRESENTATIVE_AREA_NAME_TOKENS = new Set<string>([
@@ -1438,10 +1723,10 @@ const REPRESENTATIVE_ADDRESS_LIKE_REGEX =
   /(?:[0-9０-９]|丁目|番地|番|号|都道府県|市.+区|県.+市|市.+町|市.+村|区.+町|区.+村)/u;
 
 const REPRESENTATIVE_PREFIX_TITLE_TRIM_REGEX =
-  /^(?:代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|代表|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー)+/u;
+  /^(?:代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|代表理事|代表|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー)+/u;
 
 const REPRESENTATIVE_SUFFIX_TITLE_TRIM_REGEX =
-  /(?:代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|代表|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー|様|さん|氏)+$/u;
+  /(?:代表取締役会長CEO|代表取締役社長COO|代表取締役副社長|代表取締役専務|代表取締役常務|代表取締役|取締役会長|取締役社長|取締役副社長|取締役専務|取締役常務|取締役|代表理事|代表|会長|社長|副社長|専務|常務|執行役員|監査役|理事長|院長|所長|支店長|本部長|部長|課長|店長|工場長|センター長|室長|主任|係長|担当役員|担当者|担当|責任者|マネージャー|様|さん|氏)+$/u;
 
 const REPRESENTATIVE_NOISE_TOKEN_REGEX =
   /^(?:男性|女性|男|女|担当|担当者|責任者|窓口|受付|御中|様|さん|氏|代表|社長|会長)$/u;
@@ -1477,6 +1762,72 @@ function normalizeRepresentativeSource(value: string) {
     .replace(/[^\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}A-Za-z\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getRepresentativeNonNameComparableValues(value: string) {
+  const original = value.trim();
+  const normalizedRaw = normalizeRepresentativeSource(original);
+  const normalizedSource = trimRepresentativeAffixes(normalizedRaw);
+
+  const symbolSpaced = original
+    .normalize("NFKC")
+    .replace(/[（(][^）)]*[）)]/g, " ")
+    .replace(/[【】\[\]「」『』<>〈〉《》〔〕]/g, " ")
+    .replace(/[\/／|｜,，、・｡。!！?？:：;；"'`´]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const symbolSpacedTrimmed = trimRepresentativeAffixes(symbolSpaced);
+
+  return Array.from(
+    new Set(
+      [
+        original,
+        original.normalize("NFKC").trim(),
+        normalizedRaw,
+        normalizedSource,
+        symbolSpaced,
+        symbolSpacedTrimmed,
+      ].filter((item) => item !== "")
+    )
+  );
+}
+
+function isExactRepresentativeNonName(value: string) {
+  return getRepresentativeNonNameComparableValues(value).some((item) =>
+    REPRESENTATIVE_NON_NAME_EXACT_VALUES.has(item)
+  );
+}
+
+function hasRepresentativeTitle(value: string) {
+  REPRESENTATIVE_TITLE_REGEX.lastIndex = 0;
+  const result = REPRESENTATIVE_TITLE_REGEX.test(value);
+  REPRESENTATIVE_TITLE_REGEX.lastIndex = 0;
+  return result;
+}
+
+function hasRepresentativeTitleAndName(value: string) {
+  const original = value.trim();
+  if (!original) return false;
+  if (!hasRepresentativeTitle(original)) return false;
+
+  const normalized = normalizeRepresentativeSource(original);
+
+  REPRESENTATIVE_TITLE_REGEX.lastIndex = 0;
+  const withoutTitles = trimRepresentativeAffixes(
+    normalized
+      .replace(REPRESENTATIVE_TITLE_REGEX, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+  REPRESENTATIVE_TITLE_REGEX.lastIndex = 0;
+
+  if (withoutTitles && looksLikeRepresentativeName(withoutTitles)) {
+    return true;
+  }
+
+  const extractedName = extractRepresentativeName(original);
+  return !!extractedName;
 }
 
 function normalizeRepresentativeToken(token: string) {
@@ -1570,14 +1921,16 @@ function looksLikeNonNameToken(value: string) {
   const text = trimRepresentativeAffixes(value.trim());
   if (!text) return true;
 
-  if (looksLikeProtectedRepresentativeName(text)) return false;
   if (REPRESENTATIVE_NON_NAME_EXACT_VALUES.has(text)) return true;
+  if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
+  if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
+
+  if (looksLikeProtectedRepresentativeName(text)) return false;
+
   if (REPRESENTATIVE_STRICT_NON_NAME_AREA_TOKENS.has(text.normalize("NFKC"))) {
     return true;
   }
-  if (REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(text)) return true;
-  if (REPRESENTATIVE_NON_NAME_SUFFIX_REGEX.test(text)) return true;
-  
+
   if (
     REPRESENTATIVE_MUNICIPALITY_LIKE_REGEX.test(text) &&
     !isLikelyPersonalNameEndingWithShi(text)
@@ -1753,6 +2106,166 @@ function extractRepresentativeName(value: string) {
   return null;
 }
 
+function looksLikeCleanedRepresentativeName(value: string) {
+  const text = trimRepresentativeAffixes(value.trim());
+  if (!text) return false;
+
+  if (looksLikeRepresentativeName(text)) {
+    return true;
+  }
+
+  if (/[0-9０-９]/.test(text)) return false;
+  if (/株式会社|有限会社|合同会社|御中|様/.test(text)) return false;
+  if (REPRESENTATIVE_ADDRESS_LIKE_REGEX.test(text)) return false;
+  if (REPRESENTATIVE_ORGANIZATION_LIKE_REGEX.test(text)) return false;
+  if (REPRESENTATIVE_NON_NAME_CONTENT_REGEX.test(text)) return false;
+
+  const parts = text.split(/\s+/).filter((part) => part !== "");
+  if (parts.length === 0 || parts.length > 4) return false;
+
+  return parts.every((part) => {
+    if (looksLikeNonNameToken(part)) return false;
+
+    return /^[\p{sc=Han}々ヶヵ\p{sc=Hiragana}\p{sc=Katakana}ー]{1,12}$/u.test(part) ||
+      /^[A-Za-z]{2,20}$/u.test(part);
+  });
+}
+
+function hasJapaneseNameWithReading(value: string) {
+  const normalized = normalizeRepresentativeSource(value);
+  if (!normalized) return false;
+
+  if (
+    /[\p{sc=Han}々ヶヵ][\p{sc=Han}々ヶヵ\s]*\s+[A-Za-z]{2,}(?:\s+[A-Za-z]{2,})+$/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /[\p{sc=Han}々ヶヵ][\p{sc=Han}々ヶヵ\s]*\s+[\p{sc=Hiragana}ー]{2,}(?:\s+[\p{sc=Hiragana}ー]{2,})+$/u.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function looksLikeForeignKatakanaName(value: string) {
+  const normalized = value.normalize("NFKC").trim();
+
+  if (!/^[\p{sc=Katakana}ー・･\s]+$/u.test(normalized)) {
+    return false;
+  }
+
+  const parts = normalized.split(/[\s・･]+/).filter((part) => part !== "");
+
+  return (
+    parts.length >= 2 &&
+    parts.every((part) => /^[\p{sc=Katakana}ー]{2,20}$/u.test(part))
+  );
+}
+
+function hasMultipleRepresentativeNames(value: string) {
+  const normalized = normalizeRepresentativeSource(value);
+  if (!normalized) return false;
+
+  if (
+    /[\p{sc=Han}々ヶヵ]{1,6}\s+[\p{sc=Han}々ヶヵ]{1,6}\s*[・･]\s*[\p{sc=Han}々ヶヵ]{1,6}\s+[\p{sc=Han}々ヶヵ]{1,6}/u.test(
+      value
+    )
+  ) {
+    return true;
+  }
+
+  const parts = normalized.split(/\s+/).filter((part) => part !== "");
+  if (parts.length < 2) return false;
+
+  let namePairCount = 0;
+
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const candidate = `${parts[i]} ${parts[i + 1]}`;
+
+    if (looksLikeCleanedRepresentativeName(candidate)) {
+      namePairCount += 1;
+      i += 1;
+    }
+  }
+
+  if (namePairCount >= 2) {
+    return true;
+  }
+
+  if (
+    parts.length === 2 &&
+    parts.every((part) =>
+      /^[\p{sc=Han}々ヶヵ]{3,8}$/u.test(part)
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function cleanupRepresentativeNameNoise(value: string) {
+  const original = value.trim();
+  if (!original) return null;
+
+  let cleaned = original;
+
+  const forcedPrefixPatterns: RegExp[] = [
+    /^職名\s+.+?\s+氏名\s*/u,
+    /^職名\s+.+?氏名\s*/u,
+    /^氏名\s*/u,
+    /^交代\s+/u,
+    /^グループCO\s*O\s+/u,
+  ];
+
+  for (const pattern of forcedPrefixPatterns) {
+    cleaned = cleaned.replace(pattern, "").trim();
+  }
+
+  const changedByForcedPrefix = cleaned !== original;
+
+  if (!changedByForcedPrefix && hasRepresentativeTitle(original)) {
+    return null;
+  }
+
+  const cleanupPatterns: RegExp[] = [
+    /\s*(?:殿|印)$/u,
+    /\s+様の活動を$/u,
+    /\s+様$/u,
+    /\s+氏$/u,
+    /\s+先生$/u,
+    /\s+[^\s]*大学[^\s]*卒$/u,
+    /\s+サインアートモリヤ$/u,
+    /\s+これまで通り\s+が通用しない時代に$/u,
+    /\s+営業登録\s+Vivace$/u,
+    /\s+トシ君の独り言の部屋$/u,
+    /(?:トップメッセージ|のメッセージ|からの\s*メッセージ|メッセージ|ごあいさつ|ご挨拶|代表交代のご挨拶|代表挨拶|就任|へ交代|さんの想い|さんが|が出席|のプロフィール|プロフィール|コメント)$/u,
+  ];
+
+  for (const pattern of cleanupPatterns) {
+    cleaned = cleaned.replace(pattern, "").trim();
+  }
+
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+
+  if (cleaned === "" || cleaned === original) {
+    return null;
+  }
+
+  if (!looksLikeCleanedRepresentativeName(cleaned)) {
+    return null;
+  }
+
+  return cleaned;
+}
+
 function inspectRepresentativeNameValue(value: string | null) {
   const original = typeof value === "string" ? value.trim() : "";
 
@@ -1763,6 +2276,57 @@ function inspectRepresentativeNameValue(value: string | null) {
       shouldDelete: false,
       shouldReview: false,
       reason: "",
+    };
+  }
+
+  const normalizedRaw = normalizeRepresentativeSource(original);
+  const normalizedSource = trimRepresentativeAffixes(normalizedRaw);
+
+  if (isExactRepresentativeNonName(original)) {
+    return {
+      cleanedValue: null as string | null,
+      shouldUpdate: false,
+      shouldDelete: true,
+      shouldReview: false,
+      reason: "氏名ではない文字列のため削除候補",
+    };
+  }
+
+  const cleanedByNoise = cleanupRepresentativeNameNoise(original);
+
+  if (cleanedByNoise) {
+    return {
+      cleanedValue: cleanedByNoise,
+      shouldUpdate: true,
+      shouldDelete: false,
+      shouldReview: false,
+      reason: "氏名以外の文字を除去したため更新候補",
+    };
+  }
+
+  if (
+    hasRepresentativeTitleAndName(original) ||
+    hasJapaneseNameWithReading(original) ||
+    looksLikeForeignKatakanaName(original) ||
+    hasMultipleRepresentativeNames(original) ||
+    looksLikeRepresentativeName(original)
+  ) {
+    return {
+      cleanedValue: original,
+      shouldUpdate: false,
+      shouldDelete: false,
+      shouldReview: false,
+      reason: "",
+    };
+  }
+
+  if (!normalizedSource || REPRESENTATIVE_NON_NAME_PREFIX_REGEX.test(normalizedSource)) {
+    return {
+      cleanedValue: null as string | null,
+      shouldUpdate: false,
+      shouldDelete: true,
+      shouldReview: false,
+      reason: "氏名ではない文字列のため削除候補",
     };
   }
 
@@ -1792,26 +2356,22 @@ function inspectRepresentativeNameValue(value: string | null) {
     };
   }
 
-  const normalizedSource = trimRepresentativeAffixes(
-    normalizeRepresentativeSource(original)
-  );
-
-  if (!normalizedSource || looksLikeNonNameToken(normalizedSource)) {
+  if (looksLikeNonNameToken(normalizedSource)) {
     return {
       cleanedValue: null as string | null,
       shouldUpdate: false,
       shouldDelete: true,
       shouldReview: false,
-      reason: "氏名ではない可能性が高いため削除候補",
+      reason: "氏名ではない文字列のため削除候補",
     };
   }
 
   return {
-    cleanedValue: null as string | null,
+    cleanedValue: original,
     shouldUpdate: false,
     shouldDelete: false,
-    shouldReview: true,
-    reason: "氏名か断定できないため要確認",
+    shouldReview: false,
+    reason: "",
   };
 }
 
