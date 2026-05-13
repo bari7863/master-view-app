@@ -1407,6 +1407,15 @@ function normalizeWorkerName(value: unknown) {
   return text === "" ? null : text.slice(0, 200);
 }
 
+function isLocalDevelopmentRequest(req: NextRequest) {
+  const host = req.headers.get("host") || "";
+
+  return (
+    host.startsWith("localhost:") ||
+    host.startsWith("127.0.0.1:")
+  );
+}
+
 type SerializedCrawlJobPreviewItem = {
   row_id: string;
   preview_row_id: string;
@@ -3529,8 +3538,9 @@ export async function POST(req: NextRequest) {
       }
 
       const assignedWorkerId = normalizeWorkerId(body.assignedWorkerId);
+      const isLocal = isLocalDevelopmentRequest(req);
 
-      if (!assignedWorkerId) {
+      if (!assignedWorkerId && !isLocal) {
         return NextResponse.json(
           {
             ok: false,
@@ -3552,16 +3562,27 @@ export async function POST(req: NextRequest) {
 
       await persistCrawlJobState(job);
 
-      await updateJobWorkerColumns(client, job.jobId, {
-        status: "queued",
-        assignedWorkerId,
-        message: "worker再開待機中",
-      });
+      if (assignedWorkerId) {
+        await updateJobWorkerColumns(client, job.jobId, {
+          status: "queued",
+          assignedWorkerId,
+          message: "worker再開待機中",
+        });
+
+        return NextResponse.json({
+          ...buildJobResponse(job),
+          jobStatus: "running",
+          message: "workerに再開を予約しました",
+        });
+      }
+
+      // localhostでは従来通りNext.js内部runnerで再開する
+      startCrawlJobRunner(job.jobId);
 
       return NextResponse.json({
         ...buildJobResponse(job),
         jobStatus: "running",
-        message: "workerに再開を予約しました",
+        message: "ローカル環境でクローリングを再開しました",
       });
     }
 
@@ -3622,8 +3643,9 @@ export async function POST(req: NextRequest) {
       const selectedFields = Array.from(selectedFieldSet);
 
       const assignedWorkerId = normalizeWorkerId(body.assignedWorkerId);
+      const isLocal = isLocalDevelopmentRequest(req);
 
-      if (!assignedWorkerId) {
+      if (!assignedWorkerId && !isLocal) {
         return NextResponse.json(
           {
             ok: false,
@@ -3684,16 +3706,27 @@ export async function POST(req: NextRequest) {
 
       await persistCrawlJobState(job);
 
-      await updateJobWorkerColumns(client, jobId, {
-        status: "queued",
-        assignedWorkerId,
-        message: "worker待機中",
-      });
+      if (assignedWorkerId) {
+        await updateJobWorkerColumns(client, jobId, {
+          status: "queued",
+          assignedWorkerId,
+          message: "worker待機中",
+        });
+
+        return NextResponse.json({
+          ...buildJobResponse(job),
+          jobStatus: "running",
+          message: "クローリングをworkerに予約しました",
+        });
+      }
+
+      // localhostでは従来通りNext.js内部runnerで実行する
+      startCrawlJobRunner(jobId);
 
       return NextResponse.json({
         ...buildJobResponse(job),
         jobStatus: "running",
-        message: "クローリングをworkerに予約しました",
+        message: "ローカル環境でクローリングを開始しました",
       });
     }
 

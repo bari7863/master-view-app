@@ -419,6 +419,15 @@ const ACTIVE_CRAWL_JOB_STORAGE_KEY = "master-data-active-crawl-job-id";
 
 const LOCAL_CRAWL_WORKER_STATUS_URL = "http://127.0.0.1:39281/status";
 
+function isLocalAppRuntime() {
+  if (typeof window === "undefined") return false;
+
+  return (
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1"
+  );
+}
+
 type LocalCrawlWorkerStatus = {
   ok: boolean;
   workerId: string;
@@ -2396,6 +2405,12 @@ export default function Home() {
   }, [page, limit, appliedColumnStates, appliedAdvancedFilters]);
 
   const checkLocalCrawlWorker = async () => {
+    if (isLocalAppRuntime()) {
+      setLocalCrawlWorker(null);
+      setLocalCrawlWorkerError("");
+      return null;
+    }
+
     try {
       const res = await fetch(LOCAL_CRAWL_WORKER_STATUS_URL, {
         method: "GET",
@@ -5827,13 +5842,22 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     setCrawlProgressOpen(true);
 
     try {
+      const isLocal = isLocalAppRuntime();
+      const worker = isLocal ? null : await checkLocalCrawlWorker();
 
-      const worker = await checkLocalCrawlWorker();
-
-      if (!worker) {
+      if (!isLocal && !worker) {
         throw new Error(
           "このPCのworkerが起動していません。master-crawl-worker.exe を起動してから再度実行してください。"
         );
+      }
+
+      const body: Record<string, unknown> = {
+        action: "resume_job",
+        jobId: crawlJobId,
+      };
+
+      if (!isLocal && worker) {
+        body.assignedWorkerId = worker.workerId;
       }
 
       const res = await fetch("/api/master_data/crawl", {
@@ -5841,11 +5865,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          action: "resume_job",
-          jobId: crawlJobId,
-          assignedWorkerId: worker.workerId,
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await readApiResponse(res);
@@ -5902,9 +5922,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
     try {
       
-      const worker = await checkLocalCrawlWorker();
+      const isLocal = isLocalAppRuntime();
+      const worker = isLocal ? null : await checkLocalCrawlWorker();
 
-      if (!worker) {
+      if (!isLocal && !worker) {
         throw new Error(
           "このPCのworkerが起動していません。master-crawl-worker.exe を起動してから再度実行してください。"
         );
@@ -5914,8 +5935,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         action: "start_preview_job",
         targetScope: crawlTargetScope,
         selectedFields: getSelectedCrawlFields(crawlFieldSelections),
-        assignedWorkerId: worker.workerId,
       };
+
+      if (!isLocal && worker) {
+        body.assignedWorkerId = worker.workerId;
+      }
 
       if (crawlTargetScope === "filtered") {
         body.filterModels = buildRequestFilterModels(appliedColumnStates);
