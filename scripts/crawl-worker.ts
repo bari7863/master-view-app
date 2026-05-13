@@ -35,21 +35,6 @@ type WorkerClaimJobResponse = {
   error?: string;
 };
 
-type WorkerClaimTargetResponse = {
-  ok: boolean;
-  completed?: boolean;
-  paused?: boolean;
-  target?: {
-    targetIndex: number;
-    rowId: string;
-    company: string | null;
-    address: string | null;
-    websiteUrl: string | null;
-    selectedFields: CrawlSelectableFieldKey[];
-  } | null;
-  error?: string;
-};
-
 type WorkerCrawlTarget = {
   targetIndex: number;
   rowId: string;
@@ -250,35 +235,11 @@ async function claimJob() {
   });
 }
 
-async function claimTarget(jobId: string) {
-  return await callApi<WorkerClaimTargetResponse>({
-    action: "worker_claim_target",
-    jobId,
-  });
-}
-
 async function claimTargets(jobId: string) {
   return await callApi<WorkerClaimTargetsResponse>({
     action: "worker_claim_targets",
     jobId,
     targetLimit: TARGET_BATCH_SIZE,
-  });
-}
-
-async function reportTarget(params: {
-  jobId: string;
-  targetIndex: number;
-  targetStatus: "done" | "skipped" | "failed";
-  statusReason?: string | null;
-  extracted?: CrawlExtractedFields | null;
-}) {
-  await callApi({
-    action: "worker_report_target",
-    jobId: params.jobId,
-    targetIndex: params.targetIndex,
-    targetStatus: params.targetStatus,
-    statusReason: params.statusReason ?? null,
-    extracted: params.extracted ?? null,
   });
 }
 

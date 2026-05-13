@@ -33,6 +33,7 @@ const FILTER_COLUMN_MAP = {
   business_type: `"業種"`,
   business_content: `"事業内容"`,
   industry_category: `"業界"`,
+  permit_number: `"許可番号"`,
   memo: `"メモ"`,
 } as const;
 
@@ -413,63 +414,6 @@ const PREFECTURE_TO_REGION = {
 const PREFECTURE_NAMES = Object.keys(PREFECTURE_TO_REGION) as Array<
   keyof typeof PREFECTURE_TO_REGION
 >;
-
-const INDUSTRY_PARENT_SORT_ORDER = [
-  "農業、林業",
-  "漁業",
-  "鉱業、採石業、砂利採取業",
-  "建設業",
-  "製造業",
-  "電気・ガス・熱供給・水道業",
-  "情報通信業",
-  "運輸業、郵便業",
-  "卸売業、小売業",
-  "金融業、保険業",
-  "不動産業、物品賃貸業",
-  "学術研究、専門・技術サービス業",
-  "宿泊業、飲食サービス業",
-  "生活関連サービス業、娯楽業",
-  "教育、学習支援業",
-  "医療、福祉",
-  "複合サービス事業",
-  "サービス業（他に分類されないもの）",
-  "公務",
-  "その他",
-] as const;
-
-function resolveIndustryParent(bigIndustry: string) {
-  const value = bigIndustry.trim();
-
-  if (value === "") return "その他";
-  if (/製造業|製造|工業/.test(value)) return "製造業";
-  if (/建設/.test(value)) return "建設業";
-  if (/農業|林業/.test(value)) return "農業、林業";
-  if (/漁業/.test(value)) return "漁業";
-  if (/鉱業|採石|砂利/.test(value)) return "鉱業、採石業、砂利採取業";
-  if (/電気|ガス|熱供給|水道/.test(value))
-    return "電気・ガス・熱供給・水道業";
-  if (/情報|通信|IT|ソフトウェア/.test(value)) return "情報通信業";
-  if (/運輸|郵便|物流|運送/.test(value)) return "運輸業、郵便業";
-  if (/卸売|小売|販売/.test(value)) return "卸売業、小売業";
-  if (/金融|保険/.test(value)) return "金融業、保険業";
-  if (/不動産|賃貸/.test(value)) return "不動産業、物品賃貸業";
-  if (/学術|研究|専門|技術|士業/.test(value))
-    return "学術研究、専門・技術サービス業";
-  if (/宿泊|飲食/.test(value)) return "宿泊業、飲食サービス業";
-  if (/生活関連|娯楽|理容|美容|クリーニング/.test(value))
-    return "生活関連サービス業、娯楽業";
-  if (/教育|学習支援|学校/.test(value)) return "教育、学習支援業";
-  if (/医療|福祉|介護/.test(value)) return "医療、福祉";
-  if (/複合サービス/.test(value)) return "複合サービス事業";
-  if (/公務/.test(value)) return "公務";
-  if (/サービス/.test(value)) return "サービス業（他に分類されないもの）";
-
-  if ((INDUSTRY_PARENT_SORT_ORDER as readonly string[]).includes(value)) {
-    return value;
-  }
-
-  return "その他";
-}
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

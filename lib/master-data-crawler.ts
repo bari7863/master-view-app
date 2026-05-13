@@ -169,14 +169,8 @@ const CRAWLER_USER_AGENT =
   "AppleWebKit/537.36 (KHTML, like Gecko) " +
   "Chrome/124.0.0.0 Safari/537.36";
 
-const REPRESENTATIVE_TRAILING_TITLE_REGEX =
-  /\s*(?:代表取締役(?:社長|会長)?|取締役社長|取締役|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|常務取締役?|専務取締役?|執行役員(?:専務|常務)?|常務|専務|相談役|名誉相談役|所長|センター長|学院長|校長|学長|施設長|室長|代表)\s*$/i;
-
 const REPRESENTATIVE_LEADING_LABEL_REGEX =
   /^(?:代表者氏名|代表氏名|代表者名?|代表者|代表取締役(?:社長|会長)?|取締役社長|代表社員|代表理事|理事長|社長|会長|所長|センター長|学院長|校長|学長|施設長|室長|役員(?!一覧|紹介))\s*[:：]?\s*/i;
-
-const REPRESENTATIVE_INLINE_TITLE_REGEX =
-  /(代表取締役社長|代表取締役会長|代表取締役|取締役社長|代表社員|代表理事|理事長|社長|会長|CEO|COO|CFO|CTO|代表|所長|センター長|学院長|校長|学長|施設長|室長)(?!から)/i;
 
 const REPRESENTATIVE_STRONG_PAGE_REGEX =
   /(会社概要(?:・沿革)?|会社案内|会社情報|企業情報|法人概要|企業概要|会社データ|会社紹介|会社基本情報|基本情報|outline|profile|company|corporate|about|gaiyou|overview|information)/i;
@@ -190,14 +184,8 @@ const REPRESENTATIVE_WEAK_PAGE_REGEX =
 const REPRESENTATIVE_DENY_PAGE_REGEX =
   /$^/i;
 
-const REPRESENTATIVE_NON_NAME_REGEX =
-  /(会社概要|会社情報|企業情報|法人概要|企業概要|基本情報|会社データ|会社紹介|採用|人事|営業|問い合わせ|お問い合わせ|連絡先|所在地|住所|アクセス|資本金|従業員数|事業内容|サービス|商品|製品|一覧|ブログ|ニュース|お知らせ|沿革|理念|方針|インタビュー|スタッフ|店舗|工場|営業所)/i;
-
 const REPRESENTATIVE_COMPANY_REGEX =
   /株式会社|有限会社|合同会社|合資会社|合名会社|御中/i;
-
-const REPRESENTATIVE_NAME_BODY_REGEX =
-  /^[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵー]{2,20}(?:\s+[\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}々ヶヵー]{1,20})?$/u;
 
 type RepresentativeCandidate = {
   value: string;
@@ -234,13 +222,6 @@ export function inspectRepresentativeNameValue(value: string | null) {
     shouldReview: false,
     reason: "",
   };
-}
-
-function normalizeRepresentativeName(
-  value: string,
-  _options?: { allowCompactSingleToken?: boolean }
-) {
-  return cleanRepresentativeCandidate(value);
 }
 
 function normalizeRepresentativeCandidateForBest(value: string) {
@@ -404,11 +385,6 @@ function collectRepresentativeCandidatesFromText(
   return Array.from(candidateMap.entries())
     .map(([value, score]) => ({ value, score }))
     .sort((a, b) => b.score - a.score);
-}
-
-function extractRepresentativeNameFromText(text: string) {
-  const candidates = collectRepresentativeCandidatesFromText(text, 0);
-  return candidates[0]?.value ?? null;
 }
 
 function getRepresentativePagePriorityBoost(page: PageData) {
@@ -3781,72 +3757,6 @@ function hasSelectedOfficeFields(
   );
 }
 
-function isRepresentativeOnlyMode(
-  _selectedFieldSet: Set<CrawlSelectableFieldKey>
-) {
-  return false;
-}
-
-function getRepresentativeEnoughScore(
-  _selectedFieldSet: Set<CrawlSelectableFieldKey>
-) {
-  return 980;
-}
-
-function getCandidatePageLimit(
-  selectedFieldSet: Set<CrawlSelectableFieldKey>
-) {
-  const needsRepresentative = hasSelectedCrawlField(
-    selectedFieldSet,
-    "representative_name"
-  );
-  const needsEmployeeCount = hasSelectedCrawlField(
-    selectedFieldSet,
-    "employee_count"
-  );
-  const needsPermit = hasSelectedPermitFields(selectedFieldSet);
-
-  if (selectedFieldSet.size === 1) {
-    if (hasSelectedCrawlField(selectedFieldSet, "form_url")) return 12;
-    if (needsRepresentative) return 100;
-    if (needsEmployeeCount) return 140;
-    if (needsPermit) return 24;
-    if (hasSelectedOfficeFields(selectedFieldSet)) return 20;
-    return 16;
-  }
-
-  if (needsRepresentative && needsEmployeeCount) {
-    return 160;
-  }
-
-  if (needsRepresentative) {
-    return 100;
-  }
-
-  if (needsEmployeeCount) {
-    return 140;
-  }
-
-  if (needsPermit) {
-    return 32;
-  }
-
-  if (selectedFieldSet.size <= 3 && !hasSelectedOfficeFields(selectedFieldSet)) {
-    return 24;
-  }
-
-  return 30;
-}
-
-function hasHighConfidenceEmployeeCount(
-  best: Partial<Record<keyof CrawlExtractedFields, BestValue>>
-) {
-  return (
-    !!best.employee_count?.value &&
-    (best.employee_count?.score ?? 0) >= 380
-  );
-}
-
 function canStopFetchingAdditionalPages(
   best: Partial<Record<keyof CrawlExtractedFields, BestValue>>,
   selectedFieldSet: Set<CrawlSelectableFieldKey>,
@@ -4186,8 +4096,6 @@ export async function crawlCompanyWebsite(
   const best: Partial<Record<keyof CrawlExtractedFields, BestValue>> = {};
   const shouldExtractOffices = hasSelectedOfficeFields(selectedFieldSet);
   const collectedPages: PageData[] = [];
-  const representativeEnoughScore =
-    getRepresentativeEnoughScore(selectedFieldSet);
   const pageFetchTimeoutMs = 10000;
 
   throwIfCrawlShouldStop(runtimeOptions);

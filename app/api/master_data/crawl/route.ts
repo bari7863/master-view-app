@@ -1781,21 +1781,6 @@ async function fetchAllCrawlPreviewItems(client: DbClient, jobId: string) {
   );
 }
 
-async function fetchCrawlPreviewRowIdSet(client: DbClient, jobId: string) {
-  await ensureCrawlPreviewTable(client);
-
-  const res = await client.query(
-    `
-      SELECT DISTINCT row_id::text AS row_id
-      FROM public.master_data_crawl_preview
-      WHERE job_id = $1
-    `,
-    [jobId]
-  );
-
-  return new Set(res.rows.map((row) => String(row.row_id ?? "")));
-}
-
 async function deleteCrawlPreviewItemsByIds(
   client: DbClient,
   jobId: string,

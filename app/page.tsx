@@ -1131,15 +1131,6 @@ function getSingleLineFitFontSize(value: string) {
   return undefined;
 }
 
-function formatYearMonthInputValue(value: string) {
-  if (!value || value.length !== 6) return "";
-  return `${value.slice(0, 4)}-${value.slice(4, 6)}`;
-}
-
-function parseYearMonthInputValue(value: string) {
-  return value ? value.replace("-", "") : "";
-}
-
 const ESTABLISHED_MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => {
   const value = String(i + 1).padStart(2, "0");
   return {
