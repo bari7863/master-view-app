@@ -50,6 +50,31 @@ type WorkerClaimTargetResponse = {
   error?: string;
 };
 
+type WorkerCrawlTarget = {
+  targetIndex: number;
+  rowId: string;
+  company: string | null;
+  address: string | null;
+  websiteUrl: string | null;
+  selectedFields: CrawlSelectableFieldKey[];
+};
+
+type WorkerClaimTargetsResponse = {
+  ok: boolean;
+  completed?: boolean;
+  paused?: boolean;
+  targets?: WorkerCrawlTarget[];
+  error?: string;
+};
+
+type WorkerTargetResult = {
+  targetIndex: number;
+  targetStatus: "done" | "skipped" | "failed";
+  statusReason?: string | null;
+  extracted?: CrawlExtractedFields | null;
+  targetStartedAt?: string | null;
+  targetFinishedAt?: string | null;
+};
 const appDir =
   typeof (process as any).pkg !== "undefined"
     ? path.dirname(process.execPath)
@@ -107,6 +132,10 @@ function loadOrCreateWorkerId() {
 
 const config = loadConfig();
 const workerId = loadOrCreateWorkerId();
+
+const HEARTBEAT_INTERVAL_MS = 30 * 1000;
+const TARGET_BATCH_SIZE = 10;
+let lastHeartbeatAt = 0;
 
 const status: WorkerStatus = {
   ok: true,
@@ -204,6 +233,17 @@ async function sendHeartbeat() {
   });
 }
 
+async function sendHeartbeatIfNeeded(force = false) {
+  const now = Date.now();
+
+  if (!force && now - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) {
+    return;
+  }
+
+  await sendHeartbeat();
+  lastHeartbeatAt = now;
+}
+
 async function claimJob() {
   return await callApi<WorkerClaimJobResponse>({
     action: "worker_claim_job",
@@ -214,6 +254,14 @@ async function claimTarget(jobId: string) {
   return await callApi<WorkerClaimTargetResponse>({
     action: "worker_claim_target",
     jobId,
+  });
+}
+
+async function claimTargets(jobId: string) {
+  return await callApi<WorkerClaimTargetsResponse>({
+    action: "worker_claim_targets",
+    jobId,
+    targetLimit: TARGET_BATCH_SIZE,
   });
 }
 
@@ -234,15 +282,78 @@ async function reportTarget(params: {
   });
 }
 
+async function reportTargets(jobId: string, targetResults: WorkerTargetResult[]) {
+  if (targetResults.length === 0) return;
+
+  await callApi({
+    action: "worker_report_targets",
+    jobId,
+    targetResults,
+  });
+}
+
+async function processTarget(
+  jobId: string,
+  target: WorkerCrawlTarget
+): Promise<WorkerTargetResult> {
+  const targetStartedAt = new Date().toISOString();
+
+  status.currentCompany = target.company;
+  status.lastMessage = `取得中: ${target.company || target.websiteUrl || target.rowId}`;
+
+  if (!target.websiteUrl) {
+    return {
+      targetIndex: target.targetIndex,
+      targetStatus: "skipped",
+      statusReason: "企業サイトURLが空です",
+      targetStartedAt,
+      targetFinishedAt: new Date().toISOString(),
+    };
+  }
+
+  try {
+    const extracted = await runWithTimeout(
+      crawlCompanyWebsite(
+        target.websiteUrl,
+        target.selectedFields,
+        {
+          company: target.company,
+          address: target.address,
+        },
+        {
+          shouldStop: () => false,
+        }
+      ),
+      90 * 1000
+    );
+
+    return {
+      targetIndex: target.targetIndex,
+      targetStatus: "done",
+      extracted,
+      targetStartedAt,
+      targetFinishedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      targetIndex: target.targetIndex,
+      targetStatus: "failed",
+      statusReason: error instanceof Error ? error.message : "不明なエラー",
+      targetStartedAt,
+      targetFinishedAt: new Date().toISOString(),
+    };
+  }
+}
+
 async function processJob(jobId: string) {
   status.currentJobId = jobId;
   status.running = true;
   status.lastMessage = `ジョブ処理開始: ${jobId}`;
 
   while (true) {
-    await sendHeartbeat();
+    await sendHeartbeatIfNeeded();
 
-    const targetRes = await claimTarget(jobId);
+    const targetRes = await claimTargets(jobId);
 
     if (targetRes.completed) {
       status.lastMessage = `ジョブ完了: ${jobId}`;
@@ -254,56 +365,25 @@ async function processJob(jobId: string) {
       break;
     }
 
-    const target = targetRes.target;
+    const targets = targetRes.targets || [];
 
-    if (!target) {
+    if (targets.length === 0) {
       status.lastMessage = "処理対象なし";
       break;
     }
 
-    status.currentCompany = target.company;
-    status.lastMessage = `取得中: ${target.company || target.websiteUrl || target.rowId}`;
+    status.lastMessage = `まとめ取得中: ${targets.length}件`;
 
-    if (!target.websiteUrl) {
-      await reportTarget({
-        jobId,
-        targetIndex: target.targetIndex,
-        targetStatus: "skipped",
-        statusReason: "企業サイトURLが空です",
-      });
-      continue;
+    const results: WorkerTargetResult[] = [];
+
+    for (const target of targets) {
+      await sendHeartbeatIfNeeded();
+
+      const result = await processTarget(jobId, target);
+      results.push(result);
     }
 
-    try {
-      const extracted = await runWithTimeout(
-        crawlCompanyWebsite(
-          target.websiteUrl,
-          target.selectedFields,
-          {
-            company: target.company,
-            address: target.address,
-          },
-          {
-            shouldStop: () => false,
-          }
-        ),
-        90 * 1000
-      );
-
-      await reportTarget({
-        jobId,
-        targetIndex: target.targetIndex,
-        targetStatus: "done",
-        extracted,
-      });
-    } catch (error) {
-      await reportTarget({
-        jobId,
-        targetIndex: target.targetIndex,
-        targetStatus: "failed",
-        statusReason: error instanceof Error ? error.message : "不明なエラー",
-      });
-    }
+    await reportTargets(jobId, results);
   }
 
   status.running = false;
@@ -315,6 +395,7 @@ async function mainLoop() {
   startLocalStatusServer();
 
   await registerWorker();
+  await sendHeartbeatIfNeeded(true);
 
   console.log(`Crawl worker started: ${workerId}`);
   console.log(`Worker name: ${config.workerName}`);
@@ -322,8 +403,8 @@ async function mainLoop() {
 
   while (true) {
     try {
-      await sendHeartbeat();
-
+      await sendHeartbeatIfNeeded();
+        
       const job = await claimJob();
 
       if (!job.jobId) {

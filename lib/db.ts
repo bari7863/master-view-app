@@ -21,7 +21,11 @@ const poolConfig = process.env.DATABASE_URL
       database: process.env.POSTGRES_DB,
     };
 
-export const pool = global.pgPool || new Pool(poolConfig);
+if (!global.pgPool) {
+  global.pgPool = new Pool(poolConfig);
+}
+
+export const pool = global.pgPool;
 
 export const dbReady =
   global.masterDataColumnInitPromise ||
@@ -36,7 +40,3 @@ export const dbReady =
   })();
 
 global.masterDataColumnInitPromise = dbReady;
-
-if (process.env.NODE_ENV !== "production") {
-  global.pgPool = pool;
-}

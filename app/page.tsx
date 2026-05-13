@@ -5686,9 +5686,12 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     };
 
     void poll();
+
+    const CRAWL_STATUS_POLL_INTERVAL_MS = isLocalAppRuntime() ? 1500 : 5000;
+
     crawlStatusTimerRef.current = window.setInterval(() => {
       void poll();
-    }, 1200);
+    }, CRAWL_STATUS_POLL_INTERVAL_MS);
   };
 
   const restoreSavedCrawlJob = async () => {

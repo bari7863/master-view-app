@@ -208,6 +208,24 @@ type SelectedCrawlChanges = Partial<
   >
 >;
 
+type WorkerCrawlTarget = {
+  targetIndex: number;
+  rowId: string;
+  company: string | null;
+  address: string | null;
+  websiteUrl: string | null;
+  selectedFields: CrawlSelectableFieldKey[];
+};
+
+type WorkerTargetResult = {
+  targetIndex: number;
+  targetStatus: "done" | "skipped" | "failed";
+  statusReason?: string | null;
+  extracted?: CrawlExtractedFields | null;
+  targetStartedAt?: string | null;
+  targetFinishedAt?: string | null;
+};
+
 type CrawlRequestBody = {
   action?:
     | "start_preview_job"
@@ -220,15 +238,21 @@ type CrawlRequestBody = {
     | "worker_heartbeat"
     | "worker_claim_job"
     | "worker_claim_target"
-    | "worker_report_target";
+    | "worker_claim_targets"
+    | "worker_report_target"
+    | "worker_report_targets";
   jobId?: string | null;
   workerId?: string | null;
   workerName?: string | null;
   assignedWorkerId?: string | null;
   targetIndex?: number | null;
+  targetLimit?: number | null;
   targetStatus?: "done" | "skipped" | "failed";
   statusReason?: string | null;
   extracted?: CrawlExtractedFields | null;
+  targetStartedAt?: string | null;
+  targetFinishedAt?: string | null;
+  targetResults?: WorkerTargetResult[];
   filterModels?: Partial<Record<FilterKey, FilterModel>>;
   advancedFilters?: AdvancedFilters;
   sortKey?: FilterKey | null;
@@ -2406,12 +2430,44 @@ async function fetchCrawlTargetByIndex(
   return (res.rows[0] as Record<string, unknown> | undefined) ?? null;
 }
 
+async function fetchCrawlTargetsByRange(
+  client: DbClient,
+  jobId: string,
+  startIndex: number,
+  limit: number
+) {
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 10);
+
+  const res = await client.query(
+    `
+      SELECT
+        target_index,
+        row_id::text,
+        company,
+        address,
+        website_url
+      FROM public.master_data_crawl_targets
+      WHERE job_id = $1
+        AND target_index >= $2
+        AND target_index < $2 + $3
+      ORDER BY target_index ASC
+    `,
+    [jobId, startIndex, safeLimit]
+  );
+
+  return res.rows as Array<Record<string, unknown>>;
+}
+
 async function markCrawlTargetStatus(
   client: DbClient,
   jobId: string,
   targetIndex: number,
   status: "processing" | "done" | "skipped" | "failed",
-  reason?: string | null
+  reason?: string | null,
+  timing?: {
+    startedAt?: string | null;
+    finishedAt?: string | null;
+  }
 ) {
   await client.query(
     `
@@ -2420,12 +2476,47 @@ async function markCrawlTargetStatus(
         status = $3,
         skip_reason = CASE WHEN $3 = 'skipped' THEN $4 ELSE skip_reason END,
         error_message = CASE WHEN $3 = 'failed' THEN $4 ELSE error_message END,
-        started_at = CASE WHEN $3 = 'processing' THEN now() ELSE started_at END,
-        finished_at = CASE WHEN $3 IN ('done', 'skipped', 'failed') THEN now() ELSE finished_at END
+        started_at = CASE
+          WHEN $5::timestamptz IS NOT NULL THEN $5::timestamptz
+          WHEN $3 = 'processing' THEN COALESCE(started_at, now())
+          WHEN $3 IN ('done', 'skipped', 'failed') THEN COALESCE(started_at, now())
+          ELSE started_at
+        END,
+        finished_at = CASE
+          WHEN $6::timestamptz IS NOT NULL THEN $6::timestamptz
+          WHEN $3 IN ('done', 'skipped', 'failed') THEN now()
+          ELSE finished_at
+        END
       WHERE job_id = $1
         AND target_index = $2
     `,
-    [jobId, targetIndex, status, reason ?? null]
+    [
+      jobId,
+      targetIndex,
+      status,
+      reason ?? null,
+      timing?.startedAt ?? null,
+      timing?.finishedAt ?? null,
+    ]
+  );
+}
+
+async function markCrawlTargetsProcessing(
+  client: DbClient,
+  jobId: string,
+  targetIndexes: number[]
+) {
+  if (targetIndexes.length === 0) return;
+
+  await client.query(
+    `
+      UPDATE public.master_data_crawl_targets
+      SET
+        status = 'processing'
+      WHERE job_id = $1
+        AND target_index = ANY($2::int[])
+    `,
+    [jobId, targetIndexes]
   );
 }
 
@@ -2638,6 +2729,100 @@ async function claimWorkerTarget(
   };
 }
 
+async function claimWorkerTargets(
+  client: DbClient,
+  job: CrawlJobState,
+  workerId: string,
+  limit: number
+) {
+  await ensureCrawlJobTables(client);
+
+  const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 10);
+
+  if (job.pauseRequested) {
+    markCrawlJobPaused(job);
+    await persistCrawlJobState(job);
+    await updateJobWorkerColumns(client, job.jobId, {
+      status: "paused",
+      workerId,
+      message: "一時停止中",
+    });
+
+    return { paused: true, completed: false, targets: [] as WorkerCrawlTarget[] };
+  }
+
+  if (job.completed || job.nextIndex >= job.total) {
+    stopCrawlRunTimer(job);
+
+    job.completed = true;
+    job.running = false;
+    job.paused = false;
+    job.currentCompany = null;
+    job.currentWebsiteUrl = null;
+
+    await persistCrawlJobState(job);
+    await updateJobWorkerColumns(client, job.jobId, {
+      status: "completed",
+      workerId,
+      message: "完了",
+    });
+
+    return { paused: false, completed: true, targets: [] as WorkerCrawlTarget[] };
+  }
+
+  const rows = await fetchCrawlTargetsByRange(
+    client,
+    job.jobId,
+    job.nextIndex,
+    safeLimit
+  );
+
+  if (rows.length === 0) {
+    job.failed += 1;
+    job.processed += 1;
+    job.nextIndex += 1;
+    await persistCrawlJobState(job);
+
+    return { paused: false, completed: false, targets: [] as WorkerCrawlTarget[] };
+  }
+
+  const targets: WorkerCrawlTarget[] = rows.map((row) => ({
+    targetIndex: Number(row.target_index ?? 0),
+    rowId: String(row.row_id ?? ""),
+    company: normalizeNullableText(row.company),
+    address: normalizeNullableText(row.address),
+    websiteUrl: normalizeNullableText(row.website_url),
+    selectedFields: job.selectedFields,
+  }));
+
+  const firstTarget = targets[0];
+
+  job.running = true;
+  job.paused = false;
+  job.currentCompany = firstTarget.company;
+  job.currentWebsiteUrl = firstTarget.websiteUrl;
+  startCrawlRunTimer(job);
+
+  await markCrawlTargetsProcessing(
+    client,
+    job.jobId,
+    targets.map((target) => target.targetIndex)
+  );
+
+  await persistCrawlJobState(job);
+  await updateJobWorkerColumns(client, job.jobId, {
+    status: "running",
+    workerId,
+    message: `取得中: ${job.currentCompany ?? job.currentWebsiteUrl ?? ""}`,
+  });
+
+  return {
+    paused: false,
+    completed: false,
+    targets,
+  };
+}
+
 async function reportWorkerTargetResult(
   client: DbClient,
   job: CrawlJobState,
@@ -2680,6 +2865,8 @@ async function reportWorkerTargetResult(
   let targetStatus = body.targetStatus ?? "done";
   let statusReason = normalizeNullableText(body.statusReason);
   const extracted = body.extracted ?? null;
+  const targetStartedAt = normalizeDateIsoText(body.targetStartedAt);
+  const targetFinishedAt = normalizeDateIsoText(body.targetFinishedAt);
 
   try {
     if (targetStatus === "done") {
@@ -2753,7 +2940,11 @@ async function reportWorkerTargetResult(
       job.jobId,
       targetIndex,
       targetStatus,
-      statusReason
+      statusReason,
+      {
+        startedAt: targetStartedAt,
+        finishedAt: targetFinishedAt,
+      }
     );
 
     job.processed += 1;
@@ -2781,7 +2972,11 @@ async function reportWorkerTargetResult(
       job.jobId,
       targetIndex,
       "failed",
-      error instanceof Error ? error.message : "不明なエラー"
+      error instanceof Error ? error.message : "不明なエラー",
+      {
+        startedAt: targetStartedAt,
+        finishedAt: targetFinishedAt,
+      }
     );
 
     job.failed += 1;
@@ -2791,6 +2986,30 @@ async function reportWorkerTargetResult(
     job.currentWebsiteUrl = null;
 
     await persistCrawlJobState(job);
+  }
+}
+
+async function reportWorkerTargetResults(
+  client: DbClient,
+  job: CrawlJobState,
+  workerId: string,
+  results: WorkerTargetResult[]
+) {
+  const sortedResults = [...results].sort(
+    (a, b) => Number(a.targetIndex) - Number(b.targetIndex)
+  );
+
+  for (const result of sortedResults) {
+    await reportWorkerTargetResult(client, job, workerId, {
+      action: "worker_report_target",
+      jobId: job.jobId,
+      targetIndex: result.targetIndex,
+      targetStatus: result.targetStatus,
+      statusReason: result.statusReason ?? null,
+      extracted: result.extracted ?? null,
+      targetStartedAt: result.targetStartedAt ?? null,
+      targetFinishedAt: result.targetFinishedAt ?? null,
+    });
   }
 }
 
@@ -3304,7 +3523,9 @@ export async function POST(req: NextRequest) {
       action === "worker_heartbeat" ||
       action === "worker_claim_job" ||
       action === "worker_claim_target" ||
-      action === "worker_report_target"
+      action === "worker_claim_targets" ||
+      action === "worker_report_target" ||
+      action === "worker_report_targets"
     ) {
       assertWorkerAuthorized(req);
 
@@ -3384,6 +3605,39 @@ export async function POST(req: NextRequest) {
           });
         }
 
+        if (action === "worker_claim_targets") {
+          const jobId = normalizeNullableText(body.jobId);
+
+          if (!jobId) {
+            return NextResponse.json(
+              { ok: false, error: "jobId が空です" },
+              { status: 400 }
+            );
+          }
+
+          crawlJobs.delete(jobId);
+          const job = await loadPersistedCrawlJobState(jobId);
+
+          if (!job) {
+            return NextResponse.json(
+              { ok: false, error: "ジョブが見つかりません" },
+              { status: 404 }
+            );
+          }
+
+          const result = await claimWorkerTargets(
+            client,
+            job,
+            workerId,
+            Number(body.targetLimit ?? 10)
+          );
+
+          return NextResponse.json({
+            ok: true,
+            ...result,
+          });
+        }
+
         if (action === "worker_report_target") {
           const jobId = normalizeNullableText(body.jobId);
 
@@ -3411,6 +3665,47 @@ export async function POST(req: NextRequest) {
             message: "処理結果を保存しました",
           });
         }
+
+        if (action === "worker_report_targets") {
+          const jobId = normalizeNullableText(body.jobId);
+
+          if (!jobId) {
+            return NextResponse.json(
+              { ok: false, error: "jobId が空です" },
+              { status: 400 }
+            );
+          }
+
+          if (!Array.isArray(body.targetResults)) {
+            return NextResponse.json(
+              { ok: false, error: "targetResults が空です" },
+              { status: 400 }
+            );
+          }
+
+          crawlJobs.delete(jobId);
+          const job = await loadPersistedCrawlJobState(jobId);
+
+          if (!job) {
+            return NextResponse.json(
+              { ok: false, error: "ジョブが見つかりません" },
+              { status: 404 }
+            );
+          }
+
+          await reportWorkerTargetResults(
+            client,
+            job,
+            workerId,
+            body.targetResults
+          );
+
+          return NextResponse.json({
+            ok: true,
+            message: "処理結果をまとめて保存しました",
+          });
+        }
+
       } finally {
         client.release();
         client = null;

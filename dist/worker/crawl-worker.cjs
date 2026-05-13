@@ -3074,6 +3074,9 @@ function loadOrCreateWorkerId() {
 }
 var config = loadConfig();
 var workerId = loadOrCreateWorkerId();
+var HEARTBEAT_INTERVAL_MS = 30 * 1e3;
+var TARGET_BATCH_SIZE = 10;
+var lastHeartbeatAt = 0;
 var status = {
   ok: true,
   workerId,
@@ -3154,34 +3157,86 @@ async function sendHeartbeat() {
     action: "worker_heartbeat"
   });
 }
+async function sendHeartbeatIfNeeded(force = false) {
+  const now = Date.now();
+  if (!force && now - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) {
+    return;
+  }
+  await sendHeartbeat();
+  lastHeartbeatAt = now;
+}
 async function claimJob() {
   return await callApi({
     action: "worker_claim_job"
   });
 }
-async function claimTarget(jobId) {
+async function claimTargets(jobId) {
   return await callApi({
-    action: "worker_claim_target",
-    jobId
+    action: "worker_claim_targets",
+    jobId,
+    targetLimit: TARGET_BATCH_SIZE
   });
 }
-async function reportTarget(params) {
+async function reportTargets(jobId, targetResults) {
+  if (targetResults.length === 0) return;
   await callApi({
-    action: "worker_report_target",
-    jobId: params.jobId,
-    targetIndex: params.targetIndex,
-    targetStatus: params.targetStatus,
-    statusReason: params.statusReason ?? null,
-    extracted: params.extracted ?? null
+    action: "worker_report_targets",
+    jobId,
+    targetResults
   });
+}
+async function processTarget(jobId, target) {
+  const targetStartedAt = (/* @__PURE__ */ new Date()).toISOString();
+  status.currentCompany = target.company;
+  status.lastMessage = `\u53D6\u5F97\u4E2D: ${target.company || target.websiteUrl || target.rowId}`;
+  if (!target.websiteUrl) {
+    return {
+      targetIndex: target.targetIndex,
+      targetStatus: "skipped",
+      statusReason: "\u4F01\u696D\u30B5\u30A4\u30C8URL\u304C\u7A7A\u3067\u3059",
+      targetStartedAt,
+      targetFinishedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  try {
+    const extracted = await runWithTimeout(
+      crawlCompanyWebsite(
+        target.websiteUrl,
+        target.selectedFields,
+        {
+          company: target.company,
+          address: target.address
+        },
+        {
+          shouldStop: () => false
+        }
+      ),
+      90 * 1e3
+    );
+    return {
+      targetIndex: target.targetIndex,
+      targetStatus: "done",
+      extracted,
+      targetStartedAt,
+      targetFinishedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  } catch (error) {
+    return {
+      targetIndex: target.targetIndex,
+      targetStatus: "failed",
+      statusReason: error instanceof Error ? error.message : "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC",
+      targetStartedAt,
+      targetFinishedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
 }
 async function processJob(jobId) {
   status.currentJobId = jobId;
   status.running = true;
   status.lastMessage = `\u30B8\u30E7\u30D6\u51E6\u7406\u958B\u59CB: ${jobId}`;
   while (true) {
-    await sendHeartbeat();
-    const targetRes = await claimTarget(jobId);
+    await sendHeartbeatIfNeeded();
+    const targetRes = await claimTargets(jobId);
     if (targetRes.completed) {
       status.lastMessage = `\u30B8\u30E7\u30D6\u5B8C\u4E86: ${jobId}`;
       break;
@@ -3190,51 +3245,19 @@ async function processJob(jobId) {
       status.lastMessage = `\u30B8\u30E7\u30D6\u4E2D\u65AD: ${jobId}`;
       break;
     }
-    const target = targetRes.target;
-    if (!target) {
+    const targets = targetRes.targets || [];
+    if (targets.length === 0) {
       status.lastMessage = "\u51E6\u7406\u5BFE\u8C61\u306A\u3057";
       break;
     }
-    status.currentCompany = target.company;
-    status.lastMessage = `\u53D6\u5F97\u4E2D: ${target.company || target.websiteUrl || target.rowId}`;
-    if (!target.websiteUrl) {
-      await reportTarget({
-        jobId,
-        targetIndex: target.targetIndex,
-        targetStatus: "skipped",
-        statusReason: "\u4F01\u696D\u30B5\u30A4\u30C8URL\u304C\u7A7A\u3067\u3059"
-      });
-      continue;
+    status.lastMessage = `\u307E\u3068\u3081\u53D6\u5F97\u4E2D: ${targets.length}\u4EF6`;
+    const results = [];
+    for (const target of targets) {
+      await sendHeartbeatIfNeeded();
+      const result = await processTarget(jobId, target);
+      results.push(result);
     }
-    try {
-      const extracted = await runWithTimeout(
-        crawlCompanyWebsite(
-          target.websiteUrl,
-          target.selectedFields,
-          {
-            company: target.company,
-            address: target.address
-          },
-          {
-            shouldStop: () => false
-          }
-        ),
-        90 * 1e3
-      );
-      await reportTarget({
-        jobId,
-        targetIndex: target.targetIndex,
-        targetStatus: "done",
-        extracted
-      });
-    } catch (error) {
-      await reportTarget({
-        jobId,
-        targetIndex: target.targetIndex,
-        targetStatus: "failed",
-        statusReason: error instanceof Error ? error.message : "\u4E0D\u660E\u306A\u30A8\u30E9\u30FC"
-      });
-    }
+    await reportTargets(jobId, results);
   }
   status.running = false;
   status.currentJobId = null;
@@ -3243,12 +3266,13 @@ async function processJob(jobId) {
 async function mainLoop() {
   startLocalStatusServer();
   await registerWorker();
+  await sendHeartbeatIfNeeded(true);
   console.log(`Crawl worker started: ${workerId}`);
   console.log(`Worker name: ${config.workerName}`);
   console.log(`API: ${config.apiBaseUrl}`);
   while (true) {
     try {
-      await sendHeartbeat();
+      await sendHeartbeatIfNeeded();
       const job = await claimJob();
       if (!job.jobId) {
         status.lastMessage = "\u5F85\u6A5F\u4E2D";
