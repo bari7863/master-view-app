@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   clearMasterDataAuthCookie,
+  requireMasterDataAuth,
   setMasterDataAuthCookie,
 } from "@/lib/master-data-auth";
+import { dbReady, pool } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -21,6 +23,12 @@ type MasterDataLoginHistoryEvent = {
   loggedAt: string;
   ipAddress: string;
   browser: string;
+};
+
+type MasterDataLoginHistoryRow = {
+  logged_at: Date | string;
+  ip_address: string | null;
+  browser: string | null;
 };
 
 function isMasterDataLoginRole(value: unknown): value is MasterDataLoginRole {
@@ -190,6 +198,73 @@ function createMasterDataLoginHistoryEvent(
   };
 }
 
+function toLoginHistoryIsoString(value: Date | string) {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  const date = new Date(value);
+
+  if (!Number.isNaN(date.getTime())) {
+    return date.toISOString();
+  }
+
+  return String(value);
+}
+
+async function saveMasterDataLoginHistoryToDb(
+  loginUser: MasterDataLoginUser,
+  event: MasterDataLoginHistoryEvent
+) {
+  await dbReady;
+
+  await pool.query(
+    `
+      INSERT INTO master_data_login_history (
+        user_id,
+        user_name,
+        user_role,
+        ip_address,
+        browser,
+        logged_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [
+      loginUser.id,
+      loginUser.name,
+      loginUser.role,
+      event.ipAddress,
+      event.browser,
+      event.loggedAt,
+    ]
+  );
+}
+
+async function fetchMasterDataLoginHistoryFromDb(userId: string) {
+  await dbReady;
+
+  const result = await pool.query<MasterDataLoginHistoryRow>(
+    `
+      SELECT
+        logged_at,
+        ip_address,
+        browser
+      FROM master_data_login_history
+      WHERE user_id = $1
+      ORDER BY logged_at DESC
+      LIMIT 50
+    `,
+    [userId]
+  );
+
+  return result.rows.map((row) => ({
+    loggedAt: toLoginHistoryIsoString(row.logged_at),
+    ipAddress: row.ip_address || "-",
+    browser: row.browser || "-",
+  }));
+}
+
 function findMasterDataLoginUser(id: string, password: string) {
   return getMasterDataLoginUsers().find(
     (user) => user.id === id && user.password === password
@@ -212,6 +287,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const loginHistoryEvent = createMasterDataLoginHistoryEvent(req);
+
+    await saveMasterDataLoginHistoryToDb(loginUser, loginHistoryEvent);
+
+    const loginHistory = await fetchMasterDataLoginHistoryFromDb(loginUser.id);
+
     const response = NextResponse.json({
       ok: true,
       loginUser: {
@@ -220,7 +301,8 @@ export async function POST(req: NextRequest) {
         name: loginUser.name,
         role: loginUser.role,
       },
-      loginHistoryEvent: createMasterDataLoginHistoryEvent(req),
+      loginHistoryEvent,
+      loginHistory,
     });
     setMasterDataAuthCookie(response);
 
@@ -231,6 +313,43 @@ export async function POST(req: NextRequest) {
         ok: false,
         error:
           error instanceof Error ? error.message : "ログイン処理でエラーが発生しました",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function GET(req: NextRequest) {
+  const authError = requireMasterDataAuth(req);
+
+  if (authError) {
+    return authError;
+  }
+
+  try {
+    const userId = new URL(req.url).searchParams.get("userId")?.trim() ?? "";
+
+    if (userId === "") {
+      return NextResponse.json(
+        { ok: false, error: "ユーザーIDが指定されていません" },
+        { status: 400 }
+      );
+    }
+
+    const loginHistory = await fetchMasterDataLoginHistoryFromDb(userId);
+
+    return NextResponse.json({
+      ok: true,
+      loginHistory,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "ログイン履歴の取得でエラーが発生しました",
       },
       { status: 500 }
     );

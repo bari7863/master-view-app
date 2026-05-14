@@ -268,6 +268,7 @@ type ApiResponse = {
   ok: boolean;
   loginUser?: MasterDataLoginUser | null;
   loginHistoryEvent?: MasterDataLoginHistoryItem;
+  loginHistory?: MasterDataLoginHistoryItem[];
   total?: number;
   page?: number;
   limit?: number | "all";
@@ -438,77 +439,34 @@ const ACTIVE_CRAWL_JOB_STORAGE_KEY = "master-data-active-crawl-job-id";
 
 const MASTER_DATA_LOGIN_SESSION_KEY = "master-data-login-session";
 const MASTER_DATA_LOGIN_USER_KEY = "master-data-login-user";
-const MASTER_DATA_LOGIN_HISTORY_KEY = "master-data-login-history";
 
 const MASTER_DATA_LOGIN_EXPIRES_AT_KEY = "master-data-login-expires-at";
 const MASTER_DATA_LOGIN_SESSION_MS = 30 * 60 * 1000;
 
 const LOCAL_CRAWL_WORKER_STATUS_URL = "http://127.0.0.1:39281/status";
 
-function buildMasterDataLoginHistoryStorageKey(userId: string) {
-  return `${MASTER_DATA_LOGIN_HISTORY_KEY}:${userId}`;
-}
-
-function loadMasterDataLoginHistory(userId: string | undefined) {
-  if (typeof window === "undefined" || !userId) return [];
+async function fetchMasterDataLoginHistory(userId: string | undefined) {
+  if (!userId) return [];
 
   try {
-    const text = window.localStorage.getItem(
-      buildMasterDataLoginHistoryStorageKey(userId)
+    const res = await fetch(
+      `/api/master_data/login?userId=${encodeURIComponent(userId)}`,
+      {
+        method: "GET",
+        cache: "no-store",
+      }
     );
 
-    if (!text) return [];
+    const data = await readApiResponse(res);
 
-    const parsed = JSON.parse(text) as unknown;
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || "ログイン履歴の取得に失敗しました");
+    }
 
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .map((item) => {
-        if (!item || typeof item !== "object") return null;
-
-        const value = item as Record<string, unknown>;
-
-        const loggedAt =
-          typeof value.loggedAt === "string" ? value.loggedAt : "";
-        const ipAddress =
-          typeof value.ipAddress === "string" ? value.ipAddress : "";
-        const browser =
-          typeof value.browser === "string" ? value.browser : "";
-
-        if (loggedAt === "") return null;
-
-        return {
-          loggedAt,
-          ipAddress: ipAddress || "-",
-          browser: browser || "-",
-        };
-      })
-      .filter((item): item is MasterDataLoginHistoryItem => item !== null);
+    return data.loginHistory || [];
   } catch {
     return [];
   }
-}
-
-function saveMasterDataLoginHistory(
-  userId: string | undefined,
-  event: MasterDataLoginHistoryItem | undefined
-) {
-  if (typeof window === "undefined" || !userId || !event) {
-    return loadMasterDataLoginHistory(userId);
-  }
-
-  const nextHistory = [
-    event,
-    ...loadMasterDataLoginHistory(userId),
-  ].slice(0, 50);
-
-  window.localStorage.setItem(
-    buildMasterDataLoginHistoryStorageKey(userId),
-    JSON.stringify(nextHistory)
-  );
-
-  return nextHistory;
 }
 
 function splitMasterDataLoginName(name: string | undefined) {
@@ -2368,9 +2326,8 @@ export default function Home() {
       const nextLoginUser = data.loginUser ?? null;
 
       const nextLoginHistory =
-        nextLoginUser && data.loginHistoryEvent
-          ? saveMasterDataLoginHistory(nextLoginUser.id, data.loginHistoryEvent)
-          : loadMasterDataLoginHistory(nextLoginUser?.id);
+        data.loginHistory ||
+        (data.loginHistoryEvent ? [data.loginHistoryEvent] : []);
 
             if (typeof window !== "undefined") {
               window.sessionStorage.setItem(MASTER_DATA_LOGIN_SESSION_KEY, "1");
@@ -2748,10 +2705,13 @@ export default function Home() {
 
       if (canceled) return;
 
+      const savedLoginHistory =
+        isValidLoginSession && savedLoginUser
+          ? await fetchMasterDataLoginHistory(savedLoginUser.id)
+          : [];
+
       setLoginUser(isValidLoginSession ? savedLoginUser : null);
-      setLoginHistory(
-        isValidLoginSession ? loadMasterDataLoginHistory(savedLoginUser?.id) : []
-      );
+      setLoginHistory(savedLoginHistory);
       setLoginStatus(isValidLoginSession ? "logged_in" : "logged_out");
       setScreenReady(true);
     };
@@ -3105,7 +3065,10 @@ export default function Home() {
       if (nextPanel === "settings") {
         setSettingsTab("profile");
         setSettingsPasswordVisible(false);
-        setLoginHistory(loadMasterDataLoginHistory(loginUser?.id));
+
+        void fetchMasterDataLoginHistory(loginUser?.id).then((history) => {
+          setLoginHistory(history);
+        });
       }
 
       if (nextPanel === "list") {

@@ -27,6 +27,23 @@ if (!global.pgPool) {
 
 export const pool = global.pgPool;
 
+async function ensureMasterDataLoginHistoryTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS master_data_login_history (
+      id BIGSERIAL PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      user_role TEXT NOT NULL,
+      ip_address TEXT NOT NULL,
+      browser TEXT NOT NULL,
+      logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_master_data_login_history_user_logged_at
+      ON master_data_login_history (user_id, logged_at DESC);
+  `);
+}
+
 export const dbReady =
   global.masterDataColumnInitPromise ||
   (async () => {
@@ -34,9 +51,11 @@ export const dbReady =
     const sql = await readFile(sqlFilePath, "utf8");
     const normalizedSql = sql.trim();
 
-    if (!normalizedSql) return;
+    if (normalizedSql) {
+      await pool.query(normalizedSql);
+    }
 
-    await pool.query(normalizedSql);
+    await ensureMasterDataLoginHistoryTable();
   })();
 
 global.masterDataColumnInitPromise = dbReady;
