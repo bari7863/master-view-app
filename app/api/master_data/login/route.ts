@@ -17,6 +17,12 @@ type MasterDataLoginUser = {
   role: MasterDataLoginRole;
 };
 
+type MasterDataLoginHistoryEvent = {
+  loggedAt: string;
+  ipAddress: string;
+  browser: string;
+};
+
 function isMasterDataLoginRole(value: unknown): value is MasterDataLoginRole {
   return value === "管理者" || value === "従業員";
 }
@@ -135,6 +141,55 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
   return [];
 }
 
+function normalizeRequestIpAddress(value: string | undefined | null) {
+  const ipAddress = value?.trim();
+
+  if (!ipAddress) {
+    return "";
+  }
+
+  if (
+    ipAddress === "::1" ||
+    ipAddress === "127.0.0.1" ||
+    ipAddress === "::ffff:127.0.0.1"
+  ) {
+    return "ローカル環境";
+  }
+
+  return ipAddress;
+}
+
+function getRequestIpAddress(req: NextRequest) {
+  const forwardedFor = req.headers.get("x-forwarded-for");
+  const forwardedIp = forwardedFor?.split(",")[0]?.trim();
+
+  return (
+    normalizeRequestIpAddress(forwardedIp) ||
+    normalizeRequestIpAddress(req.headers.get("x-real-ip")) ||
+    normalizeRequestIpAddress(req.headers.get("cf-connecting-ip")) ||
+    "取得できません"
+  );
+}
+
+function getBrowserLabel(userAgent: string) {
+  if (/Edg\//i.test(userAgent)) return "Edge";
+  if (/Chrome\//i.test(userAgent) || /CriOS\//i.test(userAgent)) return "Chrome";
+  if (/Firefox\//i.test(userAgent) || /FxiOS\//i.test(userAgent)) return "Firefox";
+  if (/Safari\//i.test(userAgent)) return "Safari";
+
+  return "不明";
+}
+
+function createMasterDataLoginHistoryEvent(
+  req: NextRequest
+): MasterDataLoginHistoryEvent {
+  return {
+    loggedAt: new Date().toISOString(),
+    ipAddress: getRequestIpAddress(req),
+    browser: getBrowserLabel(req.headers.get("user-agent") ?? ""),
+  };
+}
+
 function findMasterDataLoginUser(id: string, password: string) {
   return getMasterDataLoginUsers().find(
     (user) => user.id === id && user.password === password
@@ -161,9 +216,11 @@ export async function POST(req: NextRequest) {
       ok: true,
       loginUser: {
         id: loginUser.id,
+        password: loginUser.password,
         name: loginUser.name,
         role: loginUser.role,
       },
+      loginHistoryEvent: createMasterDataLoginHistoryEvent(req),
     });
     setMasterDataAuthCookie(response);
 

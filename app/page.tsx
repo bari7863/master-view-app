@@ -253,13 +253,21 @@ type MasterDataLoginRole = "管理者" | "従業員";
 
 type MasterDataLoginUser = {
   id: string;
+  password: string;
   name: string;
   role: MasterDataLoginRole;
+};
+
+type MasterDataLoginHistoryItem = {
+  loggedAt: string;
+  ipAddress: string;
+  browser: string;
 };
 
 type ApiResponse = {
   ok: boolean;
   loginUser?: MasterDataLoginUser | null;
+  loginHistoryEvent?: MasterDataLoginHistoryItem;
   total?: number;
   page?: number;
   limit?: number | "all";
@@ -430,11 +438,120 @@ const ACTIVE_CRAWL_JOB_STORAGE_KEY = "master-data-active-crawl-job-id";
 
 const MASTER_DATA_LOGIN_SESSION_KEY = "master-data-login-session";
 const MASTER_DATA_LOGIN_USER_KEY = "master-data-login-user";
+const MASTER_DATA_LOGIN_HISTORY_KEY = "master-data-login-history";
 
 const MASTER_DATA_LOGIN_EXPIRES_AT_KEY = "master-data-login-expires-at";
 const MASTER_DATA_LOGIN_SESSION_MS = 30 * 60 * 1000;
 
 const LOCAL_CRAWL_WORKER_STATUS_URL = "http://127.0.0.1:39281/status";
+
+function buildMasterDataLoginHistoryStorageKey(userId: string) {
+  return `${MASTER_DATA_LOGIN_HISTORY_KEY}:${userId}`;
+}
+
+function loadMasterDataLoginHistory(userId: string | undefined) {
+  if (typeof window === "undefined" || !userId) return [];
+
+  try {
+    const text = window.localStorage.getItem(
+      buildMasterDataLoginHistoryStorageKey(userId)
+    );
+
+    if (!text) return [];
+
+    const parsed = JSON.parse(text) as unknown;
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+
+        const value = item as Record<string, unknown>;
+
+        const loggedAt =
+          typeof value.loggedAt === "string" ? value.loggedAt : "";
+        const ipAddress =
+          typeof value.ipAddress === "string" ? value.ipAddress : "";
+        const browser =
+          typeof value.browser === "string" ? value.browser : "";
+
+        if (loggedAt === "") return null;
+
+        return {
+          loggedAt,
+          ipAddress: ipAddress || "-",
+          browser: browser || "-",
+        };
+      })
+      .filter((item): item is MasterDataLoginHistoryItem => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+function saveMasterDataLoginHistory(
+  userId: string | undefined,
+  event: MasterDataLoginHistoryItem | undefined
+) {
+  if (typeof window === "undefined" || !userId || !event) {
+    return loadMasterDataLoginHistory(userId);
+  }
+
+  const nextHistory = [
+    event,
+    ...loadMasterDataLoginHistory(userId),
+  ].slice(0, 50);
+
+  window.localStorage.setItem(
+    buildMasterDataLoginHistoryStorageKey(userId),
+    JSON.stringify(nextHistory)
+  );
+
+  return nextHistory;
+}
+
+function splitMasterDataLoginName(name: string | undefined) {
+  const trimmedName = (name ?? "").trim();
+
+  if (trimmedName === "") {
+    return {
+      lastName: "-",
+      firstName: "-",
+    };
+  }
+
+  const parts = trimmedName.split(/[ 　]+/).filter(Boolean);
+
+  if (parts.length >= 2) {
+    return {
+      lastName: parts[0],
+      firstName: parts.slice(1).join(" "),
+    };
+  }
+
+  return {
+    lastName: trimmedName,
+    firstName: "-",
+  };
+}
+
+function formatMasterDataLoginDate(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value || "-";
+  }
+
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
 
 function isLocalAppRuntime() {
   if (typeof window === "undefined") return false;
@@ -814,7 +931,13 @@ const ADVANCED_FILTER_TITLES: Record<AdvancedFilterModalKey, string> = {
   tag: "タグ",
 };
 
-type SidebarPanelKey = "search" | "list" | "csv" | "inspection" | "theme";
+type SidebarPanelKey =
+  | "search"
+  | "list"
+  | "csv"
+  | "inspection"
+  | "theme"
+  | "settings";
 
 type FilterClearConfirmTarget =
   | { type: "column"; key: FilterKey }
@@ -826,6 +949,7 @@ const SIDEBAR_PANEL_TITLES: Record<SidebarPanelKey, string> = {
   csv: "CSV取込",
   inspection: "精査",
   theme: "テーマ",
+  settings: "設定",
 };
 
 const SIDEBAR_MENU_ITEMS: { key: SidebarPanelKey; label: string }[] = [
@@ -834,6 +958,7 @@ const SIDEBAR_MENU_ITEMS: { key: SidebarPanelKey; label: string }[] = [
   { key: "csv", label: "CSV" },
   { key: "inspection", label: "精査" },
   { key: "theme", label: "テーマ" },
+  { key: "settings", label: "設定" },
 ];
 
 function SidebarMenuIcon({
@@ -912,6 +1037,21 @@ function SidebarMenuIcon({
         <path d="M18.4 5.6l-1.8 1.8" />
         <path d="M7.4 16.6l-1.8 1.8" />
         <circle cx="12" cy="12" r="4.5" />
+      </svg>
+    );
+  }
+
+    if (menuKey === "settings") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className={className}
+      >
+        <path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5z" />
+        <path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.06.06a2.1 2.1 0 0 1-2.97 2.97l-.06-.06a1.8 1.8 0 0 0-1.98-.36 1.8 1.8 0 0 0-1.1 1.66V21a2.1 2.1 0 0 1-4.2 0v-.09a1.8 1.8 0 0 0-1.1-1.66 1.8 1.8 0 0 0-1.98.36l-.06.06a2.1 2.1 0 0 1-2.97-2.97l.06-.06A1.8 1.8 0 0 0 3.6 15a1.8 1.8 0 0 0-1.66-1.1H1.85a2.1 2.1 0 0 1 0-4.2h.09A1.8 1.8 0 0 0 3.6 8.6a1.8 1.8 0 0 0-.36-1.98l-.06-.06a2.1 2.1 0 1 1 2.97-2.97l.06.06a1.8 1.8 0 0 0 1.98.36h.01A1.8 1.8 0 0 0 9.3 2.35V2.1a2.1 2.1 0 0 1 4.2 0v.25a1.8 1.8 0 0 0 1.1 1.66h.01a1.8 1.8 0 0 0 1.98-.36l.06-.06a2.1 2.1 0 1 1 2.97 2.97l-.06.06a1.8 1.8 0 0 0-.36 1.98v.01a1.8 1.8 0 0 0 1.66 1.1h.25a2.1 2.1 0 0 1 0 4.2h-.25A1.8 1.8 0 0 0 19.4 15z" />
       </svg>
     );
   }
@@ -2171,6 +2311,15 @@ export default function Home() {
 
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
 
+  const [settingsTab, setSettingsTab] = useState<"profile" | "loginHistory">(
+    "profile"
+  );
+  const [loginHistory, setLoginHistory] = useState<
+    MasterDataLoginHistoryItem[]
+  >([]);
+
+  const [settingsPasswordVisible, setSettingsPasswordVisible] = useState(false);
+
   const [loginStatus, setLoginStatus] =
     useState<MasterDataLoginStatus>("checking");
 
@@ -2218,6 +2367,11 @@ export default function Home() {
 
       const nextLoginUser = data.loginUser ?? null;
 
+      const nextLoginHistory =
+        nextLoginUser && data.loginHistoryEvent
+          ? saveMasterDataLoginHistory(nextLoginUser.id, data.loginHistoryEvent)
+          : loadMasterDataLoginHistory(nextLoginUser?.id);
+
             if (typeof window !== "undefined") {
               window.sessionStorage.setItem(MASTER_DATA_LOGIN_SESSION_KEY, "1");
               window.sessionStorage.setItem(
@@ -2236,6 +2390,7 @@ export default function Home() {
             }
 
             setLoginUser(nextLoginUser);
+            setLoginHistory(nextLoginHistory);
             setLoginStatus("logged_in");
             setLoginPassword("");
             setLoginError("");
@@ -2266,9 +2421,12 @@ export default function Home() {
       window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
     }
 
+    setLoginUser(null);
+    setLoginHistory([]);
     setLoginStatus("logged_out");
     setLoginId("");
     setLoginPassword("");
+    setSettingsPasswordVisible(false);
     setLoginPasswordVisible(false);
     setLoginError("");
   };
@@ -2591,6 +2749,9 @@ export default function Home() {
       if (canceled) return;
 
       setLoginUser(isValidLoginSession ? savedLoginUser : null);
+      setLoginHistory(
+        isValidLoginSession ? loadMasterDataLoginHistory(savedLoginUser?.id) : []
+      );
       setLoginStatus(isValidLoginSession ? "logged_in" : "logged_out");
       setScreenReady(true);
     };
@@ -2940,6 +3101,12 @@ export default function Home() {
 
       const nextPanel = openSidebarPanel === key ? null : key;
       setOpenSidebarPanel(nextPanel);
+
+      if (nextPanel === "settings") {
+        setSettingsTab("profile");
+        setSettingsPasswordVisible(false);
+        setLoginHistory(loadMasterDataLoginHistory(loginUser?.id));
+      }
 
       if (nextPanel === "list") {
         setListDeleteScopeOpen(false);
@@ -4177,6 +4344,239 @@ export default function Home() {
           {itemInspectionError && (
             <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {itemInspectionError}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (openSidebarPanel === "settings") {
+      const nameParts = splitMasterDataLoginName(loginUser?.name);
+
+      return (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-[#0f172a] p-2">
+            <button
+              type="button"
+              onClick={() => setSettingsTab("profile")}
+              className={`h-11 rounded-xl border px-3 text-sm font-semibold transition ${
+                settingsTab === "profile"
+                  ? "border-sky-400/40 bg-sky-500/20 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
+                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              プロフィール
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSettingsTab("loginHistory")}
+              className={`h-11 rounded-xl border px-3 text-sm font-semibold transition ${
+                settingsTab === "loginHistory"
+                  ? "border-sky-400/40 bg-sky-500/20 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
+                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+              }`}
+            >
+              ログイン履歴
+            </button>
+          </div>
+
+          {settingsTab === "profile" && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-sky-500/10 via-[#0f172a] to-indigo-500/10 p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-300/20 bg-sky-400/10 text-sky-100">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      className="h-6 w-6"
+                    >
+                      <path d="M20 21a8 8 0 0 0-16 0" />
+                      <circle cx="12" cy="8" r="4" />
+                    </svg>
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-100">
+                      プロフィール
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">
+                      ログイン中のアカウント情報を表示しています
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                    <div className="mb-2 text-xs font-semibold text-slate-400">
+                      姓
+                    </div>
+                    <div className="truncate text-sm font-semibold text-slate-100">
+                      {nameParts.lastName}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                    <div className="mb-2 text-xs font-semibold text-slate-400">
+                      名
+                    </div>
+                    <div className="truncate text-sm font-semibold text-slate-100">
+                      {nameParts.firstName}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
+                <div className="mb-4 text-sm font-semibold text-slate-100">
+                  ログイン情報
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                    <div className="mb-2 text-xs font-semibold text-slate-400">
+                      ID
+                    </div>
+                    <div
+                      className="truncate text-sm font-semibold text-slate-100"
+                      title={loginUser?.id ?? ""}
+                    >
+                      {loginUser?.id ?? "-"}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                    <div className="mb-2 text-xs font-semibold text-slate-400">
+                      パスワード
+                    </div>
+
+                    <div className="relative">
+                      <div
+                        className="truncate pr-10 text-sm font-semibold text-slate-100"
+                        title={settingsPasswordVisible ? loginUser?.password ?? "" : ""}
+                      >
+                        {loginUser?.password
+                          ? settingsPasswordVisible
+                            ? loginUser.password
+                            : "•".repeat(Math.max(loginUser.password.length, 8))
+                          : "-"}
+                      </div>
+
+                      {loginUser?.password && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSettingsPasswordVisible((prev) => !prev)
+                          }
+                          className="absolute right-0 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-slate-100"
+                          aria-label={
+                            settingsPasswordVisible
+                              ? "パスワードを隠す"
+                              : "パスワードを表示する"
+                          }
+                        >
+                          {settingsPasswordVisible ? (
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              className="h-5 w-5"
+                            >
+                              <path d="M3 3l18 18" />
+                              <path d="M10.7 10.7a2 2 0 0 0 2.6 2.6" />
+                              <path d="M9.5 5.3A9.5 9.5 0 0 1 12 5c5 0 8.5 4.5 9.5 7-0.4 1-1.3 2.4-2.7 3.7" />
+                              <path d="M6.2 6.8C4.4 8.1 3.2 10.1 2.5 12c1 2.5 4.5 7 9.5 7 1.5 0 2.8-.4 4-1" />
+                            </svg>
+                          ) : (
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              className="h-5 w-5"
+                            >
+                              <path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                    <div className="mb-2 text-xs font-semibold text-slate-400">
+                      ロール
+                    </div>
+                    <div
+                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                        loginUser?.role === "従業員"
+                          ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+                          : "border-sky-300/30 bg-sky-400/10 text-sky-100"
+                      }`}
+                    >
+                      {loginUser?.role ?? "-"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {settingsTab === "loginHistory" && (
+            <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-100">
+                    ログイン履歴
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    最近のログインイベントを最大50件表示します
+                  </div>
+                </div>
+
+                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-300">
+                  {loginHistory.length.toLocaleString()}件
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-white/10">
+                <div className="grid grid-cols-[1.1fr_0.9fr_0.8fr] border-b border-white/10 bg-white/5 px-4 py-3 text-xs font-semibold text-slate-300">
+                  <div>ログイン日時</div>
+                  <div>IPアドレス</div>
+                  <div>ブラウザ</div>
+                </div>
+
+                {loginHistory.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-sm text-slate-500">
+                    ログイン履歴はまだありません
+                  </div>
+                ) : (
+                  <div className="max-h-[420px] overflow-y-auto">
+                    {loginHistory.map((item, index) => (
+                      <div
+                        key={`${item.loggedAt}-${index}`}
+                        className="grid grid-cols-[1.1fr_0.9fr_0.8fr] border-b border-white/5 px-4 py-3 text-sm text-slate-200 last:border-b-0 hover:bg-white/5"
+                      >
+                        <div className="truncate" title={item.loggedAt}>
+                          {formatMasterDataLoginDate(item.loggedAt)}
+                        </div>
+
+                        <div className="truncate" title={item.ipAddress}>
+                          {item.ipAddress}
+                        </div>
+
+                        <div className="truncate" title={item.browser}>
+                          {item.browser}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -7052,6 +7452,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       ? "max-w-[920px]"
       : openSidebarPanel === "search"
       ? "max-w-[720px]"
+      : openSidebarPanel === "settings"
+      ? "max-w-[900px]"
       : openSidebarPanel === "theme"
       ? "max-w-[420px]"
       : "max-w-[520px]";
