@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 import { dbReady, pool } from "@/lib/db";
+import { requireMasterDataAuth } from "@/lib/master-data-auth";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -858,6 +859,9 @@ function createFileName() {
 
 export async function GET(req: NextRequest) {
   try {
+    const authError = requireMasterDataAuth(req);
+    if (authError) return authError;
+
     const { searchParams } = new URL(req.url);
     return await handleExportRequest(searchParams);
   } catch (error) {
@@ -873,6 +877,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const authError = requireMasterDataAuth(req);
+    if (authError) return authError;
+
     const payload = (await req.json()) as Record<string, unknown>;
     const searchParams = buildSearchParamsFromExportPayload(payload);
     return await handleExportRequest(searchParams);

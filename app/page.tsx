@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { List, type RowComponentProps } from "react-window";
 import { createPortal } from "react-dom";
 
@@ -249,8 +249,17 @@ function createEmptyItemInspectionMethodSelections(): Record<
   };
 }
 
+type MasterDataLoginRole = "管理者" | "従業員";
+
+type MasterDataLoginUser = {
+  id: string;
+  name: string;
+  role: MasterDataLoginRole;
+};
+
 type ApiResponse = {
   ok: boolean;
+  loginUser?: MasterDataLoginUser | null;
   total?: number;
   page?: number;
   limit?: number | "all";
@@ -355,6 +364,8 @@ type MynaviJobStatus = "idle" | "running" | "paused" | "completed" | "error";
 
 type MynaviJobMode = "count_pages" | "scrape";
 
+type MasterDataLoginStatus = "checking" | "logged_in" | "logged_out";
+
 const MYNAVI_FIELD_LABELS: Record<string, string> = {
   count_open: "一覧ページを開いています",
   count_parse: "ページ数を解析しています",
@@ -416,6 +427,12 @@ const CRAWL_PREVIEW_PAGE_SIZE = 20;
 const ITEM_INSPECTION_PREVIEW_PAGE_SIZE = 20;
 
 const ACTIVE_CRAWL_JOB_STORAGE_KEY = "master-data-active-crawl-job-id";
+
+const MASTER_DATA_LOGIN_SESSION_KEY = "master-data-login-session";
+const MASTER_DATA_LOGIN_USER_KEY = "master-data-login-user";
+
+const MASTER_DATA_LOGIN_EXPIRES_AT_KEY = "master-data-login-expires-at";
+const MASTER_DATA_LOGIN_SESSION_MS = 30 * 60 * 1000;
 
 const LOCAL_CRAWL_WORKER_STATUS_URL = "http://127.0.0.1:39281/status";
 
@@ -923,6 +940,7 @@ function MasterDataBrandLogo({
   return (
     <svg
       viewBox="0 0 520 280"
+      preserveAspectRatio="xMidYMid slice"
       className={`master-data-brand-logo ${className}`}
       role="img"
       aria-label="MASTER DATA BARI SPECIAL"
@@ -1012,6 +1030,38 @@ function MasterDataBrandLogo({
         letterSpacing="3.2"
       >
         BARI SPECIAL
+      </text>
+    </svg>
+  );
+}
+
+function MasterDataLoginWordmark({
+  className = "",
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      viewBox="0 0 520 120"
+      className={`master-data-brand-logo ${className}`}
+      role="img"
+      aria-label="MASTER DATA"
+    >
+      <text
+        x="260"
+        y="78"
+        textAnchor="middle"
+        className="master-data-brand-logo__wordmark"
+        fill="#6f471b"
+        fontSize="58"
+        fontWeight="800"
+        letterSpacing="7"
+        style={{
+          filter:
+            "drop-shadow(0 4px 5px rgba(15, 23, 42, 0.22)) drop-shadow(0 1px 0 rgba(255, 255, 255, 0.9))",
+        }}
+      >
+        MASTER DATA
       </text>
     </svg>
   );
@@ -2120,7 +2170,108 @@ export default function Home() {
     useState<SidebarPanelKey | null>(null);
 
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
+
+  const [loginStatus, setLoginStatus] =
+    useState<MasterDataLoginStatus>("checking");
+
+  const [loginId, setLoginId] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [loginUser, setLoginUser] = useState<MasterDataLoginUser | null>(null);
+  const [screenReady, setScreenReady] = useState(false);
+
   const fetchDataRequestIdRef = useRef(0);
+
+  const handleLoginSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const normalizedLoginId = loginId.trim();
+
+    if (normalizedLoginId === "" || loginPassword.trim() === "") {
+      setLoginError("IDとパスワードを入力してください");
+      return;
+    }
+
+    setLoginLoading(true);
+    setLoginError("");
+
+    try {
+      const res = await fetch("/api/master_data/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: normalizedLoginId,
+          password: loginPassword,
+        }),
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "IDまたはパスワードが違います");
+      }
+
+      const nextLoginUser = data.loginUser ?? null;
+
+            if (typeof window !== "undefined") {
+              window.sessionStorage.setItem(MASTER_DATA_LOGIN_SESSION_KEY, "1");
+              window.sessionStorage.setItem(
+                MASTER_DATA_LOGIN_EXPIRES_AT_KEY,
+                String(Date.now() + MASTER_DATA_LOGIN_SESSION_MS)
+              );
+
+              if (nextLoginUser) {
+                window.sessionStorage.setItem(
+                  MASTER_DATA_LOGIN_USER_KEY,
+                  JSON.stringify(nextLoginUser)
+                );
+              } else {
+                window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
+              }
+            }
+
+            setLoginUser(nextLoginUser);
+            setLoginStatus("logged_in");
+            setLoginPassword("");
+            setLoginError("");
+    } catch (e) {
+      setLoginStatus("logged_out");
+      setLoginUser(null);
+      setLoginError(
+        e instanceof Error ? e.message : "ログインに失敗しました"
+      );
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/master_data/login", {
+        method: "DELETE",
+        cache: "no-store",
+      });
+    } catch {
+      // ログアウト時は画面側の状態を戻すことを優先します
+    }
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(MASTER_DATA_LOGIN_SESSION_KEY);
+      window.sessionStorage.removeItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY);
+      window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
+    }
+
+    setLoginStatus("logged_out");
+    setLoginId("");
+    setLoginPassword("");
+    setLoginPasswordVisible(false);
+    setLoginError("");
+  };
 
   const buildReadRequestBody = (extra: Record<string, unknown> = {}) => {
     const body: Record<string, unknown> = {
@@ -2392,8 +2543,108 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let canceled = false;
+
+    const prepareInitialScreen = async () => {
+      const savedLoginSession = window.sessionStorage.getItem(
+        MASTER_DATA_LOGIN_SESSION_KEY
+      );
+
+      const savedLoginExpiresAt = Number(
+        window.sessionStorage.getItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY)
+      );
+
+      const isValidLoginSession =
+        savedLoginSession === "1" &&
+        Number.isFinite(savedLoginExpiresAt) &&
+        savedLoginExpiresAt > Date.now();
+
+      let savedLoginUser: MasterDataLoginUser | null = null;
+
+      if (!isValidLoginSession) {
+        window.sessionStorage.removeItem(MASTER_DATA_LOGIN_SESSION_KEY);
+        window.sessionStorage.removeItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY);
+        window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
+      } else {
+        try {
+          const savedLoginUserText = window.sessionStorage.getItem(
+            MASTER_DATA_LOGIN_USER_KEY
+          );
+
+          savedLoginUser = savedLoginUserText
+            ? (JSON.parse(savedLoginUserText) as MasterDataLoginUser)
+            : null;
+        } catch {
+          window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
+          savedLoginUser = null;
+        }
+      }
+
+      try {
+        await document.fonts.ready;
+      } catch {
+        // フォント読み込みに失敗しても画面は表示します
+      }
+
+      if (canceled) return;
+
+      setLoginUser(isValidLoginSession ? savedLoginUser : null);
+      setLoginStatus(isValidLoginSession ? "logged_in" : "logged_out");
+      setScreenReady(true);
+    };
+
+    void prepareInitialScreen();
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loginStatus !== "logged_in") return;
+
     fetchData();
-  }, [page, limit, appliedColumnStates, appliedAdvancedFilters]);
+  }, [page, limit, appliedColumnStates, appliedAdvancedFilters, loginStatus]);
+
+  useEffect(() => {
+    if (loginStatus !== "logged_in") return;
+
+    const timer = window.setInterval(() => {
+      const activeCrawlJobId = crawlJobId ?? loadActiveCrawlJobId();
+      const hasActiveCrawlJob =
+        !!activeCrawlJobId &&
+        (
+          crawling ||
+          crawlJobStatus === "running" ||
+          crawlJobStatus === "paused"
+        );
+
+      if (hasActiveCrawlJob) {
+        window.sessionStorage.setItem(
+          MASTER_DATA_LOGIN_EXPIRES_AT_KEY,
+          String(Date.now() + MASTER_DATA_LOGIN_SESSION_MS)
+        );
+        return;
+      }
+
+      const savedLoginExpiresAt = Number(
+        window.sessionStorage.getItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY)
+      );
+
+      if (
+        !Number.isFinite(savedLoginExpiresAt) ||
+        savedLoginExpiresAt <= Date.now()
+      ) {
+        void handleLogout();
+      }
+    }, 30 * 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loginStatus, crawlJobId, crawlJobStatus, crawling]);
 
   const checkLocalCrawlWorker = async () => {
     if (isLocalAppRuntime()) {
@@ -2427,6 +2678,8 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (loginStatus !== "logged_in") return;
+
     void checkLocalCrawlWorker();
 
     const timer = window.setInterval(() => {
@@ -2436,7 +2689,7 @@ export default function Home() {
     return () => {
       window.clearInterval(timer);
     };
-  }, []);
+  }, [loginStatus]);
 
   useEffect(() => {
     return () => {
@@ -5527,27 +5780,40 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   clearCrawlStatusPolling();
   clearCrawlRestoreTimer();
 
-  setCrawling(false);
+  setCrawling(true);
   setCrawlProgressOpen(true);
+  setCrawlPreviewOpen(false);
+  setCrawlResumeConfirmOpen(false);
   setCrawlMessage("接続が切れました。復旧を確認しています...");
   setCrawlError("");
 
-  crawlRestoreTimerRef.current = window.setTimeout(async () => {
+  const retryRestore = async () => {
     const restored = await tryRestoreCrawlJob(restoreJobId);
 
-    if (restored) return;
-
-    crawlStatusErrorCountRef.current += 1;
-
-    if (crawlStatusErrorCountRef.current < 10) {
-      scheduleCrawlRecovery(restoreJobId);
+    if (restored) {
+      crawlStatusErrorCountRef.current = 0;
       return;
     }
 
-    setCrawlProgressOpen(false);
-    setCrawlError(
-      "接続エラーが続いています。アプリ再起動後も jobId は保持しているので、再表示時に復元を試します。"
+    crawlStatusErrorCountRef.current += 1;
+
+    setCrawling(true);
+    setCrawlProgressOpen(true);
+    setCrawlMessage("接続が切れました。復旧を確認しています...");
+    setCrawlError("");
+
+    const nextDelayMs = Math.min(
+      1500 + crawlStatusErrorCountRef.current * 500,
+      10000
     );
+
+    crawlRestoreTimerRef.current = window.setTimeout(() => {
+      void retryRestore();
+    }, nextDelayMs);
+  };
+
+  crawlRestoreTimerRef.current = window.setTimeout(() => {
+    void retryRestore();
   }, 1500);
 };
 
@@ -5693,10 +5959,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   };
 
   useEffect(() => {
+    if (loginStatus !== "logged_in") return;
+
     void restoreSavedCrawlJob();
-  }, []);
+  }, [loginStatus]);
 
   useEffect(() => {
+    if (loginStatus !== "logged_in") return;
+
     const handleRecover = () => {
       const storedJobId = loadActiveCrawlJobId();
       if (!storedJobId) return;
@@ -5724,7 +5994,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearCrawlRestoreTimer();
     };
-  }, [crawlJobId]);
+  }, [crawlJobId, loginStatus]);
 
   useEffect(() => {
     const saveBeforeClose = () => {
@@ -5795,7 +6065,13 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   const handlePauseCrawl = async () => {
     if (!crawlJobId) return;
 
+    clearCrawlStatusPolling();
+    setCrawlMessage("クローリングを中断しています。保存候補を読み込みます...");
+    setCrawlError("");
+
     try {
+      const targetJobId = crawlJobId;
+
       const res = await fetch("/api/master_data/crawl", {
         method: "POST",
         headers: {
@@ -5803,8 +6079,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         },
         body: JSON.stringify({
           action: "pause_job",
-          jobId: crawlJobId,
+          jobId: targetJobId,
         }),
+        cache: "no-store",
       });
 
       const data = await readApiResponse(res);
@@ -5813,8 +6090,12 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         throw new Error(data.error || "中断に失敗しました");
       }
 
-      setCrawlMessage("中断指示を受け付けました");
+      applyCrawlStatus(data);
+      await tryRestoreCrawlJob(targetJobId);
+
+      setCrawlMessage("クローリングを中断しました。保存できます。");
     } catch (e) {
+      startCrawlStatusPolling(crawlJobId);
       setCrawlError(
         e instanceof Error ? e.message : "中断処理でエラーが発生しました"
       );
@@ -6915,6 +7196,130 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         sidebarOpen ? "app-sidebar-open" : "app-sidebar-closed"
       } h-[100dvh] overflow-hidden bg-transparent text-slate-100`}
     >
+      {!screenReady || loginStatus === "checking" ? (
+        <div className="flex h-full min-h-0 items-center justify-center bg-[#05070d] px-6">
+          <div className="flex w-full max-w-[420px] flex-col items-center rounded-[28px] border border-white/10 bg-white/[0.04] px-8 py-10 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <MasterDataBrandLogo className="h-auto w-[220px] shrink-0" />
+
+            <div className="mt-4 h-10 w-10 animate-spin rounded-full border-2 border-white/15 border-t-[#c59b5a]" />
+
+            <div className="mt-5 text-sm font-semibold tracking-[0.22em] text-[#d9b56f]">
+              読み込み中
+            </div>
+
+            <div className="mt-2 text-xs text-slate-400">
+              画面を準備しています
+            </div>
+          </div>
+        </div>
+      ) : loginStatus !== "logged_in" ? (
+        <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-white lg:grid-cols-2">
+          <section className="flex min-h-[320px] flex-col items-center justify-center bg-[#05070d] px-8 py-10 text-center">
+            <MasterDataBrandLogo className="h-auto w-[min(600px,82vw)] shrink-0 -translate-y-[40px]" />
+
+            <h1 className="master-data-brand-title mt-8 text-[52px] leading-none md:text-[72px]">
+              マスタデータ
+            </h1>
+          </section>
+
+          <section className="flex min-h-[420px] items-center justify-center bg-white px-6 py-10 text-slate-900">
+            <form
+              onSubmit={handleLoginSubmit}
+              className="w-full max-w-[440px]"
+            >
+              <div className="mb-8 flex justify-center">
+                <MasterDataLoginWordmark className="h-auto w-[340px] translate-y-[40px]" />
+              </div>
+
+              <div className="space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    ID
+                  </label>
+                  <input
+                    value={loginId}
+                    onChange={(e) => setLoginId(e.target.value)}
+                    disabled={loginLoading}
+                    autoComplete="username"
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-4 focus:ring-sky-500/10 disabled:bg-slate-100"
+                    placeholder="IDを入力"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    パスワード
+                  </label>
+
+                  <div className="relative">
+                    <input
+                      type={loginPasswordVisible ? "text" : "password"}
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      disabled={loginLoading}
+                      autoComplete="current-password"
+                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 pr-12 text-base text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-4 focus:ring-sky-500/10 disabled:bg-slate-100"
+                      placeholder="パスワードを入力"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setLoginPasswordVisible((prev) => !prev)}
+                      disabled={loginLoading}
+                      className="absolute right-3 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40"
+                      aria-label={
+                        loginPasswordVisible
+                          ? "パスワードを隠す"
+                          : "パスワードを表示する"
+                      }
+                    >
+                      {loginPasswordVisible ? (
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          className="h-5 w-5"
+                        >
+                          <path d="M3 3l18 18" />
+                          <path d="M10.7 10.7a2 2 0 0 0 2.6 2.6" />
+                          <path d="M9.5 5.3A9.5 9.5 0 0 1 12 5c5 0 8.5 4.5 9.5 7-0.4 1-1.3 2.4-2.7 3.7" />
+                          <path d="M6.2 6.8C4.4 8.1 3.2 10.1 2.5 12c1 2.5 4.5 7 9.5 7 1.5 0 2.8-.4 4-1" />
+                        </svg>
+                      ) : (
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          className="h-5 w-5"
+                        >
+                          <path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {loginError && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {loginError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="h-12 w-full rounded-2xl bg-[#0b1326] px-5 text-sm font-semibold text-white shadow-[0_16px_36px_rgba(15,23,42,0.22)] transition hover:bg-[#111d38] disabled:opacity-50"
+                >
+                {loginLoading ? "ログイン中..." : "ログイン"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : (
       <div
         className="mx-auto flex h-full min-w-0 max-w-[1880px] flex-col px-[var(--app-page-x)] py-[var(--app-page-y)] pl-[var(--app-content-left)] transition-all duration-300"
       >
@@ -6922,8 +7327,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         <aside
           className="fixed bottom-[var(--app-sidebar-gap)] left-[var(--app-sidebar-left)] top-[var(--app-sidebar-gap)] z-40 w-[var(--app-sidebar-width)] overflow-visible transition-all duration-300"
         >
-          <div className="mb-0 flex justify-center">
-            <MasterDataBrandLogo className="h-auto w-[var(--app-logo-width)] shrink-0" />
+          <div className="mb-2 flex h-[var(--app-logo-height)] w-full items-center justify-center overflow-hidden px-0">
+            <MasterDataBrandLogo
+              className={`h-[var(--app-logo-height)] shrink-0 ${
+                sidebarOpen
+                  ? "w-[var(--app-logo-width)]"
+                  : "w-[var(--app-sidebar-width)]"
+              }`}
+            />
           </div>
 
           <div className="app-scrollbar max-h-[calc(100dvh-var(--app-sidebar-menu-offset))] overflow-y-auto rounded-[var(--app-radius-lg)] border border-white/10 bg-[#08101d]/90 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
@@ -7015,7 +7426,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 </h1>
               </div>
 
-              <div className="grid grid-cols-2 gap-[var(--app-gap-sm)] xl:grid-cols-4">
+              <div className="grid grid-cols-2 gap-[var(--app-gap-sm)] xl:grid-cols-6">
                 <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
                   <div className="text-xs text-slate-400">総件数</div>
                   <div className="mt-1 text-lg font-semibold text-white md:text-xl">
@@ -7037,7 +7448,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   </div>
                 </div>
 
-                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
+                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center xl:mr-8">
                   <div className="text-xs text-slate-400">表示件数</div>
                   <div className="mt-2">
                     <select
@@ -7055,6 +7466,75 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       ))}
                     </select>
                   </div>
+                </div>
+
+                <div
+                  className={`flex min-h-[var(--app-stat-card-h)] items-center justify-center rounded-[var(--app-radius-md)] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center ${
+                    loginUser?.role === "従業員"
+                      ? "border border-amber-300/20 bg-gradient-to-br from-amber-500/15 to-yellow-500/10"
+                      : "border border-white/10 bg-gradient-to-br from-sky-500/15 to-indigo-500/10"
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center justify-center gap-2">
+                    <span
+                      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${
+                        loginUser?.role === "従業員"
+                          ? "border-amber-300/20 bg-amber-400/10 text-amber-100"
+                          : "border-sky-300/20 bg-sky-400/10 text-sky-100"
+                      }`}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        className="h-5 w-5"
+                      >
+                        <path d="M20 21a8 8 0 0 0-16 0" />
+                        <circle cx="12" cy="8" r="4" />
+                      </svg>
+                    </span>
+
+                    <div className="min-w-0 text-left leading-tight">
+                      <div
+                        className="max-w-[120px] truncate text-sm font-semibold text-white"
+                        title={loginUser?.name ?? ""}
+                      >
+                        {loginUser?.name ?? "-"}
+                      </div>
+
+                      <div
+                        className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                          loginUser?.role === "従業員"
+                            ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+                            : "border-sky-300/30 bg-sky-400/10 text-sky-100"
+                        }`}
+                      >
+                        {loginUser?.role ?? "-"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex min-h-[var(--app-stat-card-h)] items-center justify-center translate-x-[0px] translate-y-[0px]">
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      className="h-4 w-4"
+                    >
+                      <path d="M10 17l5-5-5-5" />
+                      <path d="M15 12H3" />
+                      <path d="M21 3v18" />
+                    </svg>
+                    <span>ログアウト</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -10148,6 +10628,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           </button>
         </div>
       </div>
+      )}
 
       {/* テーマ：ライト */}
       <style jsx global>{`

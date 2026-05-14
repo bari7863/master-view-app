@@ -8,6 +8,7 @@ import path from "path";
 import os from "os";
 import { spawn, type ChildProcessByStdio } from "child_process";
 import type { Readable } from "stream";
+import { requireMasterDataAuth } from "@/lib/master-data-auth";
 
 type MynaviRequestBody = {
   action?:
@@ -546,6 +547,9 @@ async function resumeMynaviJob(jobId: string): Promise<MynaviJobState> {
 
 export async function POST(req: NextRequest) {
   try {
+    const authError = requireMasterDataAuth(req);
+    if (authError) return authError;
+
     const body = (await req.json()) as MynaviRequestBody;
     const action = body.action;
 
@@ -678,6 +682,9 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
+    const authError = requireMasterDataAuth(req);
+    if (authError) return authError;
+
     const { searchParams } = new URL(req.url);
     const action = searchParams.get("action");
 

@@ -9,6 +9,7 @@ import {
   type CrawlExtractedFields,
   type CrawlExtractedOffice,
 } from "@/lib/master-data-crawler";
+import { requireMasterDataAuth } from "@/lib/master-data-auth";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -2011,8 +2012,19 @@ async function loadPersistedCrawlJobState(jobId: string) {
       ? Date.parse(persistedLastStartedAt)
       : NaN;
 
+    const persistedError = normalizeNullableText(row.error);
+    const persistedCompleted = !!row.completed;
+    const persistedPaused = !!row.paused;
+    const persistedPauseRequested = !!row.pause_requested;
+    const persistedRunning =
+      !!row.running &&
+      !persistedCompleted &&
+      !persistedPaused &&
+      !persistedPauseRequested &&
+      !persistedError;
+
     const recoveredElapsedMs =
-      !!row.running && Number.isFinite(persistedLastStartedAtMs)
+      persistedRunning && Number.isFinite(persistedLastStartedAtMs)
         ? persistedElapsedMs + Math.max(Date.now() - persistedLastStartedAtMs, 0)
         : persistedElapsedMs;
 
@@ -2028,11 +2040,11 @@ async function loadPersistedCrawlJobState(jobId: string) {
       failed: Number(row.failed ?? 0),
       currentCompany: normalizeNullableText(row.current_company),
       currentWebsiteUrl: normalizeNullableText(row.current_website_url),
-      running: false,
-      paused: !!row.paused,
-      pauseRequested: false,
-      completed: !!row.completed,
-      error: normalizeNullableText(row.error),
+      running: persistedRunning,
+      paused: persistedPaused,
+      pauseRequested: persistedPauseRequested,
+      completed: persistedCompleted,
+      error: persistedError,
       elapsedMs: Number.isFinite(recoveredElapsedMs)
         ? Math.max(Math.floor(recoveredElapsedMs), 0)
         : 0,
@@ -2107,6 +2119,7 @@ function markCrawlJobPaused(job: CrawlJobState) {
 
   job.running = false;
   job.paused = true;
+  job.pauseRequested = true;
   job.currentCompany = null;
   job.currentWebsiteUrl = null;
 }
@@ -2820,6 +2833,19 @@ async function reportWorkerTargetResult(
     throw new Error("targetIndex が不正です");
   }
 
+  if (job.paused || job.pauseRequested) {
+    markCrawlJobPaused(job);
+    await persistCrawlJobState(job);
+
+    await updateJobWorkerColumns(client, job.jobId, {
+      status: "paused",
+      workerId,
+      message: "一時停止中",
+    });
+
+    return;
+  }
+
   if (targetIndex < job.nextIndex) {
     return;
   }
@@ -3503,6 +3529,20 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as CrawlRequestBody;
     const action = body.action;
 
+    const isWorkerAction =
+      action === "worker_register" ||
+      action === "worker_heartbeat" ||
+      action === "worker_claim_job" ||
+      action === "worker_claim_target" ||
+      action === "worker_claim_targets" ||
+      action === "worker_report_target" ||
+      action === "worker_report_targets";
+
+    if (!isWorkerAction) {
+      const authError = requireMasterDataAuth(req);
+      if (authError) return authError;
+    }
+
     if (
       action === "worker_register" ||
       action === "worker_heartbeat" ||
@@ -3687,6 +3727,13 @@ export async function POST(req: NextRequest) {
 
           return NextResponse.json({
             ok: true,
+            paused: job.paused || job.pauseRequested,
+            completed: job.completed,
+            jobStatus: job.completed
+              ? "completed"
+              : job.paused || job.pauseRequested
+              ? "paused"
+              : "running",
             message: "処理結果をまとめて保存しました",
           });
         }
@@ -3707,11 +3754,24 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // 専用worker化後は、Next.js内部のrunnerではなく外部workerが処理します。
-      // そのため runningCrawlJobIds を見て running=false に戻したり、
-      // startCrawlJobRunner を呼び直したりしません。
-      if (!job.completed && !job.pauseRequested && !job.error) {
-        await persistCrawlJobState(job);
+      const shouldContinueJob =
+        !job.completed &&
+        !job.pauseRequested &&
+        !job.paused &&
+        !job.error;
+
+      if (shouldContinueJob) {
+        const isLocal = isLocalDevelopmentRequest(req);
+
+        if (isLocal && !runningCrawlJobIds.has(job.jobId)) {
+          job.running = true;
+          job.paused = false;
+          startCrawlRunTimer(job);
+          await persistCrawlJobState(job);
+          startCrawlJobRunner(job.jobId);
+        } else {
+          await persistCrawlJobState(job);
+        }
       }
 
       await syncCrawlElapsedMsFromTargets(job);
@@ -3791,12 +3851,20 @@ export async function POST(req: NextRequest) {
       }
 
       job.pauseRequested = true;
+      markCrawlJobPaused(job);
 
       await persistCrawlJobState(job);
 
+      client = await pool.connect();
+
+      await updateJobWorkerColumns(client, job.jobId, {
+        status: "paused",
+        message: "一時停止中",
+      });
+
       return NextResponse.json({
         ...buildJobResponse(job),
-        message: "中断指示を受け付けました",
+        message: "クローリングを中断しました。保存できます。",
       });
     }
 

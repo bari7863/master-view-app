@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 import { dbReady, pool } from "@/lib/db";
+import { requireMasterDataAuth } from "@/lib/master-data-auth";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -1438,11 +1439,17 @@ async function handleReadRequest(searchParams: URLSearchParams) {
 }
 
 export async function GET(req: NextRequest) {
+  const authError = requireMasterDataAuth(req);
+  if (authError) return authError;
+
   const { searchParams } = new URL(req.url);
   return handleReadRequest(searchParams);
 }
 
 export async function POST(req: NextRequest) {
+  const authError = requireMasterDataAuth(req);
+  if (authError) return authError;
+
   const contentType = req.headers.get("content-type") || "";
 
   if (contentType.includes("application/json")) {
@@ -1678,6 +1685,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const authError = requireMasterDataAuth(req);
+  if (authError) return authError;
+
   const client = await pool.connect();
 
   try {

@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { dbReady, pool } from "@/lib/db";
+import { requireMasterDataAuth } from "@/lib/master-data-auth";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -2922,6 +2923,9 @@ async function handleApplyPreviewChanges(payload: Record<string, unknown>) {
 
 export async function POST(req: NextRequest) {
   try {
+    const authError = requireMasterDataAuth(req);
+    if (authError) return authError;
+
     await dbReady;
     const payload = (await req.json()) as Record<string, unknown>;
     const action = String(payload.action ?? "");

@@ -60,6 +60,16 @@ type WorkerTargetResult = {
   targetStartedAt?: string | null;
   targetFinishedAt?: string | null;
 };
+
+type WorkerReportTargetsResponse = {
+  ok: boolean;
+  paused?: boolean;
+  completed?: boolean;
+  jobStatus?: "running" | "paused" | "completed" | "error";
+  message?: string;
+  error?: string;
+};
+
 const appDir =
   typeof (process as any).pkg !== "undefined"
     ? path.dirname(process.execPath)
@@ -120,6 +130,7 @@ const workerId = loadOrCreateWorkerId();
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const TARGET_BATCH_SIZE = 10;
+const REPORT_BATCH_SIZE = 3;
 let lastHeartbeatAt = 0;
 
 const status: WorkerStatus = {
@@ -243,10 +254,13 @@ async function claimTargets(jobId: string) {
   });
 }
 
-async function reportTargets(jobId: string, targetResults: WorkerTargetResult[]) {
-  if (targetResults.length === 0) return;
+async function reportTargets(
+  jobId: string,
+  targetResults: WorkerTargetResult[]
+): Promise<WorkerReportTargetsResponse | null> {
+  if (targetResults.length === 0) return null;
 
-  await callApi({
+  return await callApi<WorkerReportTargetsResponse>({
     action: "worker_report_targets",
     jobId,
     targetResults,
@@ -335,16 +349,58 @@ async function processJob(jobId: string) {
 
     status.lastMessage = `まとめ取得中: ${targets.length}件`;
 
-    const results: WorkerTargetResult[] = [];
+    let shouldLeaveJob = false;
+    let pendingResults: WorkerTargetResult[] = [];
+
+    const flushResults = async () => {
+      if (pendingResults.length === 0) return null;
+
+      const reportRes = await reportTargets(jobId, pendingResults);
+      pendingResults = [];
+
+      return reportRes;
+    };
 
     for (const target of targets) {
       await sendHeartbeatIfNeeded();
 
       const result = await processTarget(jobId, target);
-      results.push(result);
+      pendingResults.push(result);
+
+      if (pendingResults.length >= REPORT_BATCH_SIZE) {
+        const reportRes = await flushResults();
+
+        if (reportRes?.completed) {
+          status.lastMessage = `ジョブ完了: ${jobId}`;
+          shouldLeaveJob = true;
+          break;
+        }
+
+        if (reportRes?.paused || reportRes?.jobStatus === "paused") {
+          status.lastMessage = `ジョブ中断: ${jobId}`;
+          shouldLeaveJob = true;
+          break;
+        }
+      }
     }
 
-    await reportTargets(jobId, results);
+    if (!shouldLeaveJob) {
+      const reportRes = await flushResults();
+
+      if (reportRes?.completed) {
+        status.lastMessage = `ジョブ完了: ${jobId}`;
+        shouldLeaveJob = true;
+      }
+
+      if (reportRes?.paused || reportRes?.jobStatus === "paused") {
+        status.lastMessage = `ジョブ中断: ${jobId}`;
+        shouldLeaveJob = true;
+      }
+    }
+
+    if (shouldLeaveJob) {
+      break;
+    }
   }
 
   status.running = false;
