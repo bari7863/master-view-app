@@ -1,8 +1,8 @@
 # マスタデータ
 
-営業・マーケティングで使用する企業情報を管理し、企業HPから不足情報を補完するための社内向けWebアプリ
+営業・マーケティングで使用する企業情報を管理し、企業HPから不足情報を補完するための社内向けWebアプリです。
 
-企業リストの取り込み、一覧管理、検索・フィルタ、CSV出力、クローリング、候補値の確認・保存などを行い、フォーム営業・テレアポ・営業リスト精査に使いやすいマスタデータを作ることが目的
+企業リストの取り込み、一覧管理、検索・フィルタ、CSV出力、クローリング、候補値の確認・保存などを行い、フォーム営業・テレアポ・営業リスト精査に使いやすいマスタデータを作ることを目的としています。
 
 ---
 
@@ -12,7 +12,9 @@ https://master-view-app-ruby.vercel.app/
 
 ---
 
-## 機能
+## このアプリでできること
+
+主な機能は以下です。
 
 - 企業リストの一覧表示
 - 企業名・住所・業種などによる検索、フィルタ、並び替え
@@ -26,10 +28,12 @@ https://master-view-app-ruby.vercel.app/
 - ログイン制御
 - Vercel環境での公開
 - ローカル環境での開発・検証
+- workerによるクローリング処理
+- マイナビ系データ取得・取込処理
 
 ---
 
-## データ
+## 主に扱うデータ
 
 このアプリでは、以下のような企業情報を扱います。
 
@@ -52,7 +56,7 @@ https://master-view-app-ruby.vercel.app/
 - 事業内容
 - 許可番号
 
-カラムを追加・変更する場合は、DB、API、画面、CSV取込、CSV出力、保存処理に影響する可能性があります。
+カラムを追加・変更する場合は、DB、API、画面、CSV取込、CSV出力、保存処理、クローリング結果保存に影響する可能性があります。
 
 ---
 
@@ -68,51 +72,71 @@ https://master-view-app-ruby.vercel.app/
 - Playwright
 - Vercel
 - workerによるクローリング処理
+- Pythonスクリプトによる一部データ取得・検証
 
 ---
 
 ## ディレクトリ構成
 
-主なファイル・フォルダは以下です。
+現在の主な構成は以下です。
 
 ```text
 master-view-app/
-├─ app/
-│  ├─ page.tsx
-│  ├─ layout.tsx
-│  ├─ globals.css
+├─ app
+│  ├─ api
+│  │  └─ master_data
+│  │     ├─ [id]
+│  │     │  └─ route.ts
+│  │     ├─ crawl
+│  │     │  └─ route.ts
+│  │     ├─ export
+│  │     │  └─ route.ts
+│  │     ├─ item_inspection
+│  │     │  └─ route.ts
+│  │     ├─ login
+│  │     │  └─ route.ts
+│  │     ├─ mynavi
+│  │     │  └─ route.ts
+│  │     └─ route.ts
 │  ├─ favicon.ico
-│  └─ api/
-│     ├─ master_data/
-│     │  ├─ route.ts
-│     │  └─ crawl/
-│     │     └─ route.ts
-│     └─ export/
-│        └─ route.ts
-│
-├─ lib/
+│  ├─ globals.css
+│  ├─ layout.tsx
+│  └─ page.tsx
+├─ dist
+│  └─ worker
+│     └─ crawl-worker.cjs
+├─ docs
+│  └─ handover.md
+├─ lib
 │  ├─ db.ts
+│  ├─ master-data-auth.ts
 │  └─ master-data-crawler.ts
-│
-├─ docs/
-│  └─ 引き継ぎ.md
-│
-├─ public/
-├─ .crawl-job-state/
+├─ public
+│  ├─ file.svg
+│  ├─ globe.svg
+│  ├─ next.svg
+│  ├─ vercel.svg
+│  └─ window.svg
+├─ release
+│  └─ MasterCrawlWorker
+│     ├─ master-crawl-worker.exe
+│     ├─ worker-config.json
+│     └─ worker-id.txt
+├─ scripts
+│  ├─ crawl-worker.ts
+│  └─ mynavi_shinsotsu_unified.py
+├─ sql
+│  └─ add_column.sql
+├─ .gitignore
 ├─ CLAUDE.md
-├─ README.md
-├─ crawl-worker.ts
+├─ eslint.config.mjs
+├─ next.config.ts
 ├─ package.json
 ├─ package-lock.json
-├─ tsconfig.json
-├─ next.config.ts
-├─ eslint.config.mjs
 ├─ postcss.config.mjs
-├─ .gitignore
-└─ .env.local
+├─ README.md
+└─ tsconfig.json
 ```
-
-実際の構成と完全に一致しない場合は、現在のプロジェクト内のファイルに合わせて読み替えてください。
 
 ---
 
@@ -134,11 +158,67 @@ master-view-app/
 
 ---
 
+### `app/api/master_data/[id]/route.ts`
+
+特定のマスタデータ1件に対するAPIです。
+
+個別データの取得・更新・削除など、1件単位の処理に関係する可能性があります。
+
+---
+
 ### `app/api/master_data/crawl/route.ts`
 
 クローリングAPIです。
 
 クローリング開始、job作成、進捗取得、停止、再開、worker連携、結果保存などを担当します。
+
+---
+
+### `app/api/master_data/export/route.ts`
+
+CSV出力・エクスポート系のAPIです。
+
+全件出力、処理完了分の出力、候補ありデータの出力などに関係します。
+
+---
+
+### `app/api/master_data/item_inspection/route.ts`
+
+項目精査系のAPIです。
+
+代表者名やその他項目の候補値確認、不要値の判定、精査処理などに関係する可能性があります。
+
+---
+
+### `app/api/master_data/login/route.ts`
+
+ログイン認証用のAPIです。
+
+管理者・従業員ログインや、認証トークン確認などに関係します。
+
+---
+
+### `app/api/master_data/mynavi/route.ts`
+
+マイナビ系データの処理に関係するAPIです。
+
+マイナビから取得した企業データの取り込み、取得、整形などに関係する可能性があります。
+
+---
+
+### `lib/db.ts`
+
+DB接続設定です。
+
+`DATABASE_URL` を使って PostgreSQL / Neon に接続します。
+
+---
+
+### `lib/master-data-auth.ts`
+
+マスタデータアプリの認証処理に関係するファイルです。
+
+ログイン情報、認証トークン、管理者・従業員の判定などに関係する可能性があります。
 
 ---
 
@@ -150,19 +230,67 @@ master-view-app/
 
 ---
 
-### `crawl-worker.ts`
+### `scripts/crawl-worker.ts`
 
-worker側のクローリング処理です。
+workerの元となるTypeScriptファイルです。
 
-Vercel環境で重いクローリングを直接実行すると不安定になりやすいため、workerで処理する構成があります。
+クローリング処理を外部workerとして実行するためのソースです。
 
 ---
 
-### `lib/db.ts`
+### `dist/worker/crawl-worker.cjs`
 
-DB接続設定です。
+ビルド後のworkerファイルです。
 
-`DATABASE_URL` を使って PostgreSQL / Neon に接続します。
+実行用に変換されたworkerファイルのため、基本的には直接編集せず、必要な修正は `scripts/crawl-worker.ts` 側で行います。
+
+---
+
+### `release/MasterCrawlWorker/`
+
+配布・実行用のworker関連ファイルです。
+
+```text
+master-crawl-worker.exe
+worker-config.json
+worker-id.txt
+```
+
+などが含まれます。
+
+workerを別PCや別環境で起動する場合に関係します。
+
+---
+
+### `scripts/mynavi_shinsotsu_unified.py`
+
+マイナビ新卒系のデータ取得・整形に関係するPythonスクリプトです。
+
+アプリ本体とは別に、データ収集や検証用として使われる可能性があります。
+
+---
+
+### `sql/add_column.sql`
+
+DBカラム追加用のSQLです。
+
+カラム追加・変更時に使う可能性があります。
+
+---
+
+### `docs/handover.md`
+
+開発経緯や仕様の詳細をまとめた引き継ぎ資料です。
+
+Claude Codeや別AIに移行するときは、このファイルを読ませます。
+
+---
+
+### `CLAUDE.md`
+
+Claude Code向けの作業ルールです。
+
+修正時のルール、クローリング精度に関する注意、UI修正時の注意、不要コード削除時の注意などを記載しています。
 
 ---
 
@@ -185,7 +313,9 @@ Claude Codeに守らせる作業ルールです。
 - 不要コード削除時の注意
 - 既存機能を壊さないためのルール
 
-### `docs/引き継ぎ.md`
+---
+
+### `docs/handover.md`
 
 詳細な引き継ぎ資料です。
 
@@ -305,14 +435,6 @@ MASTER_DATA_LOGIN_EMPLOYEES="xxxxx"
 
 ```gitignore
 .env.local
-```
-
-また、以下のような設定は間違いです。
-
-```env
-MASTER_DATA_AUTH_TOKEN="DATABASE_URLの中身"
-MASTER_DATA_LOGIN_ADMINS="DATABASE_URLの中身"
-MASTER_DATA_LOGIN_EMPLOYEES="DATABASE_URLの中身"
 ```
 
 各Keyには、それぞれ対応する値を設定してください。
@@ -463,8 +585,6 @@ Value: 管理者ログイン用の値
 Key: MASTER_DATA_LOGIN_EMPLOYEES
 Value: 従業員ログイン用の値
 ```
-
-`MASTER_DATA_AUTH_TOKEN` などのValueに `DATABASE_URL` の中身を入れるわけではありません。
 
 ---
 
