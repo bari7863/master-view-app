@@ -946,6 +946,22 @@ function buildCrawlPayloadBundles(
 
   return officeSources.map((office) => {
     const officeName = normalizeNullableText(office.office_name);
+    const officePhoneCandidates = uniqueTextValues(
+      office.phone_candidates.length > 0
+        ? office.phone_candidates
+        : extracted.phone
+        ? [extracted.phone]
+        : []
+    );
+
+    const officeFaxCandidates = uniqueTextValues(
+      office.fax_candidates.length > 0
+        ? office.fax_candidates
+        : extracted.fax
+        ? [extracted.fax]
+        : []
+    );
+
     const officeCompanyBase =
       normalizeNullableText(office.company) ?? baseCompany ?? fallbackCompany;
 
@@ -958,8 +974,8 @@ function buildCrawlPayloadBundles(
       company: company && isLikelyCompanyName(company) ? company : fallbackCompany,
       website_url: normalizeNullableText(extracted.website_url),
       form_url: normalizeNullableText(extracted.form_url),
-      phone: normalizeNullableText(extracted.phone),
-      fax: normalizeNullableText(extracted.fax),
+      phone: officePhoneCandidates[0] ?? null,
+      fax: officeFaxCandidates[0] ?? null,
       email: normalizeNullableText(extracted.email),
       zipcode: normalizeNullableText(extracted.zipcode),
       address: normalizeNullableText(extracted.address),
@@ -985,8 +1001,8 @@ function buildCrawlPayloadBundles(
     return {
       payload,
       candidates: {
-        phone: uniqueTextValues(office.phone_candidates),
-        fax: uniqueTextValues(office.fax_candidates),
+        phone: officePhoneCandidates,
+        fax: officeFaxCandidates,
         email: uniqueTextValues(office.email_candidates),
         zipcode: uniqueTextValues(office.zipcode_candidates),
         address: uniqueTextValues(office.address_candidates),

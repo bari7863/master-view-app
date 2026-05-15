@@ -856,6 +856,31 @@ const CONTACT_INFO_LABELS = [
   /連絡先/i,
 ];
 
+const REPRESENTATIVE_PHONE_LABELS = [
+  /^本社電話番号$/i,
+  /^代表電話$/i,
+  /^代表番号$/i,
+  /^電話番号$/i,
+  /^電話$/i,
+  /^TEL$/i,
+  /^Tel$/i,
+  /^tel$/i,
+  /本社電話番号/i,
+  /代表電話/i,
+  /代表番号/i,
+  /電話番号/i,
+  /\bTEL\b/i,
+];
+
+const REPRESENTATIVE_PHONE_PAGE_KEYWORDS =
+  /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|会社データ|会社基本情報|基本情報|所在地|アクセス|本社|本店|代表電話|電話番号|TEL|contact|access|outline|profile|company|corporate|about|overview|information)/i;
+
+const REPRESENTATIVE_PHONE_WEAK_PAGE_KEYWORDS =
+  /(採用|求人|募集|応募|エントリー|recruit|career|job|jobs|entry|news|blog|ブログ|column|コラム|topics|トピックス|予約|reservation|reserve|store|shop)/i;
+
+const REPRESENTATIVE_PHONE_DENY_CONTEXT_REGEX =
+  /(採用|求人|募集|応募|エントリー|人事|採用担当|リクルート|recruit|career|job|jobs|entry|予約|予約専用|来店予約|問い合わせ専用|お客様相談|カスタマー|サポート|ヘルプ|コールセンター|フリーダイヤル|ナビダイヤル|携帯|スマートフォン|直通|担当直通|緊急|夜間|休日|個人|店舗|ショップ|店頭|資料請求|セミナー|イベント)/i;
+
 const ADDRESS_STOP_WORDS =
   /(連絡先|アクセス方法|アクセス|TEL|Tel|tel|電話|FAX|Fax|fax|営業時間|定休日|MAP|Google|メール|E-mail|E-mai|Mail|お問合せ|お問い合わせ|Copyright|著作権|All Rights Reserved|業種|創業|設立|資本金|従業員数|取引先|Top Message|代表ご挨拶|Our Philosophy|Our Policy|History|沿革|Access|Contact|会社情報|事業紹介|設備紹介|お知らせ)/i;
 
@@ -1311,6 +1336,174 @@ function normalizePhone(value: string) {
   }
 
   return null;
+}
+
+function isLikelyRepresentativePhoneNumber(value: string) {
+  const digits = value.replace(/\D/g, "");
+
+  if (!/^0\d{9,10}$/.test(digits)) {
+    return false;
+  }
+
+  if (/^(070|080|090|050|020|0120|0570|0800)/.test(digits)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isFaxOnlyPhoneContext(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return false;
+
+  const hasFaxLabel = /(?:FAX|ＦＡＸ|Fax|fax|ファックス)/i.test(normalized);
+  const hasPhoneLabel =
+    /(?:TEL|Tel|tel|電話番号|電話|本社電話番号|代表電話|代表番号)/i.test(
+      normalized
+    );
+
+  return hasFaxLabel && !hasPhoneLabel;
+}
+
+function normalizeRepresentativePhone(value: string) {
+  if (isFaxOnlyPhoneContext(value)) {
+    return null;
+  }
+
+  const normalized = normalizePhone(value);
+  if (!normalized) return null;
+
+  return isLikelyRepresentativePhoneNumber(normalized) ? normalized : null;
+}
+
+function isWeakRepresentativePhoneContext(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return true;
+
+  return REPRESENTATIVE_PHONE_DENY_CONTEXT_REGEX.test(normalized);
+}
+
+function isRepresentativePhoneContextLine(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return false;
+  if (isFaxOnlyPhoneContext(normalized)) return false;
+  if (isWeakRepresentativePhoneContext(normalized)) return false;
+
+  return REPRESENTATIVE_PHONE_LABELS.some((regex) => regex.test(normalized));
+}
+
+function pickRepresentativePhonePairValue(
+  pairs: Array<{ label: string; value: string }>
+) {
+  for (const pair of pairs) {
+    const labelAndValue = `${pair.label} ${pair.value}`;
+
+    if (!REPRESENTATIVE_PHONE_LABELS.some((regex) => regex.test(pair.label))) {
+      continue;
+    }
+
+    if (isWeakRepresentativePhoneContext(labelAndValue)) {
+      continue;
+    }
+
+    const normalized =
+      normalizeRepresentativePhone(pair.value) ??
+      normalizeRepresentativePhone(labelAndValue);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function extractRepresentativePhoneFromLabeledText(text: string) {
+  const lines = text
+    .split("\n")
+    .map((line) => normalizeSpace(line))
+    .filter((line) => line !== "");
+
+  const labelPattern = buildLooseLabelPattern(REPRESENTATIVE_PHONE_LABELS);
+
+  const sameLinePattern = new RegExp(
+    `(?:${labelPattern})\\s*(?:\\||｜|¦|┃|‖|／|/|：|:|\\.)?\\s*(0[\\d\\s-]{8,13}\\d)`,
+    "i"
+  );
+
+  const labelOnlyPattern = new RegExp(
+    `^(?:${labelPattern})\\s*(?:\\||｜|¦|┃|‖|／|/|：|:|\\.)?\\s*$`,
+    "i"
+  );
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = normalizeDigits(lines[i]);
+
+    if (isFaxOnlyPhoneContext(line)) {
+      continue;
+    }
+
+    if (isWeakRepresentativePhoneContext(line)) {
+      continue;
+    }
+
+    const sameLine = line.match(sameLinePattern);
+    if (sameLine?.[1]) {
+      const normalized = normalizeRepresentativePhone(line);
+      if (normalized) return normalized;
+    }
+
+    if (!labelOnlyPattern.test(line)) {
+      continue;
+    }
+
+    for (let j = i + 1; j < Math.min(lines.length, i + 4); j += 1) {
+      const nextLine = normalizeDigits(lines[j]);
+
+      if (isFaxOnlyPhoneContext(nextLine)) {
+        continue;
+      }
+
+      if (isWeakRepresentativePhoneContext(`${line} ${nextLine}`)) {
+        continue;
+      }
+
+      const normalized = normalizeRepresentativePhone(nextLine);
+      if (normalized) return normalized;
+    }
+  }
+
+  return null;
+}
+
+function getRepresentativePhonePageBoost(page: PageData) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+
+  let score = 0;
+
+  if (COMPANY_KEYWORDS.test(target)) score += 140;
+  if (CONTACT_KEYWORDS.test(target)) score += 80;
+  if (REPRESENTATIVE_PHONE_PAGE_KEYWORDS.test(target)) score += 180;
+  if (REPRESENTATIVE_PHONE_WEAK_PAGE_KEYWORDS.test(target)) score -= 260;
+
+  return score;
+}
+
+function canUseRepresentativePhonePage(page: PageData) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+
+  if (
+    REPRESENTATIVE_PHONE_WEAK_PAGE_KEYWORDS.test(target) &&
+    !REPRESENTATIVE_PHONE_PAGE_KEYWORDS.test(target)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function normalizeFax(value: string) {
@@ -2161,12 +2354,8 @@ function extractOfficeResults(
 
       const phoneCandidates = uniqueNonEmpty(
         block.lines
-          .filter(
-            (line) =>
-              /(?:TEL|Tel|tel|電話)/i.test(line) &&
-              !/(?:FAX|ＦＡＸ|Fax|fax)/i.test(line)
-          )
-          .map((line) => normalizePhone(line))
+          .filter((line) => isRepresentativePhoneContextLine(line))
+          .map((line) => normalizeRepresentativePhone(line))
       );
 
       const faxCandidates = uniqueNonEmpty(
@@ -3923,16 +4112,50 @@ function processPage(
   const faxPairValue = pickPairValue(pairs, FAX_LABELS) ?? "";
   const contactPairValue = pickPairValue(pairs, CONTACT_INFO_LABELS) ?? "";
 
-  if (shouldProcessFieldInFocus(selectedFieldSet, "phone", focus)) {
-    addBest(best, "phone", normalizePhone(phonePairValue), 220 + boost);
-    addBest(best, "phone", normalizePhone(contactPairValue), 210 + boost);
+  if (
+    shouldProcessFieldInFocus(selectedFieldSet, "phone", focus) &&
+    canUseRepresentativePhonePage(page)
+  ) {
+    const representativePhonePageBoost = getRepresentativePhonePageBoost(page);
+
+    const representativePhonePairValue = pickRepresentativePhonePairValue(pairs);
+    const representativeContactPhoneValue =
+      extractRepresentativePhoneFromLabeledText(contactPairValue);
+    const representativeStructuredPhoneValue =
+      extractRepresentativePhoneFromLabeledText(page.structuredText);
+    const representativeTelValue = !isWeakRepresentativePhoneContext(
+      `${page.finalUrl} ${page.title} ${page.h1}`
+    )
+      ? normalizeRepresentativePhone(decodeURIComponent(telMatch?.[1] || ""))
+      : null;
+
     addBest(
       best,
       "phone",
-      normalizePhone(decodeURIComponent(telMatch?.[1] || "")),
-      150 + boost
+      representativePhonePairValue,
+      420 + boost + representativePhonePageBoost
     );
-    addBest(best, "phone", normalizePhone(page.text), 40 + boost);
+
+    addBest(
+      best,
+      "phone",
+      representativeContactPhoneValue,
+      360 + boost + representativePhonePageBoost
+    );
+
+    addBest(
+      best,
+      "phone",
+      representativeStructuredPhoneValue,
+      340 + boost + representativePhonePageBoost
+    );
+
+    addBest(
+      best,
+      "phone",
+      representativeTelValue,
+      260 + boost + representativePhonePageBoost
+    );
   }
 
   if (shouldProcessFieldInFocus(selectedFieldSet, "fax", focus)) {
