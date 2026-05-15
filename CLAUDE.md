@@ -2,8 +2,8 @@
 
 このファイルは、Claude Code がこのプロジェクトを修正するときに必ず守る作業ルールです。
 
-詳細な開発経緯や仕様は `docs/引き継ぎ.md` を参照してください。  
-GitHubで最初に読む概要は `README.md` を参照してください。
+GitHubで最初に読む概要は `README.md` を参照してください。  
+詳細な開発経緯や仕様は `docs/handover.md` を参照してください。
 
 ---
 
@@ -30,13 +30,22 @@ GitHubで最初に読む概要は `README.md` を参照してください。
 ```text
 app/page.tsx
 app/api/master_data/route.ts
+app/api/master_data/[id]/route.ts
 app/api/master_data/crawl/route.ts
-app/api/export/route.ts
+app/api/master_data/export/route.ts
+app/api/master_data/item_inspection/route.ts
+app/api/master_data/login/route.ts
+app/api/master_data/mynavi/route.ts
 lib/db.ts
+lib/master-data-auth.ts
 lib/master-data-crawler.ts
-crawl-worker.ts
+scripts/crawl-worker.ts
+dist/worker/crawl-worker.cjs
+release/MasterCrawlWorker/
+scripts/mynavi_shinsotsu_unified.py
+sql/add_column.sql
 README.md
-docs/引き継ぎ.md
+docs/handover.md
 ```
 
 ---
@@ -54,6 +63,7 @@ docs/引き継ぎ.md
 - ローカル環境に影響するか
 - workerに影響するか
 - クローリング精度が下がらないか
+- `dist/worker/crawl-worker.cjs` を直接修正すべき内容か、`scripts/crawl-worker.ts` を修正すべき内容か
 
 ---
 
@@ -70,10 +80,13 @@ docs/引き継ぎ.md
 - CSV取込
 - CSV抽出
 - 保存処理
+- 個別データ更新
+- 項目精査
+- ログイン機能
 - クローリング開始
 - クローリング結果画面
-- ログイン機能
 - worker連携
+- マイナビ系データ処理
 
 ---
 
@@ -86,6 +99,7 @@ docs/引き継ぎ.md
 - 代表者名
 - 従業員数
 - 電話番号
+- FAX番号
 - 問い合わせフォームURL
 - メールアドレス
 - 設立年月
@@ -107,15 +121,7 @@ docs/引き継ぎ.md
 - npm scriptsから参照されていないか
 - Vercelやworkerで使われていないか
 - 状態保存や復元に使われていないか
-
-特に以下は削除前に慎重に確認してください。
-
-```text
-app/companies/page.tsx
-.crawl-job-state/
-crawl-fob-state/
-devug_omron/
-```
+- release配下のexeやconfigに影響しないか
 
 ---
 
@@ -132,6 +138,7 @@ devug_omron/
 カラムを追加・変更する場合は、以下を必ず確認してください。
 
 - DBカラム
+- SQLファイル
 - APIのSELECT
 - APIのINSERT
 - APIのUPDATE
@@ -218,6 +225,9 @@ UI修正では、以下を守ってください。
 - 重いクローリングはworker側で処理する
 - ローカル環境ではworkerなしでもクローリングできるようにする
 - `http://localhost:3000/` では従来の動作を優先する
+- workerソースは基本的に `scripts/crawl-worker.ts` を確認する
+- `dist/worker/crawl-worker.cjs` はビルド後ファイルのため、直接編集は慎重に判断する
+- `release/MasterCrawlWorker/` は配布・実行用のworker関連ファイルとして扱う
 
 ---
 
@@ -232,6 +242,8 @@ UI修正では、以下を守ってください。
 - 個人情報を含むCSV
 - 顧客情報を含むExcel
 
+`release/MasterCrawlWorker/worker-config.json` や `worker-id.txt` に環境依存情報が含まれる場合は、取り扱いに注意してください。
+
 ---
 
 ## 参照すべき資料
@@ -240,7 +252,7 @@ UI修正では、以下を守ってください。
 
 ```text
 README.md
-docs/引き継ぎ.md
+docs/handover.md
 ```
 
-READMEは概要、引き継ぎ資料は詳細仕様です。
+READMEは概要、handover.mdは詳細仕様です。

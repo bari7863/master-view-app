@@ -82,6 +82,14 @@ MASTER_DATA_LOGIN_EMPLOYEES
 
 ---
 
+### マイナビ系データ処理
+
+`app/api/master_data/mynavi/route.ts` や `scripts/mynavi_shinsotsu_unified.py` に関連する処理があります。
+
+マイナビ新卒などから取得した企業データの取り込み、整形、検証に関係する可能性があります。
+
+---
+
 ## 3. 技術構成
 
 主な構成は以下です。
@@ -95,6 +103,7 @@ MASTER_DATA_LOGIN_EMPLOYEES
 - Vercel
 - worker
 - CSV / Excel系データ処理
+- Pythonスクリプト
 
 DBは主に Neon PostgreSQL を使用しています。
 
@@ -149,6 +158,21 @@ DBカラムを変更するときは、このファイルも確認が必要です
 
 ---
 
+### `app/api/master_data/[id]/route.ts`
+
+特定のマスタデータ1件に対するAPIです。
+
+担当範囲。
+
+- 1件単位の取得
+- 1件単位の更新
+- 1件単位の削除
+- 詳細表示や個別編集に関係する処理
+
+実際の役割はコードを確認してください。
+
+---
+
 ### `app/api/master_data/crawl/route.ts`
 
 クローリングAPIです。
@@ -165,6 +189,90 @@ DBカラムを変更するときは、このファイルも確認が必要です
 - worker連携
 - クローリング結果保存
 - クローリングプレビュー保存
+
+---
+
+### `app/api/master_data/export/route.ts`
+
+CSV出力・エクスポート系のAPIです。
+
+担当範囲。
+
+- 全件出力
+- 処理完了分の出力
+- 候補ありデータの出力
+- 項目ごとの候補値出力
+
+DBカラムや画面項目を変更した場合は、このファイルも確認してください。
+
+---
+
+### `app/api/master_data/item_inspection/route.ts`
+
+項目精査系のAPIです。
+
+担当範囲として考えられるもの。
+
+- 項目ごとの候補値確認
+- 代表者名などの精査
+- 不要値の除外
+- 候補値の検証
+- 精査プレビュー
+
+実際の役割はコードを確認してください。
+
+---
+
+### `app/api/master_data/login/route.ts`
+
+ログイン認証用のAPIです。
+
+担当範囲。
+
+- 管理者ログイン
+- 従業員ログイン
+- 認証トークン確認
+- ログイン可否判定
+
+`lib/master-data-auth.ts` とセットで確認してください。
+
+---
+
+### `app/api/master_data/mynavi/route.ts`
+
+マイナビ系データ処理のAPIです。
+
+担当範囲として考えられるもの。
+
+- マイナビ系データの取得
+- マイナビ系データの取り込み
+- マイナビ系データの整形
+- アプリ内データへの反映
+
+`scripts/mynavi_shinsotsu_unified.py` と関係する可能性があります。
+
+---
+
+### `lib/db.ts`
+
+DB接続設定です。
+
+`DATABASE_URL` と関係します。
+
+---
+
+### `lib/master-data-auth.ts`
+
+認証処理に関係するファイルです。
+
+担当範囲。
+
+- ログイン情報の確認
+- 管理者・従業員の判定
+- 認証トークンの扱い
+- API認証
+
+`app/api/master_data/login/route.ts` とセットで確認してください。
 
 ---
 
@@ -195,19 +303,78 @@ DBカラムを変更するときは、このファイルも確認が必要です
 
 ---
 
-### `crawl-worker.ts`
+### `scripts/crawl-worker.ts`
 
-worker側のクローリング処理です。
+workerの元となるTypeScriptファイルです。
 
-Vercel上で重いクローリングを直接実行すると不安定になりやすいため、workerを使う構成が入っています。
+担当範囲。
+
+- worker起動
+- APIまたはDBとの連携
+- クローリングjobの取得
+- クローリング処理の実行
+- 進捗・結果の保存
+
+workerを修正する場合は、基本的にこのファイルを確認してください。
 
 ---
 
-### `lib/db.ts`
+### `dist/worker/crawl-worker.cjs`
 
-DB接続設定です。
+ビルド後のworkerファイルです。
 
-`DATABASE_URL` と関係します。
+実行用に変換されたファイルのため、基本的には直接編集しません。
+
+修正が必要な場合は、まず `scripts/crawl-worker.ts` を修正し、ビルドして反映する流れが望ましいです。
+
+---
+
+### `release/MasterCrawlWorker/`
+
+配布・実行用のworker関連ファイルです。
+
+含まれるファイル。
+
+```text
+master-crawl-worker.exe
+worker-config.json
+worker-id.txt
+```
+
+注意点。
+
+- exeは別PCでworkerを起動するためのもの
+- configやidに環境依存情報が含まれる可能性がある
+- 秘密情報や接続情報が含まれていないか注意する
+- GitHubに含めてよい内容か確認する
+
+---
+
+### `scripts/mynavi_shinsotsu_unified.py`
+
+マイナビ新卒系のデータ取得・整形用Pythonスクリプトです。
+
+担当範囲として考えられるもの。
+
+- マイナビ新卒データの取得
+- 企業情報の整形
+- CSV / Excel出力
+- アプリ投入前のデータ準備
+- TypeScript側ロジックとの比較検証
+
+---
+
+### `sql/add_column.sql`
+
+DBカラム追加用SQLです。
+
+DBの項目を増やす場合に使用する可能性があります。
+
+注意点。
+
+- SQLを実行する前にバックアップを取る
+- API、画面、CSV、型定義も合わせて修正する
+- 既存データに影響が出ないか確認する
 
 ---
 
@@ -526,6 +693,7 @@ Vercel公開URLでは以下を想定します。
 DBカラムを追加・変更するときは、以下を必ず確認します。
 
 - DBテーブル
+- SQLファイル
 - APIのSELECT
 - APIのINSERT
 - APIのUPDATE
@@ -658,18 +826,19 @@ UI修正では以下を守ります。
 - npm scriptsから参照されていないか
 - Vercelやworkerで使われていないか
 - 状態保存や復元に使われていないか
+- release配下のworker実行に影響しないか
 - `npm run build` が通るか
 
 特に注意するもの。
 
 ```text
-app/companies/page.tsx
-.crawl-job-state/
-crawl-fob-state/
-devug_omron/
+dist/worker/crawl-worker.cjs
+release/MasterCrawlWorker/
+scripts/crawl-worker.ts
+sql/add_column.sql
 ```
 
-中身が空でも、参照されている場合は削除すると不具合になる可能性があります。
+ビルド済みファイル、配布用exe、SQLファイルは、不要に見えても運用で使っている可能性があります。
 
 ---
 
@@ -678,7 +847,7 @@ devug_omron/
 Claude Codeや別AIに依頼するときは、以下のように伝えると安全です。
 
 ```text
-まず README.md、CLAUDE.md、docs/引き継ぎ.md を読んでください。
+まず README.md、CLAUDE.md、docs/handover.md を読んでください。
 
 このプロジェクトでは、既存機能とクローリング精度を最優先で維持してください。
 不要そうなコードでも、参照関係を確認せずに削除しないでください。

@@ -1,0 +1,55 @@
+﻿master-view-app/
+├─ app
+│  ├─ api
+│  │  └─ master_data
+│  │     ├─ [id]
+│  │     │  └─ route.ts
+│  │     ├─ crawl
+│  │     │  └─ route.ts
+│  │     ├─ export
+│  │     │  └─ route.ts
+│  │     ├─ item_inspection
+│  │     │  └─ route.ts
+│  │     ├─ login
+│  │     │  └─ route.ts
+│  │     ├─ mynavi
+│  │     │  └─ route.ts
+│  │     └─ route.ts
+│  ├─ favicon.ico
+│  ├─ globals.css
+│  ├─ layout.tsx
+│  └─ page.tsx
+├─ dist
+│  └─ worker
+│     └─ crawl-worker.cjs
+├─ docs
+│  └─ handover.md
+├─ lib
+│  ├─ db.ts
+│  ├─ master-data-auth.ts
+│  └─ master-data-crawler.ts
+├─ public
+│  ├─ file.svg
+│  ├─ globe.svg
+│  ├─ next.svg
+│  ├─ vercel.svg
+│  └─ window.svg
+├─ release
+│  └─ MasterCrawlWorker
+│     ├─ master-crawl-worker.exe
+│     ├─ worker-config.json
+│     └─ worker-id.txt
+├─ scripts
+│  ├─ crawl-worker.ts
+│  └─ mynavi_shinsotsu_unified.py
+├─ sql
+│  └─ add_column.sql
+├─ .gitignore
+├─ CLAUDE.md
+├─ eslint.config.mjs
+├─ next.config.ts
+├─ package.json
+├─ package-lock.json
+├─ postcss.config.mjs
+├─ README.md
+└─ tsconfig.json
