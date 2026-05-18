@@ -2294,6 +2294,8 @@ export default function Home() {
   const [screenReady, setScreenReady] = useState(false);
 
   const fetchDataRequestIdRef = useRef(0);
+  const filterValueRequestIdRef = useRef<Partial<Record<FilterKey, number>>>({});
+  const crawlPreviewRequestIdRef = useRef(0);
 
   const handleLoginSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2490,6 +2492,9 @@ export default function Home() {
           : currentState.valueOffset;
       const currentLimit = currentState.valueLimit || 200;
 
+      const requestId = (filterValueRequestIdRef.current[key] ?? 0) + 1;
+      filterValueRequestIdRef.current[key] = requestId;
+
       setDraftColumnStates((prev) => {
         const next = cloneColumnStates(prev);
         next[key].valueLoading = true;
@@ -2531,6 +2536,10 @@ export default function Home() {
         }
 
         setDraftColumnStates((prev) => {
+          if (filterValueRequestIdRef.current[key] !== requestId) {
+            return prev;
+          }
+
           const next = cloneColumnStates(prev);
           const incomingValues = data.values || [];
           const incomingAllValues = Array.isArray(data.allValues)
@@ -2558,6 +2567,10 @@ export default function Home() {
           return next;
         });
       } catch (e) {
+        if (filterValueRequestIdRef.current[key] !== requestId) {
+          return;
+        }
+
         setDraftColumnStates((prev) => {
           const next = cloneColumnStates(prev);
           next[key].valueLoading = false;
@@ -5801,7 +5814,11 @@ const handlePreviewCsvExport = async () => {
     nextPage: number,
     previewTab: "candidate" | "multiple" | "excluded" = crawlPreviewTab
   ) => {
+    const requestId = ++crawlPreviewRequestIdRef.current;
+
     setCrawlPreviewLoading(true);
+    setCrawlPreviewRows([]);
+    setCrawlPreviewPage(nextPage);
 
     try {
       const res = await fetch("/api/master_data/crawl", {
@@ -5825,18 +5842,28 @@ const handlePreviewCsvExport = async () => {
         throw new Error(data.error || "クローリング結果確認の取得に失敗しました");
       }
 
+      if (crawlPreviewRequestIdRef.current !== requestId) {
+        return;
+      }
+
       applyCrawlStatus(data);
       setCrawlPreviewRows(data.previewRows || []);
       setCrawlPreviewTotalCount(data.previewTotal ?? 0);
       setCrawlPreviewPage(data.previewPage ?? nextPage);
     } catch (e) {
+      if (crawlPreviewRequestIdRef.current !== requestId) {
+        return;
+      }
+
       setCrawlError(
         e instanceof Error
           ? e.message
           : "クローリング結果確認の取得でエラーが発生しました"
       );
     } finally {
-      setCrawlPreviewLoading(false);
+      if (crawlPreviewRequestIdRef.current === requestId) {
+        setCrawlPreviewLoading(false);
+      }
     }
   };
 
@@ -6542,6 +6569,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     setCrawlPreviewTotalCount(0);
     setCrawlPreviewPage(1);
     setCrawlSelectedChanges({});
+    setCrawlPreviewTab("candidate");
+    crawlPreviewRequestIdRef.current += 1;
     setCrawlMessage("");
     stopCrawlElapsedTracking();
     setCrawlError("");

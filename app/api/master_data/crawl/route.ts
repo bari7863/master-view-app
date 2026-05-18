@@ -906,6 +906,31 @@ function uniqueTextValues(values: Array<string | null | undefined>) {
   return result;
 }
 
+function splitCrawlContactNumberCandidates(value: string | null | undefined) {
+  const text = normalizeNullableText(value);
+  if (!text) return [];
+
+  const separatedValues = text
+    .split(/\r?\n|[;；]/)
+    .map((item) => item.trim())
+    .filter((item) => item !== "");
+
+  if (separatedValues.length > 1) {
+    return uniqueTextValues(separatedValues);
+  }
+
+  const numberMatches =
+    text.match(
+      /(?:[^。\n\r;；、,]*?[：:]\s*)?(?:\+?81[-－ー―\s]?)?0[0-9０-９]{1,4}[-－ー―\s]?[0-9０-９]{1,4}[-－ー―\s]?[0-9０-９]{3,4}/g
+    ) ?? [];
+
+  if (numberMatches.length > 1) {
+    return uniqueTextValues(numberMatches);
+  }
+
+  return uniqueTextValues([text]);
+}
+
 function normalizeOfficeMatchText(value: string | null | undefined) {
   return normalizeNullableText(value)
     ?.normalize("NFKC")
@@ -1059,6 +1084,13 @@ function buildCrawlPayloadBundles(
       ? extractedCompany
       : fallbackCompany;
 
+  const fallbackPhoneCandidates = splitCrawlContactNumberCandidates(
+    extracted.phone
+  );
+  const fallbackFaxCandidates = splitCrawlContactNumberCandidates(
+    extracted.fax
+  );
+
   const officeSources: CrawlExtractedOffice[] =
     Array.isArray(extracted.offices) && extracted.offices.length > 0
       ? extracted.offices
@@ -1066,8 +1098,8 @@ function buildCrawlPayloadBundles(
           {
             office_name: null,
             company: baseCompany,
-            phone_candidates: extracted.phone ? [extracted.phone] : [],
-            fax_candidates: extracted.fax ? [extracted.fax] : [],
+            phone_candidates: fallbackPhoneCandidates,
+            fax_candidates: fallbackFaxCandidates,
             email_candidates: extracted.email ? [extracted.email] : [],
             zipcode_candidates: extracted.zipcode ? [extracted.zipcode] : [],
             address_candidates: extracted.address ? [extracted.address] : [],
@@ -1143,10 +1175,10 @@ function buildCrawlPayloadBundles(
       candidates: {
         phone: phoneCandidates.values.length > 0
           ? phoneCandidates.values
-          : uniqueTextValues([extracted.phone]),
+          : fallbackPhoneCandidates,
         fax: faxCandidates.values.length > 0
           ? faxCandidates.values
-          : uniqueTextValues([extracted.fax]),
+          : fallbackFaxCandidates,
         email: uniqueTextValues(
           sortedOfficeSources.flatMap((office) => office.email_candidates)
         ),
