@@ -501,6 +501,26 @@ npm run lint
 
 ---
 
+### worker再ビルド
+
+例：
+
+```bash
+npm run build:worker
+```
+
+---
+
+### exeを作り直す
+
+例：
+
+```bash
+npm run package:worker:win
+```
+
+---
+
 ### worker起動
 
 worker用のコマンドは `package.json` の `scripts` を確認してください。

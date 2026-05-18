@@ -10006,7 +10006,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               <div className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]">
                 <div className="flex min-h-full items-center justify-center">
                   <div
-                    className="flex w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    className="flex w-full max-w-[1500px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
@@ -10144,7 +10144,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       </div>
                     </div>
 
-                    <div className="max-h-[70vh] overflow-y-auto px-4 py-4 space-y-4">
+                    <div className="max-h-[70vh] overflow-auto px-4 py-4 space-y-4">
                       {crawlPreviewLoading ? (
                         <div className="px-4 py-12 text-center text-slate-400">
                           クローリング結果確認を読み込み中です...
@@ -10167,6 +10167,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                               {row.company || "(企業名なし)"}
                             </div>
 
+                            <div className="mt-1 text-xs text-slate-300 break-all">
+                              {row.source_row?.address || "-"}
+                            </div>
+
                             <div className="mt-1 text-xs break-all">
                               {row.website_url ? (
                                 <a
@@ -10185,7 +10189,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                             {row.changes.length > 0 && (
                               <div className="mt-4 space-y-2">
-                                <div className="grid grid-cols-[72px_160px_minmax(0,1fr)_minmax(0,1fr)] gap-2">
+                                <div className="grid min-w-[1120px] grid-cols-[72px_160px_minmax(360px,1fr)_minmax(460px,1.2fr)] gap-2">
                                   <div className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-300">
                                     反映
                                   </div>
@@ -10216,7 +10220,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                                   return (
                                     <div
                                       key={`${row.preview_row_id}-${change.key}-${changeIndex}`}
-                                      className="grid grid-cols-[72px_160px_minmax(0,1fr)_minmax(0,1fr)] gap-2"
+                                      className="grid min-w-[1120px] grid-cols-[72px_160px_minmax(360px,1fr)_minmax(460px,1.2fr)] gap-2"
                                     >
                                       <div className="flex items-center justify-center rounded-lg bg-white/5 px-2 py-2">
                                         <input

@@ -592,6 +592,24 @@ var CONTACT_INFO_LABELS = [
   /^連絡先情報$/i,
   /連絡先/i
 ];
+var REPRESENTATIVE_PHONE_LABELS = [
+  /^本社電話番号$/i,
+  /^代表電話$/i,
+  /^代表番号$/i,
+  /^電話番号$/i,
+  /^電話$/i,
+  /^TEL$/i,
+  /^Tel$/i,
+  /^tel$/i,
+  /本社電話番号/i,
+  /代表電話/i,
+  /代表番号/i,
+  /電話番号/i,
+  /\bTEL\b/i
+];
+var REPRESENTATIVE_PHONE_PAGE_KEYWORDS = /(会社概要|企業情報|会社案内|会社情報|法人概要|企業概要|会社データ|会社基本情報|基本情報|所在地|アクセス|本社|本店|代表電話|電話番号|TEL|contact|access|outline|profile|company|corporate|about|overview|information)/i;
+var REPRESENTATIVE_PHONE_WEAK_PAGE_KEYWORDS = /(採用|求人|募集|応募|エントリー|recruit|career|job|jobs|entry|news|blog|ブログ|column|コラム|topics|トピックス|予約|reservation|reserve|store|shop)/i;
+var REPRESENTATIVE_PHONE_DENY_CONTEXT_REGEX = /(採用|求人|募集|応募|エントリー|人事|採用担当|リクルート|recruit|career|job|jobs|entry|予約|予約専用|来店予約|問い合わせ専用|お客様相談|カスタマー|サポート|ヘルプ|コールセンター|フリーダイヤル|ナビダイヤル|携帯|スマートフォン|直通|担当直通|緊急|夜間|休日|個人|店舗|ショップ|店頭|資料請求|セミナー|イベント)/i;
 var ADDRESS_STOP_WORDS = /(連絡先|アクセス方法|アクセス|TEL|Tel|tel|電話|FAX|Fax|fax|営業時間|定休日|MAP|Google|メール|E-mail|E-mai|Mail|お問合せ|お問い合わせ|Copyright|著作権|All Rights Reserved|業種|創業|設立|資本金|従業員数|取引先|Top Message|代表ご挨拶|Our Philosophy|Our Policy|History|沿革|Access|Contact|会社情報|事業紹介|設備紹介|お知らせ)/i;
 var BUSINESS_STOP_WORDS = /(お問い合わせ|お問合せ|スタッフ紹介|仕事紹介|サービス紹介|NEWS|BLOG|COLUMN|会社概要|所在地|連絡先|TEL|FAX|営業時間|定休日)/i;
 var BUSINESS_HINT_WORDS = /(事業|業務|販売|企画|請負|開発|分譲|売買|施工|設計|運営|介護|福祉|サービス|広告|製造|卸|小売|コンサル|代理店|保険|デイサービス)/i;
@@ -901,6 +919,122 @@ function normalizePhone(value) {
     return formatJapanesePhone(digits);
   }
   return null;
+}
+function isLikelyRepresentativePhoneNumber(value) {
+  const digits = value.replace(/\D/g, "");
+  if (!/^0\d{9,10}$/.test(digits)) {
+    return false;
+  }
+  if (/^(070|080|090|050|020|0120|0570|0800)/.test(digits)) {
+    return false;
+  }
+  return true;
+}
+function isFaxOnlyPhoneContext(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return false;
+  const hasFaxLabel = /(?:FAX|ＦＡＸ|Fax|fax|ファックス)/i.test(normalized);
+  const hasPhoneLabel = /(?:TEL|Tel|tel|電話番号|電話|本社電話番号|代表電話|代表番号)/i.test(
+    normalized
+  );
+  return hasFaxLabel && !hasPhoneLabel;
+}
+function normalizeRepresentativePhone(value) {
+  if (isFaxOnlyPhoneContext(value)) {
+    return null;
+  }
+  const normalized = normalizePhone(value);
+  if (!normalized) return null;
+  return isLikelyRepresentativePhoneNumber(normalized) ? normalized : null;
+}
+function isWeakRepresentativePhoneContext(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return true;
+  return REPRESENTATIVE_PHONE_DENY_CONTEXT_REGEX.test(normalized);
+}
+function isRepresentativePhoneContextLine(value) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return false;
+  if (isFaxOnlyPhoneContext(normalized)) return false;
+  if (isWeakRepresentativePhoneContext(normalized)) return false;
+  return REPRESENTATIVE_PHONE_LABELS.some((regex) => regex.test(normalized));
+}
+function pickRepresentativePhonePairValue(pairs) {
+  for (const pair of pairs) {
+    const labelAndValue = `${pair.label} ${pair.value}`;
+    if (!REPRESENTATIVE_PHONE_LABELS.some((regex) => regex.test(pair.label))) {
+      continue;
+    }
+    if (isWeakRepresentativePhoneContext(labelAndValue)) {
+      continue;
+    }
+    const normalized = normalizeRepresentativePhone(pair.value) ?? normalizeRepresentativePhone(labelAndValue);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+function extractRepresentativePhoneFromLabeledText(text) {
+  const lines = text.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+  const labelPattern = buildLooseLabelPattern(REPRESENTATIVE_PHONE_LABELS);
+  const sameLinePattern = new RegExp(
+    `(?:${labelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:|\\.)?\\s*(0[\\d\\s-]{8,13}\\d)`,
+    "i"
+  );
+  const labelOnlyPattern = new RegExp(
+    `^(?:${labelPattern})\\s*(?:\\||\uFF5C|\xA6|\u2503|\u2016|\uFF0F|/|\uFF1A|:|\\.)?\\s*$`,
+    "i"
+  );
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = normalizeDigits(lines[i]);
+    if (isFaxOnlyPhoneContext(line)) {
+      continue;
+    }
+    if (isWeakRepresentativePhoneContext(line)) {
+      continue;
+    }
+    const sameLine = line.match(sameLinePattern);
+    if (sameLine?.[1]) {
+      const normalized = normalizeRepresentativePhone(line);
+      if (normalized) return normalized;
+    }
+    if (!labelOnlyPattern.test(line)) {
+      continue;
+    }
+    for (let j = i + 1; j < Math.min(lines.length, i + 4); j += 1) {
+      const nextLine = normalizeDigits(lines[j]);
+      if (isFaxOnlyPhoneContext(nextLine)) {
+        continue;
+      }
+      if (isWeakRepresentativePhoneContext(`${line} ${nextLine}`)) {
+        continue;
+      }
+      const normalized = normalizeRepresentativePhone(nextLine);
+      if (normalized) return normalized;
+    }
+  }
+  return null;
+}
+function getRepresentativePhonePageBoost(page) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+  let score = 0;
+  if (COMPANY_KEYWORDS.test(target)) score += 140;
+  if (CONTACT_KEYWORDS.test(target)) score += 80;
+  if (REPRESENTATIVE_PHONE_PAGE_KEYWORDS.test(target)) score += 180;
+  if (REPRESENTATIVE_PHONE_WEAK_PAGE_KEYWORDS.test(target)) score -= 260;
+  return score;
+}
+function canUseRepresentativePhonePage(page) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+  if (REPRESENTATIVE_PHONE_WEAK_PAGE_KEYWORDS.test(target) && !REPRESENTATIVE_PHONE_PAGE_KEYWORDS.test(target)) {
+    return false;
+  }
+  return true;
 }
 function normalizeFax(value) {
   const normalized = normalizeDigits(normalizeSpace(value)).replace(/[()（）]/g, "-");
@@ -1405,7 +1539,7 @@ function extractEmployeeCountFromPage(page, _sourceCompany, _sourceAddress) {
   if (!bestCandidate) return null;
   return bestCandidate;
 }
-var OFFICE_HEADER_REGEX = /^(.{1,40}?(?:本社|本店|支店|営業所|工場|事業所|センター))(?:(?:\s+|　+)(.*))?$/;
+var OFFICE_HEADER_REGEX = /^(.{1,50}?(?:本社|本店|支店|営業所|工場|事業所|センター|受注センター|サービスセンター|カスタマーサービスセンター|事業部|営業部|管理部|総務部|経理部|人事部|品質管理部|物流部|業務部|窓口|お問い合わせ先|連絡先|部|課|室|係|グループ|チーム))(?:(?:\s+|　+)(.*))?$/;
 var OFFICE_BLOCK_STOP_REGEX = /^(?:会社情報|業種|創業|設立|資本金|従業員数|取引先|Top Message|代表ご挨拶|Our Philosophy|経営理念|Our Policy|経営基本方針|History|沿革|Access|Contact|お見積|お気軽にご相談ください|事業紹介|設備紹介|お知らせ)$/i;
 function mergeOfficeResults(offices) {
   const map = /* @__PURE__ */ new Map();
@@ -1462,7 +1596,13 @@ function extractOfficeResults(pages, companyName, fallback) {
         normalizeZipcode(line),
         normalizeZipcode(nextLine),
         extractAddressFromText(line),
-        extractAddressFromText(nextLine)
+        extractAddressFromText(nextLine),
+        normalizeRepresentativePhone(line),
+        normalizeRepresentativePhone(nextLine),
+        normalizeFax(line),
+        normalizeFax(nextLine),
+        normalizeEmail(line),
+        normalizeEmail(nextLine)
       ].some(Boolean);
       if (looksLikeOfficeStart) {
         if (current) {
@@ -1490,9 +1630,11 @@ function extractOfficeResults(pages, companyName, fallback) {
       const officeName = normalizeSpace(block.office_name);
       const company = companyName && officeName && !companyName.includes(officeName) ? `${companyName} ${officeName}` : companyName ?? officeName;
       const phoneCandidates = uniqueNonEmpty(
-        block.lines.filter(
-          (line) => /(?:TEL|Tel|tel|電話)/i.test(line) && !/(?:FAX|ＦＡＸ|Fax|fax)/i.test(line)
-        ).map((line) => normalizePhone(line))
+        block.lines.filter((line) => {
+          if (isFaxOnlyPhoneContext(line)) return false;
+          if (isWeakRepresentativePhoneContext(line)) return false;
+          return isRepresentativePhoneContextLine(line) || normalizeRepresentativePhone(line) !== null;
+        }).map((line) => normalizeRepresentativePhone(line))
       );
       const faxCandidates = uniqueNonEmpty(
         block.lines.filter((line) => /(?:FAX|ＦＡＸ|Fax|fax)/i.test(line)).map((line) => normalizeFax(line))
@@ -2579,11 +2721,50 @@ function pickCandidatePageUrls(topPage, selectedFieldSet, focus) {
   }
   return urls.slice(0, getFocusCandidatePageLimit(focus));
 }
+function normalizeContactCandidateNumber(value) {
+  const normalized = normalizeDigits(normalizeSpace(value)).replace(/[－ー―]/g, "-").replace(/\s+/g, "-");
+  const matched = normalized.match(
+    /(?:\+?81[-\s]?)?0[0-9]{1,4}[-\s]?[0-9]{1,4}[-\s]?[0-9]{3,4}/
+  );
+  if (!matched?.[0]) return null;
+  return matched[0].replace(/\s+/g, "-").replace(/-+/g, "-").trim();
+}
+function uniqueContactCandidateValues(values) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const value of values) {
+    const normalized = value ? normalizeContactCandidateNumber(value) : null;
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+function collectContactNumberCandidatesFromPages(pages, type) {
+  const values = [];
+  const numberRegex = /(?:\+?81[-－ー―\s]?)?0[0-9０-９]{1,4}[-－ー―\s]?[0-9０-９]{1,4}[-－ー―\s]?[0-9０-９]{3,4}/g;
+  for (const page of pages) {
+    const lines = page.structuredText.split("\n").map((line) => normalizeSpace(line)).filter((line) => line !== "");
+    for (const line of lines) {
+      const isFaxLine = /FAX|ＦＡＸ|ファックス/i.test(line);
+      const isPhoneLine = /TEL|ＴＥＬ|電話|代表番号|代表電話|連絡先/i.test(line);
+      if (type === "phone" && isFaxLine) {
+        continue;
+      }
+      if (type === "phone" && !isPhoneLine) {
+        continue;
+      }
+      if (type === "fax" && !isFaxLine) {
+        continue;
+      }
+      const matches = line.match(numberRegex) ?? [];
+      values.push(...matches);
+    }
+  }
+  return uniqueContactCandidateValues(values);
+}
 function hasSelectedOfficeFields(selectedFieldSet) {
   return hasSelectedCrawlField(selectedFieldSet, "phone") || hasSelectedCrawlField(selectedFieldSet, "fax") || hasSelectedCrawlField(selectedFieldSet, "email") || hasSelectedCrawlField(selectedFieldSet, "zipcode") || hasSelectedCrawlField(selectedFieldSet, "address");
-}
-function getRepresentativeEnoughScore(_selectedFieldSet) {
-  return 980;
 }
 function canStopFetchingAdditionalPages(best, selectedFieldSet, focus) {
   switch (focus) {
@@ -2680,16 +2861,38 @@ function processPage(page, best, selectedFieldSet, sourceContext, focus) {
   const phonePairValue = pickPairValue(pairs, PHONE_LABELS) ?? "";
   const faxPairValue = pickPairValue(pairs, FAX_LABELS) ?? "";
   const contactPairValue = pickPairValue(pairs, CONTACT_INFO_LABELS) ?? "";
-  if (shouldProcessFieldInFocus(selectedFieldSet, "phone", focus)) {
-    addBest(best, "phone", normalizePhone(phonePairValue), 220 + boost);
-    addBest(best, "phone", normalizePhone(contactPairValue), 210 + boost);
+  if (shouldProcessFieldInFocus(selectedFieldSet, "phone", focus) && canUseRepresentativePhonePage(page)) {
+    const representativePhonePageBoost = getRepresentativePhonePageBoost(page);
+    const representativePhonePairValue = pickRepresentativePhonePairValue(pairs);
+    const representativeContactPhoneValue = extractRepresentativePhoneFromLabeledText(contactPairValue);
+    const representativeStructuredPhoneValue = extractRepresentativePhoneFromLabeledText(page.structuredText);
+    const representativeTelValue = !isWeakRepresentativePhoneContext(
+      `${page.finalUrl} ${page.title} ${page.h1}`
+    ) ? normalizeRepresentativePhone(decodeURIComponent(telMatch?.[1] || "")) : null;
     addBest(
       best,
       "phone",
-      normalizePhone(decodeURIComponent(telMatch?.[1] || "")),
-      150 + boost
+      representativePhonePairValue,
+      420 + boost + representativePhonePageBoost
     );
-    addBest(best, "phone", normalizePhone(page.text), 40 + boost);
+    addBest(
+      best,
+      "phone",
+      representativeContactPhoneValue,
+      360 + boost + representativePhonePageBoost
+    );
+    addBest(
+      best,
+      "phone",
+      representativeStructuredPhoneValue,
+      340 + boost + representativePhonePageBoost
+    );
+    addBest(
+      best,
+      "phone",
+      representativeTelValue,
+      260 + boost + representativePhonePageBoost
+    );
   }
   if (shouldProcessFieldInFocus(selectedFieldSet, "fax", focus)) {
     addBest(best, "fax", normalizeFax(faxPairValue), 220 + boost);
@@ -2822,7 +3025,6 @@ async function crawlCompanyWebsite(websiteUrl, selectedFields = DEFAULT_CRAWL_SE
   const best = {};
   const shouldExtractOffices = hasSelectedOfficeFields(selectedFieldSet);
   const collectedPages = [];
-  const representativeEnoughScore = getRepresentativeEnoughScore(selectedFieldSet);
   const pageFetchTimeoutMs = 1e4;
   throwIfCrawlShouldStop(runtimeOptions);
   const topPage = await fetchTopPage(
@@ -3000,6 +3202,16 @@ async function crawlCompanyWebsite(websiteUrl, selectedFields = DEFAULT_CRAWL_SE
     zipcode: best.zipcode?.value ?? null,
     address: best.address?.value ?? null
   }) : [];
+  const phoneCandidates = hasSelectedCrawlField(selectedFieldSet, "phone") ? uniqueContactCandidateValues([
+    best.phone?.value ?? null,
+    ...collectContactNumberCandidatesFromPages(collectedPages, "phone"),
+    ...offices.flatMap((office) => office.phone_candidates)
+  ]) : [];
+  const faxCandidates = hasSelectedCrawlField(selectedFieldSet, "fax") ? uniqueContactCandidateValues([
+    best.fax?.value ?? null,
+    ...collectContactNumberCandidatesFromPages(collectedPages, "fax"),
+    ...offices.flatMap((office) => office.fax_candidates)
+  ]) : [];
   const representativeRawValue = hasSelectedCrawlField(
     selectedFieldSet,
     "representative_name"
@@ -3008,8 +3220,10 @@ async function crawlCompanyWebsite(websiteUrl, selectedFields = DEFAULT_CRAWL_SE
     company: hasSelectedCrawlField(selectedFieldSet, "company") ? best.company?.value ?? null : null,
     website_url: hasSelectedCrawlField(selectedFieldSet, "website_url") ? best.website_url?.value ?? null : null,
     form_url: hasSelectedCrawlField(selectedFieldSet, "form_url") ? best.form_url?.value ?? null : null,
-    phone: hasSelectedCrawlField(selectedFieldSet, "phone") ? best.phone?.value ?? null : null,
-    fax: hasSelectedCrawlField(selectedFieldSet, "fax") ? best.fax?.value ?? null : null,
+    phone: hasSelectedCrawlField(selectedFieldSet, "phone") ? best.phone?.value ?? phoneCandidates[0] ?? null : null,
+    fax: hasSelectedCrawlField(selectedFieldSet, "fax") ? best.fax?.value ?? faxCandidates[0] ?? null : null,
+    phone_candidates: phoneCandidates,
+    fax_candidates: faxCandidates,
     email: hasSelectedCrawlField(selectedFieldSet, "email") ? best.email?.value ?? null : null,
     zipcode: hasSelectedCrawlField(selectedFieldSet, "zipcode") ? best.zipcode?.value ?? null : null,
     address: hasSelectedCrawlField(selectedFieldSet, "address") ? best.address?.value ?? null : null,
@@ -3076,6 +3290,7 @@ var config = loadConfig();
 var workerId = loadOrCreateWorkerId();
 var HEARTBEAT_INTERVAL_MS = 30 * 1e3;
 var TARGET_BATCH_SIZE = 10;
+var REPORT_BATCH_SIZE = 10;
 var lastHeartbeatAt = 0;
 var status = {
   ok: true,
@@ -3178,8 +3393,8 @@ async function claimTargets(jobId) {
   });
 }
 async function reportTargets(jobId, targetResults) {
-  if (targetResults.length === 0) return;
-  await callApi({
+  if (targetResults.length === 0) return null;
+  return await callApi({
     action: "worker_report_targets",
     jobId,
     targetResults
@@ -3251,13 +3466,46 @@ async function processJob(jobId) {
       break;
     }
     status.lastMessage = `\u307E\u3068\u3081\u53D6\u5F97\u4E2D: ${targets.length}\u4EF6`;
-    const results = [];
+    let shouldLeaveJob = false;
+    let pendingResults = [];
+    const flushResults = async () => {
+      if (pendingResults.length === 0) return null;
+      const reportRes = await reportTargets(jobId, pendingResults);
+      pendingResults = [];
+      return reportRes;
+    };
     for (const target of targets) {
       await sendHeartbeatIfNeeded();
       const result = await processTarget(jobId, target);
-      results.push(result);
+      pendingResults.push(result);
+      if (pendingResults.length >= REPORT_BATCH_SIZE) {
+        const reportRes = await flushResults();
+        if (reportRes?.completed) {
+          status.lastMessage = `\u30B8\u30E7\u30D6\u5B8C\u4E86: ${jobId}`;
+          shouldLeaveJob = true;
+          break;
+        }
+        if (reportRes?.paused || reportRes?.jobStatus === "paused") {
+          status.lastMessage = `\u30B8\u30E7\u30D6\u4E2D\u65AD: ${jobId}`;
+          shouldLeaveJob = true;
+          break;
+        }
+      }
     }
-    await reportTargets(jobId, results);
+    if (!shouldLeaveJob) {
+      const reportRes = await flushResults();
+      if (reportRes?.completed) {
+        status.lastMessage = `\u30B8\u30E7\u30D6\u5B8C\u4E86: ${jobId}`;
+        shouldLeaveJob = true;
+      }
+      if (reportRes?.paused || reportRes?.jobStatus === "paused") {
+        status.lastMessage = `\u30B8\u30E7\u30D6\u4E2D\u65AD: ${jobId}`;
+        shouldLeaveJob = true;
+      }
+    }
+    if (shouldLeaveJob) {
+      break;
+    }
   }
   status.running = false;
   status.currentJobId = null;

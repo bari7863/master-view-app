@@ -264,6 +264,7 @@ type CrawlRequestBody = {
   previewPage?: number;
   previewPageSize?: number;
   previewTab?: "candidate" | "multiple" | "excluded";
+  deferPersist?: boolean;
 };
 
 type DbClient = PoolClient;
@@ -931,6 +932,32 @@ function splitCrawlContactNumberCandidates(value: string | null | undefined) {
   return uniqueTextValues([text]);
 }
 
+function getExtractedContactCandidateList(
+  extracted: CrawlExtractedFields,
+  key: "phone" | "fax"
+) {
+  const extended = extracted as CrawlExtractedFields & {
+    phone_candidates?: unknown;
+    fax_candidates?: unknown;
+  };
+
+  const directCandidates =
+    key === "phone" && Array.isArray(extended.phone_candidates)
+      ? extended.phone_candidates
+      : key === "fax" && Array.isArray(extended.fax_candidates)
+      ? extended.fax_candidates
+      : [];
+
+  const fallbackCandidates = splitCrawlContactNumberCandidates(
+    key === "phone" ? extracted.phone : extracted.fax
+  );
+
+  return uniqueTextValues([
+    ...directCandidates.map((value) => String(value ?? "")),
+    ...fallbackCandidates,
+  ]);
+}
+
 function normalizeOfficeMatchText(value: string | null | undefined) {
   return normalizeNullableText(value)
     ?.normalize("NFKC")
@@ -1084,11 +1111,13 @@ function buildCrawlPayloadBundles(
       ? extractedCompany
       : fallbackCompany;
 
-  const fallbackPhoneCandidates = splitCrawlContactNumberCandidates(
-    extracted.phone
+  const fallbackPhoneCandidates = getExtractedContactCandidateList(
+    extracted,
+    "phone"
   );
-  const fallbackFaxCandidates = splitCrawlContactNumberCandidates(
-    extracted.fax
+  const fallbackFaxCandidates = getExtractedContactCandidateList(
+    extracted,
+    "fax"
   );
 
   const officeSources: CrawlExtractedOffice[] =
@@ -1105,6 +1134,34 @@ function buildCrawlPayloadBundles(
             address_candidates: extracted.address ? [extracted.address] : [],
           },
         ];
+  
+  const existingPhoneCandidateSet = new Set(
+    uniqueTextValues(officeSources.flatMap((office) => office.phone_candidates))
+  );
+
+  const existingFaxCandidateSet = new Set(
+    uniqueTextValues(officeSources.flatMap((office) => office.fax_candidates))
+  );
+
+  const missingPhoneCandidates = fallbackPhoneCandidates.filter(
+    (candidate) => !existingPhoneCandidateSet.has(candidate)
+  );
+
+  const missingFaxCandidates = fallbackFaxCandidates.filter(
+    (candidate) => !existingFaxCandidateSet.has(candidate)
+  );
+
+  if (missingPhoneCandidates.length > 0 || missingFaxCandidates.length > 0) {
+    officeSources.push({
+      office_name: "電話番号候補",
+      company: baseCompany,
+      phone_candidates: missingPhoneCandidates,
+      fax_candidates: missingFaxCandidates,
+      email_candidates: [],
+      zipcode_candidates: [],
+      address_candidates: [],
+    });
+  }
 
   const sortedOfficeSources = [...officeSources].sort((a, b) => {
     const scoreA = scoreOfficeSourceMatch(a, sourceCompany, sourceAddress);
@@ -3115,7 +3172,10 @@ async function reportWorkerTargetResult(
       "DB上の対象行が見つかりません"
     );
 
-    await persistCrawlJobState(job);
+    if (!body.deferPersist) {
+      await persistCrawlJobState(job);
+    }
+
     return;
   }
 
@@ -3215,13 +3275,15 @@ async function reportWorkerTargetResult(
       job.paused = false;
     }
 
-    await persistCrawlJobState(job);
+    if (!body.deferPersist) {
+      await persistCrawlJobState(job);
 
-    await updateJobWorkerColumns(client, job.jobId, {
-      status: job.completed ? "completed" : "running",
-      workerId,
-      message: job.completed ? "完了" : "処理継続中",
-    });
+      await updateJobWorkerColumns(client, job.jobId, {
+        status: job.completed ? "completed" : "running",
+        workerId,
+        message: job.completed ? "完了" : "処理継続中",
+      });
+    }
   } catch (error) {
     await markCrawlTargetStatus(
       client,
@@ -3241,7 +3303,9 @@ async function reportWorkerTargetResult(
     job.currentCompany = null;
     job.currentWebsiteUrl = null;
 
-    await persistCrawlJobState(job);
+    if (!body.deferPersist) {
+      await persistCrawlJobState(job);
+    }
   }
 }
 
@@ -3265,8 +3329,17 @@ async function reportWorkerTargetResults(
       extracted: result.extracted ?? null,
       targetStartedAt: result.targetStartedAt ?? null,
       targetFinishedAt: result.targetFinishedAt ?? null,
+      deferPersist: true,
     });
   }
+
+  await persistCrawlJobState(job);
+
+  await updateJobWorkerColumns(client, job.jobId, {
+    status: job.completed ? "completed" : "running",
+    workerId,
+    message: job.completed ? "完了" : "処理継続中",
+  });
 }
 
 async function fetchCrawlElapsedMsFromTargets(

@@ -14,6 +14,8 @@ export type CrawlExtractedFields = {
   form_url: string | null;
   phone: string | null;
   fax: string | null;
+  phone_candidates?: string[];
+  fax_candidates?: string[];
   email: string | null;
   zipcode: string | null;
   address: string | null;
@@ -3948,6 +3950,78 @@ function pickCandidatePageUrls(
   return urls.slice(0, getFocusCandidatePageLimit(focus));
 }
 
+function normalizeContactCandidateNumber(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value))
+    .replace(/[－ー―]/g, "-")
+    .replace(/\s+/g, "-");
+
+  const matched = normalized.match(
+    /(?:\+?81[-\s]?)?0[0-9]{1,4}[-\s]?[0-9]{1,4}[-\s]?[0-9]{3,4}/
+  );
+
+  if (!matched?.[0]) return null;
+
+  return matched[0]
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .trim();
+}
+
+function uniqueContactCandidateValues(
+  values: Array<string | null | undefined>
+) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const normalized = value ? normalizeContactCandidateNumber(value) : null;
+    if (!normalized || seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result;
+}
+
+function collectContactNumberCandidatesFromPages(
+  pages: PageData[],
+  type: "phone" | "fax"
+) {
+  const values: string[] = [];
+  const numberRegex =
+    /(?:\+?81[-－ー―\s]?)?0[0-9０-９]{1,4}[-－ー―\s]?[0-9０-９]{1,4}[-－ー―\s]?[0-9０-９]{3,4}/g;
+
+  for (const page of pages) {
+    const lines = page.structuredText
+      .split("\n")
+      .map((line) => normalizeSpace(line))
+      .filter((line) => line !== "");
+
+    for (const line of lines) {
+      const isFaxLine = /FAX|ＦＡＸ|ファックス/i.test(line);
+      const isPhoneLine = /TEL|ＴＥＬ|電話|代表番号|代表電話|連絡先/i.test(line);
+
+      if (type === "phone" && isFaxLine) {
+        continue;
+      }
+
+      if (type === "phone" && !isPhoneLine) {
+        continue;
+      }
+
+      if (type === "fax" && !isFaxLine) {
+        continue;
+      }
+
+      const matches = line.match(numberRegex) ?? [];
+      values.push(...matches);
+    }
+  }
+
+  return uniqueContactCandidateValues(values);
+}
+
 function hasSelectedOfficeFields(
   selectedFieldSet: Set<CrawlSelectableFieldKey>
 ) {
@@ -4568,6 +4642,22 @@ export async function crawlCompanyWebsite(
       })
     : [];
 
+  const phoneCandidates = hasSelectedCrawlField(selectedFieldSet, "phone")
+    ? uniqueContactCandidateValues([
+        best.phone?.value ?? null,
+        ...collectContactNumberCandidatesFromPages(collectedPages, "phone"),
+        ...offices.flatMap((office) => office.phone_candidates),
+      ])
+    : [];
+
+  const faxCandidates = hasSelectedCrawlField(selectedFieldSet, "fax")
+    ? uniqueContactCandidateValues([
+        best.fax?.value ?? null,
+        ...collectContactNumberCandidatesFromPages(collectedPages, "fax"),
+        ...offices.flatMap((office) => office.fax_candidates),
+      ])
+    : [];
+
   const representativeRawValue = hasSelectedCrawlField(
     selectedFieldSet,
     "representative_name"
@@ -4586,11 +4676,13 @@ export async function crawlCompanyWebsite(
       ? best.form_url?.value ?? null
       : null,
     phone: hasSelectedCrawlField(selectedFieldSet, "phone")
-      ? best.phone?.value ?? null
+      ? best.phone?.value ?? phoneCandidates[0] ?? null
       : null,
     fax: hasSelectedCrawlField(selectedFieldSet, "fax")
-      ? best.fax?.value ?? null
+      ? best.fax?.value ?? faxCandidates[0] ?? null
       : null,
+    phone_candidates: phoneCandidates,
+    fax_candidates: faxCandidates,
     email: hasSelectedCrawlField(selectedFieldSet, "email")
       ? best.email?.value ?? null
       : null,

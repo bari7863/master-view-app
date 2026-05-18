@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "build:worker": "esbuild scripts/crawl-worker.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/worker/crawl-worker.cjs --external:playwright --external:playwright-core --external:pdf-parse",
+    "worker": "node dist/worker/crawl-worker.cjs",
     "package:worker:win": "pkg dist/worker/crawl-worker.cjs --targets node20-win-x64 --output release/MasterCrawlWorker/master-crawl-worker.exe"
   },
   "dependencies": {
