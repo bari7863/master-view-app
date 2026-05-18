@@ -503,6 +503,17 @@ npm run lint
 
 ### worker再ビルド
 
+workerは、Vercel上ではなくPC側で動くクローリング専用の処理です。
+
+そのため、下記のようなファイルを修正した場合は、workerを再ビルドする必要があります。
+
+- `crawl-worker.ts`
+- `lib/master-data-crawler.ts`
+- worker側で使っているクローリング処理
+- workerの処理件数、送信間隔、タイムアウトなどの設定
+
+反対に、画面だけの修正やVercel側APIだけの修正であれば、基本的にworker再ビルドは不要です。
+
 例：
 
 ```bash
@@ -512,6 +523,9 @@ npm run build:worker
 ---
 
 ### exeを作り直す
+
+exeは下記ディレクトリにあります。
+release/MasterCrawlWorker/master-crawl-worker.exe
 
 例：
 
@@ -538,6 +552,29 @@ npm run crawl-worker
 ```
 
 実際のコマンド名は、現在の `package.json` に合わせてください。
+
+---
+
+## worker反映手順
+
+npm run worker で起動している場合
+
+```bash
+Ctrl + C
+npm run build:worker
+npm run worker
+```
+
+exeで起動している場合
+
+```bash
+Ctrl + C
+npm run build:worker
+npm run package:worker:win
+```
+
+その後、新しく作成された下記exeを起動します。
+release/MasterCrawlWorker/master-crawl-worker.exe
 
 ---
 

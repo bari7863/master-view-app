@@ -958,6 +958,28 @@ function getExtractedContactCandidateList(
   ]);
 }
 
+function normalizeContactNumberForCompare(value: string | null | undefined) {
+  const text = normalizeNullableText(value);
+  if (!text) return "";
+
+  const digits = text.normalize("NFKC").replace(/[^0-9]/g, "");
+
+  if (digits.startsWith("81") && digits.length >= 11) {
+    return `0${digits.slice(2)}`;
+  }
+
+  return digits;
+}
+
+function hasSameContactNumberCandidate(values: string[], target: string) {
+  const normalizedTarget = normalizeContactNumberForCompare(target);
+  if (!normalizedTarget) return false;
+
+  return values.some(
+    (value) => normalizeContactNumberForCompare(value) === normalizedTarget
+  );
+}
+
 function normalizeOfficeMatchText(value: string | null | undefined) {
   return normalizeNullableText(value)
     ?.normalize("NFKC")
@@ -1135,20 +1157,20 @@ function buildCrawlPayloadBundles(
           },
         ];
   
-  const existingPhoneCandidateSet = new Set(
-    uniqueTextValues(officeSources.flatMap((office) => office.phone_candidates))
+  const existingPhoneCandidates = uniqueTextValues(
+    officeSources.flatMap((office) => office.phone_candidates)
   );
 
-  const existingFaxCandidateSet = new Set(
-    uniqueTextValues(officeSources.flatMap((office) => office.fax_candidates))
+  const existingFaxCandidates = uniqueTextValues(
+    officeSources.flatMap((office) => office.fax_candidates)
   );
 
   const missingPhoneCandidates = fallbackPhoneCandidates.filter(
-    (candidate) => !existingPhoneCandidateSet.has(candidate)
+    (candidate) => !hasSameContactNumberCandidate(existingPhoneCandidates, candidate)
   );
 
   const missingFaxCandidates = fallbackFaxCandidates.filter(
-    (candidate) => !existingFaxCandidateSet.has(candidate)
+    (candidate) => !hasSameContactNumberCandidate(existingFaxCandidates, candidate)
   );
 
   if (missingPhoneCandidates.length > 0 || missingFaxCandidates.length > 0) {
@@ -2545,12 +2567,15 @@ async function buildPublicPreviewRows(
   const excludedRes = await client.query(
     `
       SELECT
-        row_id::text,
-        company,
-        website_url,
-        skip_reason,
-        error_message
+        t.row_id::text,
+        t.company,
+        COALESCE(t.address, md."住所") AS address,
+        t.website_url,
+        t.skip_reason,
+        t.error_message
       FROM public.master_data_crawl_targets AS t
+      LEFT JOIN public.master_data AS md
+        ON md.id = t.row_id
       WHERE t.job_id = $1
         AND t.status IN ('done', 'skipped', 'failed')
         AND NOT EXISTS (
@@ -2579,7 +2604,7 @@ async function buildPublicPreviewRows(
       source_row: {
         company: normalizeNullableText(row.company),
         zipcode: null,
-        address: null,
+        address: normalizeNullableText(row.address),
         big_industry: null,
         small_industry: null,
         company_kana: null,
