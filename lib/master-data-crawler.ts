@@ -2232,7 +2232,7 @@ function extractEmployeeCountFromPage(
 }
 
 const OFFICE_HEADER_REGEX =
-  /^(.{1,40}?(?:本社|本店|支店|営業所|工場|事業所|センター))(?:(?:\s+|　+)(.*))?$/;
+  /^(.{1,50}?(?:本社|本店|支店|営業所|工場|事業所|センター|受注センター|サービスセンター|カスタマーサービスセンター|事業部|営業部|管理部|総務部|経理部|人事部|品質管理部|物流部|業務部|窓口|お問い合わせ先|連絡先|部|課|室|係|グループ|チーム))(?:(?:\s+|　+)(.*))?$/;
 
 const OFFICE_BLOCK_STOP_REGEX =
   /^(?:会社情報|業種|創業|設立|資本金|従業員数|取引先|Top Message|代表ご挨拶|Our Philosophy|経営理念|Our Policy|経営基本方針|History|沿革|Access|Contact|お見積|お気軽にご相談ください|事業紹介|設備紹介|お知らせ)$/i;
@@ -2316,6 +2316,12 @@ function extractOfficeResults(
           normalizeZipcode(nextLine),
           extractAddressFromText(line),
           extractAddressFromText(nextLine),
+          normalizeRepresentativePhone(line),
+          normalizeRepresentativePhone(nextLine),
+          normalizeFax(line),
+          normalizeFax(nextLine),
+          normalizeEmail(line),
+          normalizeEmail(nextLine),
         ].some(Boolean);
 
       if (looksLikeOfficeStart) {
@@ -2354,7 +2360,15 @@ function extractOfficeResults(
 
       const phoneCandidates = uniqueNonEmpty(
         block.lines
-          .filter((line) => isRepresentativePhoneContextLine(line))
+          .filter((line) => {
+            if (isFaxOnlyPhoneContext(line)) return false;
+            if (isWeakRepresentativePhoneContext(line)) return false;
+
+            return (
+              isRepresentativePhoneContextLine(line) ||
+              normalizeRepresentativePhone(line) !== null
+            );
+          })
           .map((line) => normalizeRepresentativePhone(line))
       );
 

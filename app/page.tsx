@@ -2035,7 +2035,11 @@ export default function Home() {
 
   const [crawlPreviewOpen, setCrawlPreviewOpen] = useState(false);
   const [crawlPreviewRows, setCrawlPreviewRows] = useState<CrawlPreviewRow[]>([]);
-  const [crawlPreviewTab, setCrawlPreviewTab] = useState<"candidate" | "excluded">("candidate");
+
+  const [crawlPreviewTab, setCrawlPreviewTab] = useState<
+    "candidate" | "multiple" | "excluded"
+  >("candidate");
+
   const [crawlPreviewPage, setCrawlPreviewPage] = useState(1);
   const [crawlPreviewTotalCount, setCrawlPreviewTotalCount] = useState(0);
   const [crawlPreviewLoading, setCrawlPreviewLoading] = useState(false);
@@ -5701,9 +5705,7 @@ const handlePreviewCsvExport = async () => {
   };
 
   const getDefaultCrawlPreviewValue = (change: CrawlPreviewChange) => {
-    return change.candidates.length > 1
-      ? null
-      : change.after ?? change.candidates[0] ?? null;
+    return change.after ?? change.candidates[0] ?? null;
   };
 
   const getCrawlPreviewSelectedValue = (
@@ -5797,7 +5799,7 @@ const handlePreviewCsvExport = async () => {
   const fetchCrawlPreviewPage = async (
     jobId: string,
     nextPage: number,
-    previewTab: "candidate" | "excluded" = crawlPreviewTab
+    previewTab: "candidate" | "multiple" | "excluded" = crawlPreviewTab
   ) => {
     setCrawlPreviewLoading(true);
 
@@ -5846,7 +5848,7 @@ const handlePreviewCsvExport = async () => {
   };
 
   const handleChangeCrawlPreviewTab = async (
-    nextTab: "candidate" | "excluded"
+    nextTab: "candidate" | "multiple" | "excluded"
   ) => {
     if (!crawlJobId) return;
     setCrawlPreviewTab(nextTab);
@@ -10025,7 +10027,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     <div className="border-b border-white/10 px-4 py-3">
                       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div className="text-xs text-slate-400">
-                          {crawlPreviewTab === "candidate" ? "保存候補" : "候補外"} {crawlPreviewTotalCount.toLocaleString()}件中{" "}
+                          {crawlPreviewTab === "candidate"
+                            ? "保存候補"
+                            : crawlPreviewTab === "multiple"
+                            ? "複数候補"
+                            : "候補外"} {crawlPreviewTotalCount.toLocaleString()}件中{" "}
                           {crawlPreviewTotalCount === 0
                             ? 0
                             : (crawlPreviewPage - 1) * CRAWL_PREVIEW_PAGE_SIZE + 1}
@@ -10049,6 +10055,19 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                             }`}
                           >
                             候補
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => void handleChangeCrawlPreviewTab("multiple")}
+                            disabled={crawlPreviewLoading}
+                            className={`h-8 rounded-lg px-3 text-xs font-medium transition ${
+                              crawlPreviewTab === "multiple"
+                                ? "bg-sky-500 text-white"
+                                : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                            }`}
+                          >
+                            複数候補
                           </button>
 
                           <button
@@ -10105,6 +10124,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         <div className="px-4 py-12 text-center text-slate-500">
                           {crawlPreviewTab === "candidate"
                             ? "保存候補はありません"
+                            : crawlPreviewTab === "multiple"
+                            ? "複数候補はありません"
                             : "候補外はありません"}
                         </div>
                       ) : (
@@ -10135,7 +10156,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                             {row.changes.length > 0 && (
                               <div className="mt-4 space-y-2">
-                                <div className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]">
+                                <div className="grid grid-cols-[72px_160px_minmax(0,1fr)_minmax(0,1fr)] gap-2">
                                   <div className="rounded-lg bg-white/5 px-3 py-2 text-center text-xs font-semibold text-slate-300">
                                     反映
                                   </div>
@@ -10166,7 +10187,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                                   return (
                                     <div
                                       key={`${row.preview_row_id}-${change.key}-${changeIndex}`}
-                                      className="grid gap-2 md:grid-cols-[72px_160px_1fr_1fr]"
+                                      className="grid grid-cols-[72px_160px_minmax(0,1fr)_minmax(0,1fr)] gap-2"
                                     >
                                       <div className="flex items-center justify-center rounded-lg bg-white/5 px-2 py-2">
                                         <input
@@ -10205,7 +10226,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                                                 return (
                                                   <label
                                                     key={`${row.preview_row_id}-${change.key}-${candidateIndex}`}
-                                                    className="flex items-start gap-2"
+                                                    className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-2"
                                                   >
                                                     <input
                                                       type="checkbox"

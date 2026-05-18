@@ -263,7 +263,7 @@ type CrawlRequestBody = {
   selectedFields?: CrawlSelectableFieldKey[];
   previewPage?: number;
   previewPageSize?: number;
-  previewTab?: "candidate" | "excluded";
+  previewTab?: "candidate" | "multiple" | "excluded";
 };
 
 type DbClient = PoolClient;
@@ -858,6 +858,7 @@ function normalizeSelectedFields(selectedFields?: CrawlSelectableFieldKey[]) {
 type CrawlPayloadBundle = {
   payload: CrawlPayload;
   candidates: Record<CrawlPayloadCandidateKey, string[]>;
+  officeLabelMap?: Partial<Record<CrawlPayloadCandidateKey, Record<string, string>>>;
   forceCompanyUpdate: boolean;
 };
 
@@ -905,6 +906,134 @@ function uniqueTextValues(values: Array<string | null | undefined>) {
   return result;
 }
 
+function normalizeOfficeMatchText(value: string | null | undefined) {
+  return normalizeNullableText(value)
+    ?.normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/[‐-‒–—―ー－-]/g, "")
+    .replace(/[（）()[\]【】「」『』]/g, "")
+    .toLowerCase() ?? "";
+}
+
+function removeCorporateWordsForOfficeMatch(value: string) {
+  return value
+    .replace(/株式会社|有限会社|合同会社|合資会社|合名会社|㈱|（株）|\(株\)/g, "")
+    .trim();
+}
+
+function scoreOfficeSourceMatch(
+  office: CrawlExtractedOffice,
+  sourceCompany: string | null,
+  sourceAddress: string | null
+) {
+  const sourceCompanyText = removeCorporateWordsForOfficeMatch(
+    normalizeOfficeMatchText(sourceCompany)
+  );
+  const sourceAddressText = normalizeOfficeMatchText(sourceAddress);
+
+  const officeNameText = normalizeOfficeMatchText(office.office_name);
+  const officeCompanyText = removeCorporateWordsForOfficeMatch(
+    normalizeOfficeMatchText(office.company)
+  );
+
+  const officeAddressTexts = uniqueTextValues(office.address_candidates).map(
+    (address) => normalizeOfficeMatchText(address)
+  );
+
+  let score = 0;
+
+  if (officeNameText && sourceCompanyText.includes(officeNameText)) {
+    score += 1000;
+  }
+
+  if (officeNameText && sourceAddressText.includes(officeNameText)) {
+    score += 400;
+  }
+
+  if (
+    officeCompanyText &&
+    sourceCompanyText &&
+    (sourceCompanyText.includes(officeCompanyText) ||
+      officeCompanyText.includes(sourceCompanyText))
+  ) {
+    score += 120;
+  }
+
+  for (const officeAddressText of officeAddressTexts) {
+    if (!officeAddressText || !sourceAddressText) continue;
+
+    if (
+      sourceAddressText === officeAddressText ||
+      sourceAddressText.includes(officeAddressText) ||
+      officeAddressText.includes(sourceAddressText)
+    ) {
+      score += 2000;
+      continue;
+    }
+
+    const commonLength = Math.min(sourceAddressText.length, officeAddressText.length);
+    let matchedLength = 0;
+
+    for (let i = 0; i < commonLength; i += 1) {
+      if (sourceAddressText[i] !== officeAddressText[i]) break;
+      matchedLength += 1;
+    }
+
+    if (matchedLength >= 8) {
+      score += matchedLength * 10;
+    }
+  }
+
+  return score;
+}
+
+function getOfficeDisplayLabel(office: CrawlExtractedOffice) {
+  return (
+    normalizeNullableText(office.office_name) ??
+    normalizeNullableText(office.address_candidates[0]) ??
+    normalizeNullableText(office.company)
+  );
+}
+
+function buildOfficeLabeledCandidates(
+  offices: CrawlExtractedOffice[],
+  key: "phone_candidates" | "fax_candidates"
+) {
+  const values: string[] = [];
+  const labelMap: Record<string, string> = {};
+
+  for (const office of offices) {
+    const officeLabel = getOfficeDisplayLabel(office);
+    const candidates = uniqueTextValues(office[key]);
+
+    for (const candidate of candidates) {
+      const displayValue = officeLabel ? `${officeLabel}：${candidate}` : candidate;
+
+      if (values.includes(displayValue)) {
+        continue;
+      }
+
+      values.push(displayValue);
+      labelMap[displayValue] = candidate;
+    }
+  }
+
+  return {
+    values,
+    labelMap,
+  };
+}
+
+function resolveOfficeLabeledCandidateValue(
+  value: string | null | undefined,
+  labelMap?: Record<string, string>
+) {
+  const normalized = normalizeNullableText(value);
+  if (!normalized) return null;
+
+  return normalizeNullableText(labelMap?.[normalized]) ?? normalized;
+}
+
 function getResolvedValue(current: unknown, next: string | null) {
   const currentValue = normalizeNullableText(current);
   const nextValue = normalizeNullableText(next);
@@ -920,7 +1049,8 @@ function hasPermitSelection(selectedFieldSet: Set<CrawlSelectableFieldKey>) {
 
 function buildCrawlPayloadBundles(
   extracted: CrawlExtractedFields,
-  sourceCompany: string | null
+  sourceCompany: string | null,
+  sourceAddress: string | null
 ): CrawlPayloadBundle[] {
   const extractedCompany = normalizeNullableText(extracted.company);
   const fallbackCompany = normalizeNullableText(sourceCompany);
@@ -944,72 +1074,96 @@ function buildCrawlPayloadBundles(
           },
         ];
 
-  return officeSources.map((office) => {
-    const officeName = normalizeNullableText(office.office_name);
-    const officePhoneCandidates = uniqueTextValues(
-      office.phone_candidates.length > 0
-        ? office.phone_candidates
-        : extracted.phone
-        ? [extracted.phone]
-        : []
-    );
+  const sortedOfficeSources = [...officeSources].sort((a, b) => {
+    const scoreA = scoreOfficeSourceMatch(a, sourceCompany, sourceAddress);
+    const scoreB = scoreOfficeSourceMatch(b, sourceCompany, sourceAddress);
+    return scoreB - scoreA;
+  });
 
-    const officeFaxCandidates = uniqueTextValues(
-      office.fax_candidates.length > 0
-        ? office.fax_candidates
-        : extracted.fax
-        ? [extracted.fax]
-        : []
-    );
+  const primaryOffice = sortedOfficeSources[0] ?? null;
 
-    const officeCompanyBase =
-      normalizeNullableText(office.company) ?? baseCompany ?? fallbackCompany;
+  const phoneCandidates = buildOfficeLabeledCandidates(
+    sortedOfficeSources,
+    "phone_candidates"
+  );
 
-    const company =
-      officeName && officeCompanyBase && !officeCompanyBase.includes(officeName)
-        ? `${officeCompanyBase} ${officeName}`
-        : officeCompanyBase;
+  const faxCandidates = buildOfficeLabeledCandidates(
+    sortedOfficeSources,
+    "fax_candidates"
+  );
 
-    const payload: CrawlPayload = {
-      company: company && isLikelyCompanyName(company) ? company : fallbackCompany,
-      website_url: normalizeNullableText(extracted.website_url),
-      form_url: normalizeNullableText(extracted.form_url),
-      phone: officePhoneCandidates[0] ?? null,
-      fax: officeFaxCandidates[0] ?? null,
-      email: normalizeNullableText(extracted.email),
-      zipcode: normalizeNullableText(extracted.zipcode),
-      address: normalizeNullableText(extracted.address),
-      established_date: normalizeNullableText(extracted.established_date),
-      representative_name: normalizeNullableText(
-        extracted.representative_name
-      ),
-      representative_name_raw: normalizeNullableText(
-        extracted.representative_name_raw
-      ),
-      representative_name_reason: normalizeNullableText(
-        extracted.representative_name_reason
-      ),
-      representative_title: normalizeNullableText(
-        extracted.representative_title
-      ),
-      capital: normalizeNullableText(extracted.capital),
-      employee_count: normalizeNullableText(extracted.employee_count),
-      business_content: normalizeNullableText(extracted.business_content),
-      permit_number: normalizeNullableText(extracted.permit_number),
-    };
+  const firstPhoneValue =
+    resolveOfficeLabeledCandidateValue(
+      phoneCandidates.values[0],
+      phoneCandidates.labelMap
+    ) ?? normalizeNullableText(extracted.phone);
 
-    return {
+  const firstFaxValue =
+    resolveOfficeLabeledCandidateValue(
+      faxCandidates.values[0],
+      faxCandidates.labelMap
+    ) ?? normalizeNullableText(extracted.fax);
+
+  const officeName = normalizeNullableText(primaryOffice?.office_name);
+  const officeCompanyBase =
+    normalizeNullableText(primaryOffice?.company) ?? baseCompany ?? fallbackCompany;
+
+  const company =
+    officeName && officeCompanyBase && !officeCompanyBase.includes(officeName)
+      ? `${officeCompanyBase} ${officeName}`
+      : officeCompanyBase;
+
+  const payload: CrawlPayload = {
+    company: company && isLikelyCompanyName(company) ? company : fallbackCompany,
+    website_url: normalizeNullableText(extracted.website_url),
+    form_url: normalizeNullableText(extracted.form_url),
+    phone: firstPhoneValue,
+    fax: firstFaxValue,
+    email: normalizeNullableText(extracted.email),
+    zipcode: normalizeNullableText(extracted.zipcode),
+    address: normalizeNullableText(extracted.address),
+    established_date: normalizeNullableText(extracted.established_date),
+    representative_name: normalizeNullableText(extracted.representative_name),
+    representative_name_raw: normalizeNullableText(
+      extracted.representative_name_raw
+    ),
+    representative_name_reason: normalizeNullableText(
+      extracted.representative_name_reason
+    ),
+    representative_title: normalizeNullableText(extracted.representative_title),
+    capital: normalizeNullableText(extracted.capital),
+    employee_count: normalizeNullableText(extracted.employee_count),
+    business_content: normalizeNullableText(extracted.business_content),
+    permit_number: normalizeNullableText(extracted.permit_number),
+  };
+
+  return [
+    {
       payload,
       candidates: {
-        phone: officePhoneCandidates,
-        fax: officeFaxCandidates,
-        email: uniqueTextValues(office.email_candidates),
-        zipcode: uniqueTextValues(office.zipcode_candidates),
-        address: uniqueTextValues(office.address_candidates),
+        phone: phoneCandidates.values.length > 0
+          ? phoneCandidates.values
+          : uniqueTextValues([extracted.phone]),
+        fax: faxCandidates.values.length > 0
+          ? faxCandidates.values
+          : uniqueTextValues([extracted.fax]),
+        email: uniqueTextValues(
+          sortedOfficeSources.flatMap((office) => office.email_candidates)
+        ),
+        zipcode: uniqueTextValues(
+          sortedOfficeSources.flatMap((office) => office.zipcode_candidates)
+        ),
+        address: uniqueTextValues(
+          sortedOfficeSources.flatMap((office) => office.address_candidates)
+        ),
       },
-      forceCompanyUpdate: officeSources.length > 1 || officeName !== null,
-    };
-  });
+      officeLabelMap: {
+        phone: phoneCandidates.labelMap,
+        fax: faxCandidates.labelMap,
+      },
+      forceCompanyUpdate: false,
+    },
+  ];
 }
 
 function buildPreviewChanges(
@@ -1135,12 +1289,22 @@ function buildSelectedPayload(
     selectedFields
   );
 
+  const selectedPhone = resolveOfficeLabeledCandidateValue(
+    selected.phone,
+    bundle.officeLabelMap?.phone
+  );
+
+  const selectedFax = resolveOfficeLabeledCandidateValue(
+    selected.fax,
+    bundle.officeLabelMap?.fax
+  );
+
   return {
     ...bundle.payload,
     company: selected.company ?? bundle.payload.company,
     website_url: selected.website_url ?? bundle.payload.website_url,
-    phone: selected.phone ?? bundle.payload.phone,
-    fax: selected.fax ?? bundle.payload.fax,
+    phone: selectedPhone ?? bundle.payload.phone,
+    fax: selectedFax ?? bundle.payload.fax,
     email: selected.email ?? bundle.payload.email,
     zipcode: selected.zipcode ?? bundle.payload.zipcode,
     address: selected.address ?? bundle.payload.address,
@@ -2204,7 +2368,7 @@ async function buildPublicPreviewRows(
   job: CrawlJobState,
   page: number,
   pageSize: number,
-  previewTab: "candidate" | "excluded" = "candidate"
+  previewTab: "candidate" | "multiple" | "excluded" = "candidate"
 ) {
   const previewPage = normalizePreviewPage(page);
   const previewPageSize = normalizePreviewPageSize(pageSize);
@@ -2231,6 +2395,40 @@ async function buildPublicPreviewRows(
       total: previewResult.total,
       page: previewResult.page,
       pageSize: previewResult.pageSize,
+    };
+  }
+
+  if (previewTab === "multiple") {
+    const allItems = await fetchAllCrawlPreviewItems(client, job.jobId);
+
+    const multipleRows = allItems
+      .map((item) => {
+        const changes = buildPreviewChangesFromItem(
+          item,
+          job.selectedFields
+        ).filter((change) => change.candidates.length > 1);
+
+        return {
+          row_id: item.row_id,
+          preview_row_id: item.preview_row_id,
+          company: item.company,
+          website_url: item.website_url,
+          source_row: item.source_row,
+          changes,
+        };
+      })
+      .filter((row) => row.changes.length > 0);
+
+    const total = multipleRows.length;
+    const totalPages = Math.max(1, Math.ceil(total / previewPageSize));
+    const safePage = Math.min(Math.max(previewPage, 1), totalPages);
+    const start = (safePage - 1) * previewPageSize;
+
+    return {
+      rows: multipleRows.slice(start, start + previewPageSize),
+      total,
+      page: safePage,
+      pageSize: previewPageSize,
     };
   }
 
@@ -2350,7 +2548,7 @@ function buildJobResponse(job: CrawlJobState) {
       : "running",
     totalTargets: job.total,
     processed: job.processed,
-    updated: job.updated,
+    updated: Math.min(job.updated, job.processed),
     skipped: job.skipped,
     failed: job.failed,
     currentCompany: job.currentCompany,
@@ -2915,7 +3113,8 @@ async function reportWorkerTargetResult(
           const selectedFieldSet = new Set(job.selectedFields);
           const bundles = buildCrawlPayloadBundles(
             extracted,
-            normalizeNullableText(row.company)
+            normalizeNullableText(row.company),
+            normalizeNullableText(row.address)
           );
 
           const previewSourceRow = buildPreviewSourceRow(currentRowData);
@@ -2936,9 +3135,7 @@ async function reportWorkerTargetResult(
               row_id: String(row.row_id ?? ""),
               preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
               officeIndex,
-              company:
-                bundle.payload.company ??
-                normalizeNullableText(row.company),
+              company: normalizeNullableText(row.company),
               website_url: normalizeNullableText(row.website_url),
               source_row: previewSourceRow,
               bundle,
@@ -2947,7 +3144,7 @@ async function reportWorkerTargetResult(
 
           if (rowPreviewItems.length > 0) {
             await insertCrawlPreviewItems(client, job.jobId, rowPreviewItems);
-            job.updated += rowPreviewItems.length;
+            job.updated += 1;
             targetStatus = "done";
           } else {
             targetStatus = "skipped";
@@ -3228,7 +3425,8 @@ async function runCrawlJob(jobId: string) {
             } else {
               const bundles = buildCrawlPayloadBundles(
                 extracted,
-                normalizeNullableText(row.company)
+                normalizeNullableText(row.company),
+                normalizeNullableText(row.address)
               );
 
               const previewSourceRow = buildPreviewSourceRow(currentRowData);
@@ -3249,9 +3447,7 @@ async function runCrawlJob(jobId: string) {
                   row_id: String(row.row_id ?? ""),
                   preview_row_id: `${String(row.row_id ?? "")}__${officeIndex}`,
                   officeIndex,
-                  company:
-                    bundle.payload.company ??
-                    normalizeNullableText(row.company),
+                  company: normalizeNullableText(row.company),
                   website_url: normalizeNullableText(row.website_url),
                   source_row: previewSourceRow,
                   bundle,
@@ -3263,7 +3459,7 @@ async function runCrawlJob(jobId: string) {
                   insertCrawlPreviewItems(client, job.jobId, rowPreviewItems)
                 );
 
-                job.updated += rowPreviewItems.length;
+                job.updated += 1;
                 targetStatus = "done";
               } else {
                 job.skipped += 1;
