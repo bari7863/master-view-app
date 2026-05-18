@@ -525,6 +525,7 @@ npm run build:worker
 ### exeを作り直す
 
 exeは下記ディレクトリにあります。
+
 release/MasterCrawlWorker/master-crawl-worker.exe
 
 例：
@@ -574,6 +575,7 @@ npm run package:worker:win
 ```
 
 その後、新しく作成された下記exeを起動します。
+
 release/MasterCrawlWorker/master-crawl-worker.exe
 
 ---
