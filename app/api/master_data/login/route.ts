@@ -16,6 +16,7 @@ type MasterDataLoginUser = {
   id: string;
   password: string;
   name: string;
+  organization: string;
   role: MasterDataLoginRole;
 };
 
@@ -60,6 +61,8 @@ function parseMasterDataLoginUsersByRole(
       const id = typeof item.id === "string" ? item.id.trim() : "";
       const password = typeof item.password === "string" ? item.password : "";
       const name = typeof item.name === "string" ? item.name.trim() : "";
+      const organization =
+        typeof item.organization === "string" ? item.organization.trim() : "";
 
       if (id === "" || password === "" || name === "") {
         return null;
@@ -69,6 +72,7 @@ function parseMasterDataLoginUsersByRole(
         id,
         password,
         name,
+        organization,
         role,
       };
     })
@@ -113,6 +117,9 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
         const name = typeof item.name === "string" ? item.name.trim() : "";
         const role = item.role;
 
+        const organization =
+          typeof item.organization === "string" ? item.organization.trim() : "";
+
         if (
           id === "" ||
           password === "" ||
@@ -126,6 +133,7 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
           id,
           password,
           name,
+          organization,
           role,
         };
       })
@@ -142,6 +150,7 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
         password: legacyPassword,
         name: legacyId,
         role: "管理者",
+        organization: "",
       },
     ];
   }
@@ -300,11 +309,18 @@ export async function POST(req: NextRequest) {
         password: loginUser.password,
         name: loginUser.name,
         role: loginUser.role,
+        organization: loginUser.organization,
       },
       loginHistoryEvent,
       loginHistory,
     });
-    setMasterDataAuthCookie(response);
+
+    setMasterDataAuthCookie(response, {
+      id: loginUser.id,
+      name: loginUser.name,
+      role: loginUser.role,
+      organization: loginUser.organization,
+    });
 
     return response;
   } catch (error) {

@@ -9,6 +9,7 @@ import os from "os";
 import { spawn, type ChildProcessByStdio } from "child_process";
 import type { Readable } from "stream";
 import { requireMasterDataAuth } from "@/lib/master-data-auth";
+import { requireMasterDataPermission } from "@/lib/master-data-permissions";
 
 type MynaviRequestBody = {
   action?:
@@ -553,6 +554,21 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as MynaviRequestBody;
     const action = body.action;
 
+    if (
+      action === "start_count_job" ||
+      action === "get_total_pages" ||
+      action === "start_job" ||
+      action === "pause_job" ||
+      action === "cancel_job" ||
+      action === "resume_job"
+    ) {
+      const permission = await requireMasterDataPermission(req, "list.add");
+
+      if (permission.errorResponse) {
+        return permission.errorResponse;
+      }
+    }
+
     if (action === "start_count_job") {
       const gradYear = normalizeGradYear(body.gradYear);
       const job = await startMynaviCountJob(gradYear);
@@ -693,6 +709,12 @@ export async function GET(req: NextRequest) {
         { ok: false, error: "不正なリクエストです" },
         { status: 400 }
       );
+    }
+
+    const permission = await requireMasterDataPermission(req, "list.add");
+
+    if (permission.errorResponse) {
+      return permission.errorResponse;
     }
 
     const jobId = searchParams.get("jobId");

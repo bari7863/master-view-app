@@ -3,7 +3,14 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 import { dbReady, pool } from "@/lib/db";
-import { requireMasterDataAuth } from "@/lib/master-data-auth";
+import {
+  requireMasterDataAuth,
+  requireMasterDataUser,
+} from "@/lib/master-data-auth";
+import {
+  getMasterDataUserPermissionSettings,
+  requireMasterDataPermission,
+} from "@/lib/master-data-permissions";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -851,6 +858,109 @@ function buildOrderBy(searchParams: URLSearchParams) {
   return `ORDER BY COALESCE("企業名"::text, ''), COALESCE("住所"::text, '')`;
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function buildSearchParamsFromListScopeFilters(
+  allowedFilters: Record<string, unknown> | undefined
+) {
+  const listScopeFilters = allowedFilters?.listScopeFilters;
+
+  if (!isObjectRecord(listScopeFilters)) {
+    return null;
+  }
+
+  const searchParams = new URLSearchParams();
+
+  searchParams.set(
+    "filterModels",
+    JSON.stringify(
+      isObjectRecord(listScopeFilters.filterModels)
+        ? listScopeFilters.filterModels
+        : {}
+    )
+  );
+
+  searchParams.set(
+    "advancedFilters",
+    JSON.stringify(
+      isObjectRecord(listScopeFilters.advancedFilters)
+        ? listScopeFilters.advancedFilters
+        : {}
+    )
+  );
+
+  return searchParams;
+}
+
+function shiftSqlParams(sql: string, offset: number) {
+  if (offset <= 0) return sql;
+  return sql.replace(/\$(\d+)/g, (_, index) => `$${Number(index) + offset}`);
+}
+
+function mergeWhereClauses(
+  baseWhereSql: string,
+  baseParams: unknown[],
+  scopeWhereSql: string,
+  scopeParams: unknown[]
+) {
+  if (!scopeWhereSql) {
+    return {
+      whereSql: baseWhereSql,
+      params: baseParams,
+    };
+  }
+
+  const scopeCondition = shiftSqlParams(scopeWhereSql, baseParams.length)
+    .replace(/^WHERE\s+/i, "")
+    .trim();
+
+  return {
+    whereSql: baseWhereSql
+      ? `${baseWhereSql} AND (${scopeCondition})`
+      : `WHERE (${scopeCondition})`,
+    params: [...baseParams, ...scopeParams],
+  };
+}
+
+async function getListScopeSearchParamsForRequest(req: NextRequest) {
+  const { user } = requireMasterDataUser(req);
+
+  if (!user || user.role === "管理者") {
+    return null;
+  }
+
+  const settings = await getMasterDataUserPermissionSettings(
+    user.id,
+    user.organization
+  );
+
+  return buildSearchParamsFromListScopeFilters(settings.allowedFilters);
+}
+
+async function buildWhereClauseWithListScope(
+  req: NextRequest,
+  searchParams: URLSearchParams,
+  skipKey?: FilterKey
+) {
+  const base = buildWhereClause(searchParams, skipKey);
+  const scopeSearchParams = await getListScopeSearchParamsForRequest(req);
+
+  if (!scopeSearchParams) {
+    return base;
+  }
+
+  const scope = buildWhereClause(scopeSearchParams);
+
+  return mergeWhereClauses(
+    base.whereSql,
+    base.params,
+    scope.whereSql,
+    scope.params
+  );
+}
+
 function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
   const searchParams = new URLSearchParams();
 
@@ -902,7 +1012,7 @@ function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
   return searchParams;
 }
 
-async function handleReadRequest(searchParams: URLSearchParams) {
+async function handleReadRequest(req: NextRequest, searchParams: URLSearchParams) {
   try {
     await dbReady;
     await ensureMasterDataIdColumn(pool);
@@ -910,7 +1020,10 @@ async function handleReadRequest(searchParams: URLSearchParams) {
     const advancedValuesFor = searchParams.get("advancedValuesFor");
 
     if (advancedValuesFor === "prefecture") {
-      const { whereSql, params } = buildWhereClause(searchParams);
+      const { whereSql, params } = await buildWhereClauseWithListScope(
+        req,
+        searchParams
+      );
 
       const sql = `
         SELECT
@@ -981,7 +1094,10 @@ async function handleReadRequest(searchParams: URLSearchParams) {
     }
 
     if (advancedValuesFor === "industry") {
-      const { whereSql, params } = buildWhereClause(searchParams);
+      const { whereSql, params } = await buildWhereClauseWithListScope(
+        req,
+        searchParams
+      );
 
       const sql = `
         SELECT
@@ -1065,7 +1181,10 @@ async function handleReadRequest(searchParams: URLSearchParams) {
     }
 
     if (advancedValuesFor === "established") {
-      const { whereSql, params } = buildWhereClause(searchParams);
+      const { whereSql, params } = await buildWhereClauseWithListScope(
+        req,
+        searchParams
+      );
 
       const sql = `
         SELECT DISTINCT year_month
@@ -1114,7 +1233,11 @@ async function handleReadRequest(searchParams: URLSearchParams) {
     }
 
     if (advancedValuesFor === "tag") {
-      const { whereSql, params } = buildWhereClause(searchParams);
+      const { whereSql, params } = await buildWhereClauseWithListScope(
+        req,
+        searchParams
+      );
+      
       const tagWhereSql = whereSql
         ? `${whereSql} AND NULLIF(BTRIM(tag_value), '') IS NOT NULL`
         : `WHERE NULLIF(BTRIM(tag_value), '') IS NOT NULL`;
@@ -1186,7 +1309,11 @@ async function handleReadRequest(searchParams: URLSearchParams) {
     }
 
     if (valuesFor && FILTER_COLUMN_MAP[valuesFor]) {
-      const { whereSql, params } = buildWhereClause(searchParams, valuesFor);
+      const { whereSql, params } = await buildWhereClauseWithListScope(
+        req,
+        searchParams,
+        valuesFor
+      );
 
       const valueSearch = (searchParams.get("valueSearch") || "").trim();
       const valueOffset = Math.max(
@@ -1361,7 +1488,10 @@ async function handleReadRequest(searchParams: URLSearchParams) {
     const isAll = limitParam === "all";
     const limit = isAll ? null : Math.max(Number(limitParam), 1);
 
-    const { whereSql, params } = buildWhereClause(searchParams);
+    const { whereSql, params } = await buildWhereClauseWithListScope(
+      req,
+      searchParams
+    );
 
     const totalSql = `
       SELECT COUNT(*)::int AS total_count
@@ -1443,7 +1573,7 @@ export async function GET(req: NextRequest) {
   if (authError) return authError;
 
   const { searchParams } = new URL(req.url);
-  return handleReadRequest(searchParams);
+  return handleReadRequest(req, searchParams);
 }
 
 export async function POST(req: NextRequest) {
@@ -1460,7 +1590,7 @@ export async function POST(req: NextRequest) {
 
       if (action === "read") {
         const searchParams = buildSearchParamsFromReadPayload(payload);
-        return handleReadRequest(searchParams);
+        return handleReadRequest(req, searchParams);
       }
 
       return NextResponse.json(
@@ -1477,6 +1607,15 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+  }
+
+  const csvImportPermission = await requireMasterDataPermission(
+    req,
+    "csv.import"
+  );
+
+  if (csvImportPermission.errorResponse) {
+    return csvImportPermission.errorResponse;
   }
 
   const client = await pool.connect();
@@ -1695,6 +1834,22 @@ export async function DELETE(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const deleteMode = searchParams.get("deleteMode");
 
+    const deletePermissionKey =
+      deleteMode === "item"
+        ? "list.itemDelete"
+        : deleteMode === "list"
+        ? "list.delete"
+        : "list.dedupe";
+
+    const deletePermission = await requireMasterDataPermission(
+      req,
+      deletePermissionKey
+    );
+
+    if (deletePermission.errorResponse) {
+      return deletePermission.errorResponse;
+    }
+
     await client.query("BEGIN");
 
     if (deleteMode === "item") {
@@ -1729,8 +1884,8 @@ export async function DELETE(req: NextRequest) {
 
       const { whereSql, params } =
         deleteScope === "filtered"
-          ? buildWhereClause(searchParams)
-          : { whereSql: "", params: [] as (string | number)[] };
+          ? await buildWhereClauseWithListScope(req, searchParams)
+          : await buildWhereClauseWithListScope(req, new URLSearchParams());
 
       const setSql = selectedFields
         .map((field) => `${FILTER_COLUMN_MAP[field]} = NULL`)
@@ -1770,8 +1925,8 @@ export async function DELETE(req: NextRequest) {
 
       const { whereSql, params } =
         deleteScope === "filtered"
-          ? buildWhereClause(searchParams)
-          : { whereSql: "", params: [] as (string | number)[] };
+          ? await buildWhereClauseWithListScope(req, searchParams)
+          : await buildWhereClauseWithListScope(req, new URLSearchParams());
 
       await ensureMasterDataIdColumn(client);
 
@@ -1802,7 +1957,17 @@ export async function DELETE(req: NextRequest) {
       });
     }
 
-    const result = await client.query(`
+    const {
+      whereSql: dedupeScopeWhereSql,
+      params: dedupeScopeParams,
+    } = await buildWhereClauseWithListScope(req, new URLSearchParams());
+
+    const duplicateRowsWhereSql = dedupeScopeWhereSql
+      ? `${dedupeScopeWhereSql} AND "企業名" IS NOT NULL AND BTRIM("企業名"::text) <> ''`
+      : `WHERE "企業名" IS NOT NULL AND BTRIM("企業名"::text) <> ''`;
+
+    const result = await client.query(
+      `
       WITH duplicate_rows AS (
         SELECT
           id,
@@ -1811,8 +1976,7 @@ export async function DELETE(req: NextRequest) {
             ORDER BY id
           ) AS rn
         FROM public.master_data
-        WHERE "企業名" IS NOT NULL
-          AND BTRIM("企業名"::text) <> ''
+        ${duplicateRowsWhereSql}
       ),
       deleted AS (
         DELETE FROM public.master_data target
@@ -1823,7 +1987,9 @@ export async function DELETE(req: NextRequest) {
       )
       SELECT COUNT(*)::int AS deleted_count
       FROM deleted
-    `);
+    `,
+      dedupeScopeParams
+    );
 
     await client.query("COMMIT");
 

@@ -9,7 +9,15 @@ import {
   type CrawlExtractedFields,
   type CrawlExtractedOffice,
 } from "@/lib/master-data-crawler";
-import { requireMasterDataAuth } from "@/lib/master-data-auth";
+import {
+  requireMasterDataAuth,
+  requireMasterDataUser,
+} from "@/lib/master-data-auth";
+import {
+  getMasterDataUserPermissionSettings,
+  requireMasterDataPermission,
+  type MasterDataPermissionKey,
+} from "@/lib/master-data-permissions";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -225,6 +233,11 @@ type WorkerTargetResult = {
   extracted?: CrawlExtractedFields | null;
   targetStartedAt?: string | null;
   targetFinishedAt?: string | null;
+};
+
+type PermissionListScopeFilters = {
+  filterModels?: Partial<Record<FilterKey, FilterModel>>;
+  advancedFilters?: AdvancedFilters;
 };
 
 type CrawlRequestBody = {
@@ -746,6 +759,98 @@ function buildWhereClause(
 
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   return { whereSql, params };
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parsePermissionListScopeFilters(
+  allowedFilters: Record<string, unknown> | undefined
+): PermissionListScopeFilters | null {
+  const listScopeFilters = allowedFilters?.listScopeFilters;
+
+  if (!isObjectRecord(listScopeFilters)) {
+    return null;
+  }
+
+  return {
+    filterModels: isObjectRecord(listScopeFilters.filterModels)
+      ? (listScopeFilters.filterModels as Partial<Record<FilterKey, FilterModel>>)
+      : {},
+    advancedFilters: isObjectRecord(listScopeFilters.advancedFilters)
+      ? (listScopeFilters.advancedFilters as AdvancedFilters)
+      : {},
+  };
+}
+
+function shiftSqlParams(sql: string, offset: number) {
+  if (offset <= 0) return sql;
+  return sql.replace(/\$(\d+)/g, (_, index) => `$${Number(index) + offset}`);
+}
+
+function mergeWhereClauses(
+  baseWhereSql: string,
+  baseParams: unknown[],
+  scopeWhereSql: string,
+  scopeParams: unknown[]
+) {
+  if (!scopeWhereSql) {
+    return {
+      whereSql: baseWhereSql,
+      params: baseParams,
+    };
+  }
+
+  const scopeCondition = shiftSqlParams(scopeWhereSql, baseParams.length)
+    .replace(/^WHERE\s+/i, "")
+    .trim();
+
+  return {
+    whereSql: baseWhereSql
+      ? `${baseWhereSql} AND (${scopeCondition})`
+      : `WHERE (${scopeCondition})`,
+    params: [...baseParams, ...scopeParams],
+  };
+}
+
+function buildWhereClauseWithListScope(
+  filterModels: Partial<Record<FilterKey, FilterModel>>,
+  advancedFilters: AdvancedFilters,
+  listScopeFilters: PermissionListScopeFilters | null
+) {
+  const base = buildWhereClause(filterModels, advancedFilters);
+
+  if (!listScopeFilters) {
+    return base;
+  }
+
+  const scope = buildWhereClause(
+    listScopeFilters.filterModels ?? {},
+    listScopeFilters.advancedFilters ?? {}
+  );
+
+  return mergeWhereClauses(
+    base.whereSql,
+    base.params,
+    scope.whereSql,
+    scope.params
+  );
+}
+
+async function getListScopeFiltersForRequest(req: NextRequest) {
+  const { user } = requireMasterDataUser(req);
+
+  if (!user || user.role === "管理者") {
+    return null;
+  }
+
+  const settings = await getMasterDataUserPermissionSettings(
+    user.id,
+    user.organization
+  );
+
+  return parsePermissionListScopeFilters(settings.allowedFilters);
 }
 
 function buildOrderBy(
@@ -2687,14 +2792,19 @@ function buildJobResponse(job: CrawlJobState) {
 async function createCrawlTargets(
   client: DbClient,
   jobId: string,
-  body: CrawlRequestBody
+  body: CrawlRequestBody,
+  listScopeFilters: PermissionListScopeFilters | null
 ) {
   await ensureMasterDataIdColumn(client);
   await ensureCrawlJobTables(client);
 
   const filterModels = body.filterModels ?? {};
   const advancedFilters = body.advancedFilters ?? {};
-  const { whereSql, params } = buildWhereClause(filterModels, advancedFilters);
+  const { whereSql, params } = buildWhereClauseWithListScope(
+    filterModels,
+    advancedFilters,
+    listScopeFilters
+  );
   const orderBySql = buildOrderBy(body.sortKey, body.sortDirection);
 
   await client.query(
@@ -3881,8 +3991,28 @@ export async function POST(req: NextRequest) {
       action === "worker_report_targets";
 
     if (!isWorkerAction) {
-      const authError = requireMasterDataAuth(req);
-      if (authError) return authError;
+      const requiredPermission =
+        action === "start_preview_job" ||
+        action === "save_partial" ||
+        action === "pause_job" ||
+        action === "resume_job" ||
+        action === "cancel_job"
+          ? "inspection.crawl"
+          : null;
+
+      if (requiredPermission) {
+        const permission = await requireMasterDataPermission(
+          req,
+          requiredPermission
+        );
+
+        if (permission.errorResponse) {
+          return permission.errorResponse;
+        }
+      } else {
+        const authError = requireMasterDataAuth(req);
+        if (authError) return authError;
+      }
     }
 
     if (
@@ -4227,6 +4357,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      const listScopeFilters = await getListScopeFiltersForRequest(req);
       const assignedWorkerId = normalizeWorkerId(body.assignedWorkerId);
       const isLocal = isLocalDevelopmentRequest(req);
 
@@ -4332,8 +4463,36 @@ export async function POST(req: NextRequest) {
       const selectedFieldSet = normalizeSelectedFields(body.selectedFields);
       const selectedFields = Array.from(selectedFieldSet);
 
+      if (
+        action === "start_preview_job" ||
+        action === "save_partial"
+      ) {
+        for (const selectedField of selectedFields) {
+          const fieldPermission = await requireMasterDataPermission(
+            req,
+            `inspection.crawlField.${selectedField}` as MasterDataPermissionKey
+          );
+
+          if (fieldPermission.errorResponse) {
+            return fieldPermission.errorResponse;
+          }
+        }
+      }
+
+      for (const selectedField of selectedFields) {
+        const fieldPermission = await requireMasterDataPermission(
+          req,
+          `inspection.crawlField.${selectedField}` as MasterDataPermissionKey
+        );
+
+        if (fieldPermission.errorResponse) {
+          return fieldPermission.errorResponse;
+        }
+      }
+
       const assignedWorkerId = normalizeWorkerId(body.assignedWorkerId);
       const isLocal = isLocalDevelopmentRequest(req);
+      const listScopeFilters = await getListScopeFiltersForRequest(req);
 
       if (!assignedWorkerId && !isLocal) {
         return NextResponse.json(
@@ -4347,7 +4506,12 @@ export async function POST(req: NextRequest) {
       }
 
       const jobId = crypto.randomUUID();
-      const total = await createCrawlTargets(client, jobId, body);
+      const total = await createCrawlTargets(
+        client,
+        jobId,
+        body,
+        listScopeFilters
+      );
 
       if (total === 0) {
         return NextResponse.json({

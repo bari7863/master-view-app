@@ -1,7 +1,15 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { dbReady, pool } from "@/lib/db";
-import { requireMasterDataAuth } from "@/lib/master-data-auth";
+import {
+  requireMasterDataAuth,
+  requireMasterDataUser,
+} from "@/lib/master-data-auth";
+import {
+  getMasterDataUserPermissionSettings,
+  requireMasterDataPermission,
+  type MasterDataPermissionKey,
+} from "@/lib/master-data-permissions";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -843,6 +851,107 @@ function buildWhereClause(
 
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
   return { whereSql, params };
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function buildSearchParamsFromListScopeFilters(
+  allowedFilters: Record<string, unknown> | undefined
+) {
+  const listScopeFilters = allowedFilters?.listScopeFilters;
+
+  if (!isObjectRecord(listScopeFilters)) {
+    return null;
+  }
+
+  const searchParams = new URLSearchParams();
+
+  searchParams.set(
+    "filterModels",
+    JSON.stringify(
+      isObjectRecord(listScopeFilters.filterModels)
+        ? listScopeFilters.filterModels
+        : {}
+    )
+  );
+
+  searchParams.set(
+    "advancedFilters",
+    JSON.stringify(
+      isObjectRecord(listScopeFilters.advancedFilters)
+        ? listScopeFilters.advancedFilters
+        : {}
+    )
+  );
+
+  return searchParams;
+}
+
+function shiftSqlParams(sql: string, offset: number) {
+  if (offset <= 0) return sql;
+  return sql.replace(/\$(\d+)/g, (_, index) => `$${Number(index) + offset}`);
+}
+
+function mergeWhereClauses(
+  baseWhereSql: string,
+  baseParams: (string | number)[],
+  scopeWhereSql: string,
+  scopeParams: (string | number)[]
+) {
+  if (!scopeWhereSql) {
+    return {
+      whereSql: baseWhereSql,
+      params: baseParams,
+    };
+  }
+
+  const scopeCondition = shiftSqlParams(scopeWhereSql, baseParams.length)
+    .replace(/^WHERE\s+/i, "")
+    .trim();
+
+  return {
+    whereSql: baseWhereSql
+      ? `${baseWhereSql} AND (${scopeCondition})`
+      : `WHERE (${scopeCondition})`,
+    params: [...baseParams, ...scopeParams],
+  };
+}
+
+async function buildWhereClauseWithListScope(
+  req: NextRequest,
+  searchParams: URLSearchParams,
+  skipKey?: FilterKey
+) {
+  const base = buildWhereClause(searchParams, skipKey);
+  const { user } = requireMasterDataUser(req);
+
+  if (!user || user.role === "管理者") {
+    return base;
+  }
+
+  const settings = await getMasterDataUserPermissionSettings(
+    user.id,
+    user.organization
+  );
+
+  const scopeSearchParams = buildSearchParamsFromListScopeFilters(
+    settings.allowedFilters
+  );
+
+  if (!scopeSearchParams) {
+    return base;
+  }
+
+  const scope = buildWhereClause(scopeSearchParams);
+
+  return mergeWhereClauses(
+    base.whereSql,
+    base.params,
+    scope.whereSql,
+    scope.params
+  );
 }
 
 function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
@@ -2397,6 +2506,7 @@ function getJobSnapshot(
 }
 
 async function fetchInspectionTargets(
+  req: NextRequest,
   payload: Record<string, unknown>
 ): Promise<InspectionTargetRow[]> {
   await dbReady;
@@ -2411,8 +2521,8 @@ async function fetchInspectionTargets(
     const searchParams = buildSearchParamsFromReadPayload(payload);
     const { whereSql, params } =
       inspectionScope === "filtered"
-        ? buildWhereClause(searchParams)
-        : { whereSql: "", params: [] as (string | number)[] };
+        ? await buildWhereClauseWithListScope(req, searchParams)
+        : await buildWhereClauseWithListScope(req, new URLSearchParams());
 
     const targetWhereSql =
       whereSql !== ""
@@ -2578,7 +2688,7 @@ async function processItemInspectionJob(jobId: string) {
   }
 }
 
-async function handleStartJob(payload: Record<string, unknown>) {
+async function handleStartJob(req: NextRequest, payload: Record<string, unknown>) {
   const selectedFields = Array.isArray(payload.selectedFields)
     ? payload.selectedFields.map((value) => String(value ?? ""))
     : [];
@@ -2613,7 +2723,7 @@ async function handleStartJob(payload: Record<string, unknown>) {
     );
   }
 
-  const targetRows = await fetchInspectionTargets(payload);
+  const targetRows = await fetchInspectionTargets(req, payload);
 
   if (targetRows.length === 0) {
     return NextResponse.json({
@@ -2930,8 +3040,55 @@ export async function POST(req: NextRequest) {
     const payload = (await req.json()) as Record<string, unknown>;
     const action = String(payload.action ?? "");
 
+    if (
+      action === "start_job" ||
+      action === "pause_job" ||
+      action === "cancel_job" ||
+      action === "resume_job" ||
+      action === "apply_preview_changes"
+    ) {
+      const permission = await requireMasterDataPermission(
+        req,
+        "inspection.itemInspection"
+      );
+
+      if (permission.errorResponse) {
+        return permission.errorResponse;
+      }
+    }
+
     if (action === "start_job") {
-      return handleStartJob(payload);
+      const selectedFields = Array.isArray(payload.selectedFields)
+        ? payload.selectedFields
+            .map((value) => String(value ?? "").trim())
+            .filter((value) => value !== "")
+        : [];
+
+      for (const selectedField of selectedFields) {
+        const fieldPermission = await requireMasterDataPermission(
+          req,
+          `inspection.itemInspectionField.${selectedField}` as MasterDataPermissionKey
+        );
+
+        if (fieldPermission.errorResponse) {
+          return fieldPermission.errorResponse;
+        }
+      }
+    }
+
+    if (action === "apply_preview_changes") {
+      const fieldPermission = await requireMasterDataPermission(
+        req,
+        "inspection.itemInspectionField.representative_name"
+      );
+
+      if (fieldPermission.errorResponse) {
+        return fieldPermission.errorResponse;
+      }
+    }
+
+    if (action === "start_job") {
+      return handleStartJob(req, payload);
     }
 
     if (action === "get_job_status") {

@@ -182,13 +182,9 @@ function createEmptyCrawlFieldSelections(): Record<CrawlFieldKey, boolean> {
 function getSelectedCrawlFields(
   selections: Record<CrawlFieldKey, boolean>
 ): CrawlFieldKey[] {
-  const selectedFields = CRAWL_CONFIRM_FIELD_OPTIONS.filter(
+  return CRAWL_CONFIRM_FIELD_OPTIONS.filter(
     (field) => selections[field.key]
   ).map((field) => field.key);
-
-  return selectedFields.length > 0
-    ? selectedFields
-    : CRAWL_CONFIRM_FIELD_OPTIONS.map((field) => field.key);
 }
 
 type CrawlPreviewChange = {
@@ -255,6 +251,7 @@ type MasterDataLoginUser = {
   id: string;
   password: string;
   name: string;
+  organization: string;
   role: MasterDataLoginRole;
 };
 
@@ -264,11 +261,203 @@ type MasterDataLoginHistoryItem = {
   browser: string;
 };
 
+type CrawlFieldPermissionKey = `inspection.crawlField.${CrawlFieldKey}`;
+type ItemInspectionFieldPermissionKey =
+  `inspection.itemInspectionField.${FilterKey}`;
+
+type MasterDataPermissionKey =
+  | "search.companyName"
+  | "search.prefecture"
+  | "search.industry"
+  | "search.established"
+  | "search.capital"
+  | "search.employeeCount"
+  | "search.tag"
+  | "search.columnFilters"
+  | "list.add"
+  | "list.delete"
+  | "list.itemDelete"
+  | "list.dedupe"
+  | "csv.import"
+  | "csv.export"
+  | "csv.template"
+  | "inspection.crawl"
+  | "inspection.itemInspection"
+  | CrawlFieldPermissionKey
+  | ItemInspectionFieldPermissionKey;
+
+type MasterDataPermissions = Partial<
+  Record<MasterDataPermissionKey, boolean>
+>;
+
+type MasterDataPermissionEmployee = {
+  id: string;
+  name: string;
+  role: MasterDataLoginRole;
+  organization: string;
+  permissions: MasterDataPermissions;
+  allowedFilters: Record<string, unknown>;
+};
+
+type PermissionListScopeFilters = {
+  filterModels: Record<string, unknown>;
+  advancedFilters: Record<string, unknown>;
+  sortKey?: FilterKey;
+  sortDirection?: SortDirection;
+};
+
+const CRAWL_PERMISSION_FIELD_ITEMS: {
+  key: MasterDataPermissionKey;
+  label: string;
+}[] = CRAWL_CONFIRM_FIELD_OPTIONS.map((field) => ({
+  key: `inspection.crawlField.${field.key}` as MasterDataPermissionKey,
+  label: field.label,
+}));
+
+const ITEM_INSPECTION_PERMISSION_FIELD_ITEMS: {
+  key: MasterDataPermissionKey;
+  label: string;
+}[] = [
+  { key: "inspection.itemInspectionField.company", label: "企業名" },
+  { key: "inspection.itemInspectionField.zipcode", label: "郵便番号" },
+  { key: "inspection.itemInspectionField.address", label: "住所" },
+  { key: "inspection.itemInspectionField.big_industry", label: "大業種" },
+  { key: "inspection.itemInspectionField.small_industry", label: "小業種" },
+  { key: "inspection.itemInspectionField.company_kana", label: "企業名（かな）" },
+  { key: "inspection.itemInspectionField.summary", label: "企業概要" },
+  { key: "inspection.itemInspectionField.website_url", label: "企業URL" },
+  { key: "inspection.itemInspectionField.form_url", label: "お問い合わせフォームURL" },
+  { key: "inspection.itemInspectionField.phone", label: "電話番号" },
+  { key: "inspection.itemInspectionField.fax", label: "FAX番号" },
+  { key: "inspection.itemInspectionField.email", label: "メールアドレス" },
+  { key: "inspection.itemInspectionField.established_date", label: "設立年月" },
+  { key: "inspection.itemInspectionField.representative_name", label: "代表者名" },
+  { key: "inspection.itemInspectionField.representative_title", label: "代表者役職" },
+  { key: "inspection.itemInspectionField.capital", label: "資本金" },
+  { key: "inspection.itemInspectionField.employee_count", label: "従業員数" },
+  { key: "inspection.itemInspectionField.employee_count_year", label: "従業員数年度" },
+  { key: "inspection.itemInspectionField.previous_sales", label: "前年売上高" },
+  { key: "inspection.itemInspectionField.latest_sales", label: "直近売上高" },
+  { key: "inspection.itemInspectionField.closing_month", label: "決算月" },
+  { key: "inspection.itemInspectionField.office_count", label: "事業所数" },
+  { key: "inspection.itemInspectionField.tag", label: "タグ" },
+  { key: "inspection.itemInspectionField.business_type", label: "業種" },
+  { key: "inspection.itemInspectionField.business_content", label: "事業内容" },
+  { key: "inspection.itemInspectionField.industry_category", label: "業界" },
+  { key: "inspection.itemInspectionField.permit_number", label: "許可番号" },
+  { key: "inspection.itemInspectionField.memo", label: "メモ" },
+];
+
+const LIST_DATA_PERMISSION_ITEMS: {
+  key: MasterDataPermissionKey;
+  label: string;
+}[] = [
+  { key: "search.columnFilters", label: "リスト内フィルタ" },
+];
+
+const MASTER_DATA_PERMISSION_GROUPS: {
+  title: string;
+  items: { key: MasterDataPermissionKey; label: string }[];
+}[] = [
+  {
+    title: "検索",
+    items: [
+      { key: "search.companyName", label: "企業名" },
+      { key: "search.prefecture", label: "都道府県" },
+      { key: "search.industry", label: "業種" },
+      { key: "search.established", label: "設立" },
+      { key: "search.capital", label: "資本金" },
+      { key: "search.employeeCount", label: "従業員数" },
+      { key: "search.tag", label: "タグ" },
+    ],
+  },
+  {
+    title: "リスト",
+    items: [
+      { key: "list.add", label: "リスト追加" },
+      { key: "list.delete", label: "リスト削除" },
+      { key: "list.itemDelete", label: "項目削除" },
+      { key: "list.dedupe", label: "重複削除" },
+    ],
+  },
+  {
+    title: "CSV",
+    items: [
+      { key: "csv.import", label: "CSV投入" },
+      { key: "csv.export", label: "CSV抽出" },
+      { key: "csv.template", label: "CSVテンプレート" },
+    ],
+  },
+  {
+    title: "精査",
+    items: [
+      { key: "inspection.crawl", label: "クローリング" },
+      { key: "inspection.itemInspection", label: "項目精査" },
+    ],
+  },
+  {
+    title: "クローリング項目",
+    items: CRAWL_PERMISSION_FIELD_ITEMS,
+  },
+  {
+    title: "項目精査 項目",
+    items: ITEM_INSPECTION_PERMISSION_FIELD_ITEMS,
+  },
+];
+
+function createPermissionValues(checked: boolean): MasterDataPermissions {
+  return [
+    ...LIST_DATA_PERMISSION_ITEMS.map((item) => item.key),
+    ...MASTER_DATA_PERMISSION_GROUPS.flatMap((group) =>
+      group.items.map((item) => item.key)
+    ),
+  ].reduce((acc, permissionKey) => {
+    acc[permissionKey] = checked;
+    return acc;
+  }, {} as MasterDataPermissions);
+}
+
+const CRAWL_FIELD_PERMISSION_KEYS = CRAWL_PERMISSION_FIELD_ITEMS.map(
+  (item) => item.key
+);
+
+const ITEM_INSPECTION_FIELD_PERMISSION_KEYS =
+  ITEM_INSPECTION_PERMISSION_FIELD_ITEMS.map((item) => item.key);
+
+function hasAnyCheckedPermission(
+  permissions: MasterDataPermissions,
+  permissionKeys: MasterDataPermissionKey[]
+) {
+  return permissionKeys.some((permissionKey) => permissions[permissionKey] !== false);
+}
+
+function syncInspectionParentPermissions(
+  permissions: MasterDataPermissions
+): MasterDataPermissions {
+  const next = { ...permissions };
+
+  next["inspection.crawl"] = hasAnyCheckedPermission(
+    next,
+    CRAWL_FIELD_PERMISSION_KEYS
+  );
+
+  next["inspection.itemInspection"] = hasAnyCheckedPermission(
+    next,
+    ITEM_INSPECTION_FIELD_PERMISSION_KEYS
+  );
+
+  return next;
+}
+
 type ApiResponse = {
   ok: boolean;
   loginUser?: MasterDataLoginUser | null;
   loginHistoryEvent?: MasterDataLoginHistoryItem;
   loginHistory?: MasterDataLoginHistoryItem[];
+  employees?: MasterDataPermissionEmployee[];
+  employee?: MasterDataPermissionEmployee;
+  permissions?: MasterDataPermissions;
+  allowedFilters?: Record<string, unknown>;
   total?: number;
   page?: number;
   limit?: number | "all";
@@ -1517,6 +1706,7 @@ function HeaderCell({
   filterKey,
   filterState,
   isOpen,
+  canShowFilterButton,
   onToggleOpen,
   onSortChange,
   onConditionTypeChange,
@@ -1535,6 +1725,7 @@ function HeaderCell({
   filterKey: FilterKey;
   filterState: ColumnFilterState;
   isOpen: boolean;
+  canShowFilterButton: boolean;
   onToggleOpen: (key: FilterKey) => void;
   onSortChange: (key: FilterKey, direction: SortDirection) => void;
   onConditionTypeChange: (key: FilterKey, value: ConditionType) => void;
@@ -1549,7 +1740,7 @@ function HeaderCell({
   onApply: (key: FilterKey) => void;
   onClear: (key: FilterKey) => void;
 }) {
-  const active = hasActiveFilter(filterState);
+  const active = canShowFilterButton && hasActiveFilter(filterState);
   const visibleValues = filterState.availableValues.filter((value) => {
     if (!filterState.valueSearch.trim()) return true;
     const labelValue = value === "" ? "(空白)" : value;
@@ -1573,32 +1764,40 @@ function HeaderCell({
   return (
     <div className="relative border-r border-white/5 last:border-r-0">
       <div
-        className={`grid grid-cols-[minmax(0,1fr)_28px] items-center gap-2 px-4 py-3 text-sm font-semibold ${
+        className={`grid items-center gap-2 px-4 py-3 text-sm font-semibold ${
           active ? "bg-sky-500/10 text-sky-100" : "text-slate-100"
         }`}
+        style={{
+          gridTemplateColumns: canShowFilterButton
+            ? "minmax(0, 1fr) 28px"
+            : "minmax(0, 1fr)",
+        }}
       >
         <span className="block w-full whitespace-nowrap text-center">
           {label}
         </span>
 
-        <button
-          type="button"
-          onClick={() => onToggleOpen(filterKey)}
-          className={`inline-flex h-7 w-7 items-center justify-center justify-self-end rounded-lg border text-[11px] transition ${
-            active
-              ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
-              : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
-          }`}
-        >
-          ▼
-        </button>
+        {canShowFilterButton && (
+          <button
+            type="button"
+            onClick={() => onToggleOpen(filterKey)}
+            className={`inline-flex h-7 w-7 items-center justify-center justify-self-end rounded-lg border text-[11px] transition ${
+              active
+                ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
+                : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+            }`}
+          >
+            ▼
+          </button>
+        )}
       </div>
 
-      {isOpen &&
+      {canShowFilterButton &&
+        isOpen &&
         typeof document !== "undefined" &&
         createPortal(
           <div
-            className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+            className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-2"
             onClick={() => onToggleOpen(filterKey)}
           >
             <div className="flex min-h-full items-center justify-center">
@@ -2273,12 +2472,73 @@ export default function Home() {
 
   const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
 
-  const [settingsTab, setSettingsTab] = useState<"profile" | "loginHistory">(
-    "profile"
-  );
+  const [settingsTab, setSettingsTab] = useState<
+    "profile" | "loginHistory" | "permissionManagement"
+  >("profile");
   const [loginHistory, setLoginHistory] = useState<
     MasterDataLoginHistoryItem[]
   >([]);
+
+  const [permissionEmployees, setPermissionEmployees] = useState<
+    MasterDataPermissionEmployee[]
+  >([]);
+  const [selectedPermissionEmployeeId, setSelectedPermissionEmployeeId] =
+    useState("");
+  const [permissionLoading, setPermissionLoading] = useState(false);
+  const [permissionSaving, setPermissionSaving] = useState(false);
+  const [permissionError, setPermissionError] = useState("");
+  const [permissionMessage, setPermissionMessage] = useState("");
+  const [permissionListScopeOpen, setPermissionListScopeOpen] = useState(false);
+
+  const [permissionListScopeSearchOpen, setPermissionListScopeSearchOpen] =
+    useState(false);
+
+  const permissionListScopeBaseColumnStatesRef =
+    useRef<Record<FilterKey, ColumnFilterState> | null>(null);
+
+  const permissionListScopeBaseAdvancedFiltersRef =
+    useRef<AdvancedFiltersState | null>(null);
+
+  const permissionListScopeBasePageRef = useRef(1);
+  const permissionListScopeBaseLimitRef = useRef("200");
+
+  const [currentUserPermissions, setCurrentUserPermissions] =
+    useState<MasterDataPermissions>({});
+
+  const [currentUserPermissionLoaded, setCurrentUserPermissionLoaded] =
+    useState(false);
+
+  const selectedPermissionEmployee = useMemo(
+    () =>
+      permissionEmployees.find(
+        (employee) => employee.id === selectedPermissionEmployeeId
+      ) ?? null,
+    [permissionEmployees, selectedPermissionEmployeeId]
+  );
+
+  const canUsePermission = (permissionKey: MasterDataPermissionKey) => {
+    if (loginUser?.role === "管理者") {
+      return true;
+    }
+
+    if (loginUser?.role === "従業員" && !currentUserPermissionLoaded) {
+      return true;
+    }
+
+    return currentUserPermissions[permissionKey] !== false;
+  };
+
+  const canUseAnyPermission = (permissionKeys: MasterDataPermissionKey[]) => {
+    return permissionKeys.some((permissionKey) =>
+      canUsePermission(permissionKey)
+    );
+  };
+
+  const getAdvancedFilterPermissionKey = (
+    key: AdvancedFilterModalKey
+  ): MasterDataPermissionKey => {
+    return `search.${key}` as MasterDataPermissionKey;
+  };
 
   const [settingsPasswordVisible, setSettingsPasswordVisible] = useState(false);
 
@@ -2293,9 +2553,594 @@ export default function Home() {
   const [loginUser, setLoginUser] = useState<MasterDataLoginUser | null>(null);
   const [screenReady, setScreenReady] = useState(false);
 
+  const visibleCrawlConfirmFieldOptions = CRAWL_CONFIRM_FIELD_OPTIONS.filter(
+    (field) =>
+      canUsePermission(
+        `inspection.crawlField.${field.key}` as MasterDataPermissionKey
+      )
+  );
+
+  const visibleItemInspectionColumnDefs = COLUMN_DEFS.filter((column) =>
+    canUsePermission(
+      `inspection.itemInspectionField.${column.key}` as MasterDataPermissionKey
+    )
+  );
+
+  const canUseCrawlPanel =
+    canUsePermission("inspection.crawl") &&
+    visibleCrawlConfirmFieldOptions.length > 0;
+
+  const canUseItemInspectionPanel =
+    canUsePermission("inspection.itemInspection") &&
+    visibleItemInspectionColumnDefs.length > 0;
+
+  const canShowListColumnFilters = canUsePermission("search.columnFilters");
+
+  const createVisibleCrawlFieldSelections = (
+    checked: boolean
+  ): Record<CrawlFieldKey, boolean> => {
+    const visibleKeySet = new Set(
+      visibleCrawlConfirmFieldOptions.map((field) => field.key)
+    );
+
+    return CRAWL_CONFIRM_FIELD_OPTIONS.reduce((acc, field) => {
+      acc[field.key] = checked && visibleKeySet.has(field.key);
+      return acc;
+    }, {} as Record<CrawlFieldKey, boolean>);
+  };
+
+  const createVisibleItemInspectionSelections = (
+    checked: boolean
+  ): Record<FilterKey, boolean> => {
+    const visibleKeySet = new Set(
+      visibleItemInspectionColumnDefs.map((column) => column.key)
+    );
+
+    return COLUMN_DEFS.reduce((acc, column) => {
+      acc[column.key] = checked && visibleKeySet.has(column.key);
+      return acc;
+    }, {} as Record<FilterKey, boolean>);
+  };
+
   const fetchDataRequestIdRef = useRef(0);
   const filterValueRequestIdRef = useRef<Partial<Record<FilterKey, number>>>({});
   const crawlPreviewRequestIdRef = useRef(0);
+
+  const fetchCurrentUserPermissions = async (targetUser = loginUser) => {
+    setCurrentUserPermissionLoaded(false);
+
+    if (!targetUser) {
+      setCurrentUserPermissions({});
+      setCurrentUserPermissionLoaded(true);
+      return;
+    }
+
+    if (targetUser.role === "管理者") {
+      setCurrentUserPermissions({});
+      setCurrentUserPermissionLoaded(true);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/master_data/permissions/me", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "ログイン中ユーザーの権限取得に失敗しました");
+      }
+
+      setCurrentUserPermissions(data.permissions || {});
+      setCurrentUserPermissionLoaded(true);
+    } catch {
+      setCurrentUserPermissions({});
+      setCurrentUserPermissionLoaded(true);
+    }
+  };
+
+  const fetchPermissionEmployees = async () => {
+    if (loginUser?.role !== "管理者") {
+      setPermissionEmployees([]);
+      setSelectedPermissionEmployeeId("");
+      return;
+    }
+
+    setPermissionLoading(true);
+    setPermissionError("");
+    setPermissionMessage("");
+
+    try {
+      const res = await fetch("/api/master_data/permissions", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "権限情報の取得に失敗しました");
+      }
+
+      const employees = data.employees || [];
+
+      setPermissionEmployees(employees);
+      setSelectedPermissionEmployeeId((currentId) => {
+        if (currentId && employees.some((employee) => employee.id === currentId)) {
+          return currentId;
+        }
+
+        return employees[0]?.id ?? "";
+      });
+    } catch (e) {
+      setPermissionEmployees([]);
+      setSelectedPermissionEmployeeId("");
+      setPermissionError(
+        e instanceof Error ? e.message : "権限情報の取得に失敗しました"
+      );
+    } finally {
+      setPermissionLoading(false);
+    }
+  };
+
+  const handleToggleEmployeePermission = (
+    employeeId: string,
+    permissionKey: MasterDataPermissionKey
+  ) => {
+    setPermissionEmployees((prev) =>
+      prev.map((employee) => {
+        if (employee.id !== employeeId) {
+          return employee;
+        }
+
+        const currentChecked = employee.permissions[permissionKey] !== false;
+        const nextChecked = !currentChecked;
+        const nextPermissions = { ...employee.permissions };
+
+        nextPermissions[permissionKey] = nextChecked;
+
+        if (permissionKey === "inspection.crawl") {
+          CRAWL_FIELD_PERMISSION_KEYS.forEach((fieldPermissionKey) => {
+            nextPermissions[fieldPermissionKey] = nextChecked;
+          });
+        }
+
+        if (permissionKey === "inspection.itemInspection") {
+          ITEM_INSPECTION_FIELD_PERMISSION_KEYS.forEach((fieldPermissionKey) => {
+            nextPermissions[fieldPermissionKey] = nextChecked;
+          });
+        }
+
+        return {
+          ...employee,
+          permissions: syncInspectionParentPermissions(nextPermissions),
+        };
+      })
+    );
+  };
+
+  const handleSetEmployeePermissionGroup = (
+    employeeId: string,
+    permissionKeys: MasterDataPermissionKey[],
+    checked: boolean
+  ) => {
+    setPermissionEmployees((prev) =>
+      prev.map((employee) => {
+        if (employee.id !== employeeId) {
+          return employee;
+        }
+
+        const nextPermissions = { ...employee.permissions };
+
+        permissionKeys.forEach((permissionKey) => {
+          nextPermissions[permissionKey] = checked;
+        });
+
+        if (permissionKeys.includes("inspection.crawl")) {
+          CRAWL_FIELD_PERMISSION_KEYS.forEach((fieldPermissionKey) => {
+            nextPermissions[fieldPermissionKey] = checked;
+          });
+        }
+
+        if (permissionKeys.includes("inspection.itemInspection")) {
+          ITEM_INSPECTION_FIELD_PERMISSION_KEYS.forEach((fieldPermissionKey) => {
+            nextPermissions[fieldPermissionKey] = checked;
+          });
+        }
+
+        return {
+          ...employee,
+          permissions: syncInspectionParentPermissions(nextPermissions),
+        };
+      })
+    );
+  };
+
+    const buildCurrentPermissionListScope = (): PermissionListScopeFilters => {
+      const filterModels = buildRequestFilterModels(appliedColumnStates);
+      const advancedFilters = buildRequestAdvancedFilters(
+        appliedAdvancedFilters,
+        advancedValueOptions
+      );
+
+      const sortColumn = COLUMN_DEFS.find(
+        (column) => appliedColumnStates[column.key].sortDirection !== ""
+      );
+
+      const scope: PermissionListScopeFilters = {
+        filterModels,
+        advancedFilters,
+      };
+
+      if (sortColumn) {
+        scope.sortKey = sortColumn.key;
+        scope.sortDirection = appliedColumnStates[sortColumn.key].sortDirection;
+      }
+
+      return scope;
+    };
+
+    const handleApplyPermissionListScope = () => {
+      if (!selectedPermissionEmployee) {
+        return;
+      }
+
+      const listScopeFilters = buildCurrentPermissionListScope();
+
+      const nextAllowedFilters = {
+        ...(selectedPermissionEmployee.allowedFilters || {}),
+        listScopeFilters,
+      };
+
+      setPermissionEmployees((prev) =>
+        prev.map((employee) => {
+          if (employee.id !== selectedPermissionEmployee.id) {
+            return employee;
+          }
+
+          return {
+            ...employee,
+            allowedFilters: nextAllowedFilters,
+          };
+        })
+      );
+
+      closePermissionListScopeModal();
+      setPermissionMessage(
+        "リストの絞り込み範囲を反映しました。保存ボタンを押すと確定します"
+      );
+    };
+
+  const handleClearPermissionListScope = () => {
+    if (!selectedPermissionEmployee) {
+      return;
+    }
+
+    setPermissionEmployees((prev) =>
+      prev.map((employee) => {
+        if (employee.id !== selectedPermissionEmployee.id) {
+          return employee;
+        }
+
+        const nextAllowedFilters = { ...(employee.allowedFilters || {}) };
+        delete nextAllowedFilters.listScopeFilters;
+
+        return {
+          ...employee,
+          allowedFilters: nextAllowedFilters,
+        };
+      })
+    );
+
+    setPermissionMessage(
+      "リストの絞り込み範囲を解除しました。保存ボタンを押すと確定します"
+    );
+  };
+
+  const isPermissionScopeRecord = (
+    value: unknown
+  ): value is Record<string, unknown> => {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  };
+
+  const toPermissionScopeStringArray = (value: unknown) => {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item !== "");
+  };
+
+  const toPermissionScopeString = (value: unknown) => {
+    return String(value ?? "").trim();
+  };
+
+  const createColumnStatesFromPermissionListScope = (
+    listScopeFilters: unknown
+  ): Record<FilterKey, ColumnFilterState> => {
+    const next = createInitialColumnStates();
+
+    if (!isPermissionScopeRecord(listScopeFilters)) {
+      return next;
+    }
+
+    const filterModels = listScopeFilters.filterModels;
+
+    if (!isPermissionScopeRecord(filterModels)) {
+      return next;
+    }
+
+    COLUMN_DEFS.forEach((column) => {
+      const model = filterModels[column.key];
+
+      if (!isPermissionScopeRecord(model)) {
+        return;
+      }
+
+      const conditionType = toPermissionScopeString(model.conditionType);
+      const sortDirection = toPermissionScopeString(model.sortDirection);
+
+      if (
+        sortDirection === "" ||
+        sortDirection === "asc" ||
+        sortDirection === "desc"
+      ) {
+        next[column.key].sortDirection = sortDirection;
+      }
+
+      if (
+        conditionType === "" ||
+        conditionType === "contains" ||
+        conditionType === "not_contains" ||
+        conditionType === "equals" ||
+        conditionType === "not_equals" ||
+        conditionType === "starts_with" ||
+        conditionType === "ends_with" ||
+        conditionType === "is_empty" ||
+        conditionType === "is_not_empty"
+      ) {
+        next[column.key].conditionType = conditionType;
+      }
+
+      next[column.key].conditionValue = toPermissionScopeString(
+        model.conditionValue
+      );
+
+      next[column.key].valueFilterEnabled =
+        model.valueFilterEnabled === true;
+
+      next[column.key].selectedValues = toPermissionScopeStringArray(
+        model.selectedValues
+      );
+    });
+
+    const sortKey = toPermissionScopeString(listScopeFilters.sortKey);
+    const sortDirection = toPermissionScopeString(
+      listScopeFilters.sortDirection
+    );
+
+    if (
+      COLUMN_DEFS.some((column) => column.key === sortKey) &&
+      (sortDirection === "asc" || sortDirection === "desc")
+    ) {
+      COLUMN_DEFS.forEach((column) => {
+        next[column.key].sortDirection =
+          column.key === sortKey ? sortDirection : "";
+      });
+    }
+
+    return next;
+  };
+
+  const createAdvancedFiltersFromPermissionListScope = (
+    listScopeFilters: unknown
+  ): AdvancedFiltersState => {
+    const next = createInitialAdvancedFiltersState();
+
+    if (!isPermissionScopeRecord(listScopeFilters)) {
+      return next;
+    }
+
+    const advancedFilters = listScopeFilters.advancedFilters;
+
+    if (!isPermissionScopeRecord(advancedFilters)) {
+      return next;
+    }
+
+    if (isPermissionScopeRecord(advancedFilters.companyName)) {
+      next.companyName.keyword = toPermissionScopeString(
+        advancedFilters.companyName.keyword
+      );
+    }
+
+    if (isPermissionScopeRecord(advancedFilters.prefectures)) {
+      next.prefectures.regions = toPermissionScopeStringArray(
+        advancedFilters.prefectures.regions
+      );
+      next.prefectures.prefectures = toPermissionScopeStringArray(
+        advancedFilters.prefectures.prefectures
+      );
+      next.prefectures.cities = toPermissionScopeStringArray(
+        advancedFilters.prefectures.cities
+      );
+    }
+
+    if (isPermissionScopeRecord(advancedFilters.industries)) {
+      next.industries.bigIndustries = toPermissionScopeStringArray(
+        advancedFilters.industries.bigIndustries
+      );
+      next.industries.smallIndustries = toPermissionScopeStringArray(
+        advancedFilters.industries.smallIndustries
+      );
+    }
+
+    if (isPermissionScopeRecord(advancedFilters.established)) {
+      next.established.years = toPermissionScopeStringArray(
+        advancedFilters.established.years
+      );
+      next.established.yearMonths = toPermissionScopeStringArray(
+        advancedFilters.established.yearMonths
+      );
+      next.established.from = toPermissionScopeString(
+        advancedFilters.established.from
+      );
+      next.established.to = toPermissionScopeString(
+        advancedFilters.established.to
+      );
+    }
+
+    if (isPermissionScopeRecord(advancedFilters.capital)) {
+      next.capital.min = toPermissionScopeString(advancedFilters.capital.min);
+      next.capital.max = toPermissionScopeString(advancedFilters.capital.max);
+    }
+
+    if (isPermissionScopeRecord(advancedFilters.employeeCount)) {
+      next.employeeCount.min = toPermissionScopeString(
+        advancedFilters.employeeCount.min
+      );
+      next.employeeCount.max = toPermissionScopeString(
+        advancedFilters.employeeCount.max
+      );
+    }
+
+    if (isPermissionScopeRecord(advancedFilters.tags)) {
+      next.tags.parents = toPermissionScopeStringArray(
+        advancedFilters.tags.parents
+      );
+      next.tags.tags = toPermissionScopeStringArray(
+        advancedFilters.tags.tags
+      );
+    }
+
+    return next;
+  };
+
+  const openPermissionListScopeModal = () => {
+    permissionListScopeBaseColumnStatesRef.current =
+      cloneColumnStates(appliedColumnStates);
+
+    permissionListScopeBaseAdvancedFiltersRef.current =
+      cloneAdvancedFiltersState(appliedAdvancedFilters);
+
+    permissionListScopeBasePageRef.current = page;
+    permissionListScopeBaseLimitRef.current = limit;
+
+    const savedListScopeFilters =
+      selectedPermissionEmployee?.allowedFilters?.listScopeFilters;
+
+    const scopeColumnStates =
+      createColumnStatesFromPermissionListScope(savedListScopeFilters);
+
+    const scopeAdvancedFilters =
+      createAdvancedFiltersFromPermissionListScope(savedListScopeFilters);
+
+    setDraftColumnStates(scopeColumnStates);
+    setAppliedColumnStates(scopeColumnStates);
+    setDraftAdvancedFilters(scopeAdvancedFilters);
+    setAppliedAdvancedFilters(scopeAdvancedFilters);
+    setPage(1);
+
+    setOpenAdvancedFilterKey(null);
+    setOpenFilterKey(null);
+    setPermissionListScopeSearchOpen(false);
+    setPermissionListScopeOpen(true);
+  };
+
+  const closePermissionListScopeModal = () => {
+    setPermissionListScopeOpen(false);
+    setPermissionListScopeSearchOpen(false);
+    setOpenFilterKey(null);
+    setOpenAdvancedFilterKey(null);
+
+    if (permissionListScopeBaseColumnStatesRef.current) {
+      const baseColumnStates = cloneColumnStates(
+        permissionListScopeBaseColumnStatesRef.current
+      );
+
+      setDraftColumnStates(baseColumnStates);
+      setAppliedColumnStates(baseColumnStates);
+    }
+
+    if (permissionListScopeBaseAdvancedFiltersRef.current) {
+      const baseAdvancedFilters = cloneAdvancedFiltersState(
+        permissionListScopeBaseAdvancedFiltersRef.current
+      );
+
+      setDraftAdvancedFilters(baseAdvancedFilters);
+      setAppliedAdvancedFilters(baseAdvancedFilters);
+    }
+
+    setPage(permissionListScopeBasePageRef.current);
+    setLimit(permissionListScopeBaseLimitRef.current);
+
+    permissionListScopeBaseColumnStatesRef.current = null;
+    permissionListScopeBaseAdvancedFiltersRef.current = null;
+  };
+
+  const handleSetAllEmployeePermissions = (
+    employeeId: string,
+    checked: boolean
+  ) => {
+    const allPermissionKeys = [
+      ...LIST_DATA_PERMISSION_ITEMS.map((item) => item.key),
+      ...MASTER_DATA_PERMISSION_GROUPS.flatMap((group) =>
+        group.items.map((item) => item.key)
+      ),
+    ];
+
+    handleSetEmployeePermissionGroup(employeeId, allPermissionKeys, checked);
+  };
+
+  const handleSaveEmployeePermissions = async () => {
+    if (!selectedPermissionEmployee) {
+      return;
+    }
+
+    setPermissionSaving(true);
+    setPermissionError("");
+    setPermissionMessage("");
+
+    try {
+      const res = await fetch("/api/master_data/permissions", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: selectedPermissionEmployee.id,
+          permissions: selectedPermissionEmployee.permissions,
+          allowedFilters: selectedPermissionEmployee.allowedFilters || {},
+        }),
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok || !data.employee) {
+        throw new Error(data.error || "権限情報の保存に失敗しました");
+      }
+
+      setPermissionEmployees((prev) =>
+        prev.map((employee) =>
+          employee.id === data.employee?.id ? data.employee : employee
+        )
+      );
+      
+      await fetchPermissionEmployees();
+
+      setPermissionMessage("権限を保存しました");
+    } catch (e) {
+      setPermissionError(
+        e instanceof Error ? e.message : "権限情報の保存に失敗しました"
+      );
+    } finally {
+      setPermissionSaving(false);
+    }
+  };
 
   const handleLoginSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2392,6 +3237,12 @@ export default function Home() {
     setSettingsPasswordVisible(false);
     setLoginPasswordVisible(false);
     setLoginError("");
+    setPermissionEmployees([]);
+    setSelectedPermissionEmployeeId("");
+    setPermissionError("");
+    setPermissionMessage("");
+    setCurrentUserPermissions({});
+    setCurrentUserPermissionLoaded(false);
   };
 
   const buildReadRequestBody = (extra: Record<string, unknown> = {}) => {
@@ -2747,6 +3598,22 @@ export default function Home() {
   }, [page, limit, appliedColumnStates, appliedAdvancedFilters, loginStatus]);
 
   useEffect(() => {
+    if (!canShowListColumnFilters) {
+      setOpenFilterKey(null);
+    }
+  }, [canShowListColumnFilters]);
+
+  useEffect(() => {
+    if (loginStatus !== "logged_in" || !loginUser) {
+      setCurrentUserPermissions({});
+      setCurrentUserPermissionLoaded(false);
+      return;
+    }
+
+    void fetchCurrentUserPermissions(loginUser);
+  }, [loginStatus, loginUser?.id, loginUser?.role, loginUser?.organization]);
+
+  useEffect(() => {
     if (loginStatus !== "logged_in") return;
 
     const timer = window.setInterval(() => {
@@ -2851,6 +3718,11 @@ export default function Home() {
 
   const handleOpenFilter = async (key: FilterKey) => {
     if (openFilterKey === key) {
+      setOpenFilterKey(null);
+      return;
+    }
+
+    if (!canShowListColumnFilters) {
       setOpenFilterKey(null);
       return;
     }
@@ -2967,15 +3839,8 @@ export default function Home() {
     setDraftColumnStates((prev) => {
       const next = cloneColumnStates(prev);
 
-      const allValues =
-        next[key].allValues.length > 0
-          ? next[key].allValues
-          : next[key].selectedValues.length > 0
-          ? next[key].selectedValues
-          : [...next[key].availableValues];
-
-      next[key].valueFilterEnabled = true;
-      next[key].selectedValues = [...allValues];
+      next[key].valueFilterEnabled = false;
+      next[key].selectedValues = [];
       next[key].checkedItemCount = next[key].totalItemCount;
 
       return next;
@@ -3049,7 +3914,11 @@ export default function Home() {
         return;
       }
 
-      setOpenSidebarPanel(null);
+      if (!permissionListScopeOpen) {
+        setOpenSidebarPanel(null);
+      }
+
+      setPermissionListScopeSearchOpen(false);
       setOpenFilterKey(null);
       setDraftAdvancedFilters(cloneAdvancedFiltersState(appliedAdvancedFilters));
       setOpenAdvancedFilterKey(key);
@@ -3086,6 +3955,13 @@ export default function Home() {
         void fetchMasterDataLoginHistory(loginUser?.id).then((history) => {
           setLoginHistory(history);
         });
+
+        if (loginUser?.role !== "管理者") {
+          setPermissionEmployees([]);
+          setSelectedPermissionEmployeeId("");
+          setPermissionError("");
+          setPermissionMessage("");
+        }
       }
 
       if (nextPanel === "list") {
@@ -4007,9 +4883,18 @@ export default function Home() {
 
   const renderSidebarPanelContent = () => {
     if (openSidebarPanel === "search") {
+      const visibleAdvancedFilterButtons = ADVANCED_FILTER_BUTTONS.filter((button) =>
+        canUsePermission(getAdvancedFilterPermissionKey(button.key))
+      );
+
       return (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {ADVANCED_FILTER_BUTTONS.map((button) => {
+          {visibleAdvancedFilterButtons.length === 0 && (
+            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400 sm:col-span-2">
+              使用できる検索項目がありません
+            </div>
+          )}
+          {visibleAdvancedFilterButtons.map((button) => {
             const active = hasActiveAdvancedFilter(
               button.key,
               appliedAdvancedFilters
@@ -4041,50 +4926,69 @@ export default function Home() {
       return (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
-            <button
-              type="button"
-              onClick={() => setListDeleteScopeOpen(true)}
-              disabled={listDeleting}
-              className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-rose-500 disabled:opacity-50"
-            >
-              リスト削除
-            </button>
+            {!canUseAnyPermission([
+              "list.delete",
+              "list.add",
+              "list.itemDelete",
+              "list.dedupe",
+            ]) && (
+              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400 sm:col-span-4">
+                使用できるリスト操作がありません
+              </div>
+            )}
 
-            <button
-              type="button"
-              onClick={handleOpenListAdd}
-              disabled={mynaviLoading}
-              className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-emerald-500 disabled:opacity-50"
-            >
-              {mynaviLoading ? "取得中..." : "リスト追加"}
-            </button>
+            {canUsePermission("list.delete") && (
+              <button
+                type="button"
+                onClick={() => setListDeleteScopeOpen(true)}
+                disabled={listDeleting}
+                className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-rose-500 disabled:opacity-50"
+              >
+                リスト削除
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => {
-                setItemDeleteSelections(createEmptyItemDeleteSelections());
-                setItemDeleteTarget(null);
-                setItemDeleteError("");
-                setItemDeleteMessage("");
-                setItemDeleteScopeOpen(true);
-              }}
-              disabled={itemDeleting}
-              className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-cyan-500 disabled:opacity-50"
-            >
-              項目削除
-            </button>
+            {canUsePermission("list.add") && (
+              <button
+                type="button"
+                onClick={handleOpenListAdd}
+                disabled={mynaviLoading}
+                className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {mynaviLoading ? "取得中..." : "リスト追加"}
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => {
-                setDedupeTargetScope(null);
-                setDedupeScopeOpen(true);
-              }}
-              disabled={deduplicating}
-              className="h-11 rounded-xl bg-violet-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-violet-500 disabled:opacity-50"
-            >
-              {deduplicating ? "重複削除中..." : "重複削除"}
-            </button>
+            {canUsePermission("list.itemDelete") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setItemDeleteSelections(createEmptyItemDeleteSelections());
+                  setItemDeleteTarget(null);
+                  setItemDeleteError("");
+                  setItemDeleteMessage("");
+                  setItemDeleteScopeOpen(true);
+                }}
+                disabled={itemDeleting}
+                className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-cyan-500 disabled:opacity-50"
+              >
+                項目削除
+              </button>
+            )}
+
+            {canUsePermission("list.dedupe") && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDedupeTargetScope(null);
+                  setDedupeScopeOpen(true);
+                }}
+                disabled={deduplicating}
+                className="h-11 rounded-xl bg-violet-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-violet-500 disabled:opacity-50"
+              >
+                {deduplicating ? "重複削除中..." : "重複削除"}
+              </button>
+            )}
           </div>
 
           {mynaviMessage && (
@@ -4164,25 +5068,27 @@ export default function Home() {
     if (openSidebarPanel === "csv") {
       return (
         <div className="space-y-4">
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            multiple
-            onChange={(e) => {
-              const newFiles = Array.from(e.target.files ?? []);
-              setSelectedFiles((prev) => [...prev, ...newFiles]);
-              setCheckedImportFiles((prev) => ({
-                ...prev,
-                ...Object.fromEntries(
-                  newFiles.map((file) => [buildImportFileKey(file), true])
-                ),
-              }));
-              e.currentTarget.value = "";
-            }}
-            className="block w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-sky-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-sky-400"
-          />
+          {canUsePermission("csv.import") && (
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              multiple
+              onChange={(e) => {
+                const newFiles = Array.from(e.target.files ?? []);
+                setSelectedFiles((prev) => [...prev, ...newFiles]);
+                setCheckedImportFiles((prev) => ({
+                  ...prev,
+                  ...Object.fromEntries(
+                    newFiles.map((file) => [buildImportFileKey(file), true])
+                  ),
+                }));
+                e.currentTarget.value = "";
+              }}
+              className="block w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-sky-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-sky-400"
+            />
+          )}
 
-          {selectedFiles.length > 0 && (
+          {canUsePermission("csv.import") && selectedFiles.length > 0 && (
             <div className="space-y-2">
               {selectedFiles.map((file, index) => (
                 <div
@@ -4221,27 +5127,39 @@ export default function Home() {
           )}
 
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
-            <button
-              onClick={handleImportClick}
-              disabled={importing}
-              className="h-11 min-w-[160px] rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {importing ? "投入中..." : "CSV投入"}
-            </button>
+            {!canUseAnyPermission(["csv.import", "csv.export", "csv.template"]) && (
+              <div className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400">
+                使用できるCSV操作がありません
+              </div>
+            )}
 
-            <button
-              onClick={handleExportClick}
-              className="h-11 min-w-[160px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
-            >
-              CSV抽出
-            </button>
+            {canUsePermission("csv.import") && (
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                className="h-11 min-w-[160px] rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {importing ? "投入中..." : "CSV投入"}
+              </button>
+            )}
 
-            <button
-              onClick={handleDownloadTemplate}
-              className="h-11 min-w-[160px] rounded-xl bg-indigo-500 px-5 text-sm font-medium text-white transition hover:bg-indigo-400"
-            >
-              CSVテンプレート
-            </button>
+            {canUsePermission("csv.export") && (
+              <button
+                onClick={handleExportClick}
+                className="h-11 min-w-[160px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
+              >
+                CSV抽出
+              </button>
+            )}
+
+            {canUsePermission("csv.template") && (
+              <button
+                onClick={handleDownloadTemplate}
+                className="h-11 min-w-[160px] rounded-xl bg-indigo-500 px-5 text-sm font-medium text-white transition hover:bg-indigo-400"
+              >
+                CSVテンプレート
+              </button>
+            )}
           </div>
 
           {importMessage && (
@@ -4263,44 +5181,54 @@ export default function Home() {
       return (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => {
-                setCrawlFieldSelections(createEmptyCrawlFieldSelections());
-                setCrawlTargetScope(null);
-                setCrawlScopeOpen(true);
-              }}
-              disabled={crawling}
-              className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
-            >
-              {crawling ? "クローリング中..." : "クローリング"}
-            </button>
+            {!canUseCrawlPanel && !canUseItemInspectionPanel && (
+              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400 sm:col-span-2">
+                使用できる精査操作がありません
+              </div>
+            )}
 
-            <button
-              type="button"
-              onClick={() => {
-                setItemInspectionSelections(createEmptyItemDeleteSelections());
-                setItemInspectionMethodSelections(
-                  createEmptyItemInspectionMethodSelections()
-                );
-                setItemInspectionPreviewChanges([]);
-                setItemInspectionExcludedPreviewRows([]);
-                setItemInspectionExcludedTotalCount(0);
-                setItemInspectionPreviewTab("candidate");
-                setItemInspectionPreviewPage(1);
-                setItemInspectionCheckedPreviewRowIds({});
-                setItemInspectionMessage("");
-                setItemInspectionError("");
-                setItemInspectionMethodOpen(false);
-                setItemInspectionPreviewConfirmOpen(false);
-                setItemInspectionTargetScope(null);
-                setItemInspectionScopeOpen(true);
-              }}
-              disabled={itemInspecting}
-              className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
-            >
-              {itemInspecting ? "項目精査中..." : "項目精査"}
-            </button>
+            {canUseCrawlPanel && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCrawlFieldSelections(createVisibleCrawlFieldSelections(false));
+                  setCrawlTargetScope(null);
+                  setCrawlScopeOpen(true);
+                }}
+                disabled={crawling}
+                className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
+              >
+                {crawling ? "クローリング中..." : "クローリング"}
+              </button>
+            )}
+
+            {canUseItemInspectionPanel && (
+              <button
+                type="button"
+                onClick={() => {
+                  setItemInspectionSelections(createVisibleItemInspectionSelections(false));
+                  setItemInspectionMethodSelections(
+                    createEmptyItemInspectionMethodSelections()
+                  );
+                  setItemInspectionPreviewChanges([]);
+                  setItemInspectionExcludedPreviewRows([]);
+                  setItemInspectionExcludedTotalCount(0);
+                  setItemInspectionPreviewTab("candidate");
+                  setItemInspectionPreviewPage(1);
+                  setItemInspectionCheckedPreviewRowIds({});
+                  setItemInspectionMessage("");
+                  setItemInspectionError("");
+                  setItemInspectionMethodOpen(false);
+                  setItemInspectionPreviewConfirmOpen(false);
+                  setItemInspectionTargetScope(null);
+                  setItemInspectionScopeOpen(true);
+                }}
+                disabled={itemInspecting}
+                className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+              >
+                {itemInspecting ? "項目精査中..." : "項目精査"}
+              </button>
+            )}
           </div>
 
           {crawlMessage && (
@@ -4335,7 +5263,11 @@ export default function Home() {
 
       return (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-[#0f172a] p-2">
+          <div
+            className={`sticky top-0 z-30 grid gap-2 rounded-2xl border border-white/10 bg-[#0f172a]/95 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl ${
+              loginUser?.role === "管理者" ? "grid-cols-3" : "grid-cols-2"
+            }`}
+          >
             <button
               type="button"
               onClick={() => setSettingsTab("profile")}
@@ -4347,6 +5279,23 @@ export default function Home() {
             >
               プロフィール
             </button>
+
+            {loginUser?.role === "管理者" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsTab("permissionManagement");
+                  void fetchPermissionEmployees();
+                }}
+                className={`h-11 rounded-xl border px-3 text-sm font-semibold transition ${
+                  settingsTab === "permissionManagement"
+                    ? "border-sky-400/40 bg-sky-500/20 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
+                    : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                }`}
+              >
+                権限管理
+              </button>
+            )}
 
             <button
               type="button"
@@ -4404,6 +5353,18 @@ export default function Home() {
                     </div>
                     <div className="truncate text-sm font-semibold text-slate-100">
                       {nameParts.firstName}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4 md:col-span-2">
+                    <div className="mb-2 text-xs font-semibold text-slate-400">
+                      所属
+                    </div>
+                    <div
+                      className="truncate text-sm font-semibold text-slate-100"
+                      title={loginUser?.organization ?? ""}
+                    >
+                      {loginUser?.organization ?? "-"}
                     </div>
                   </div>
                 </div>
@@ -4506,6 +5467,327 @@ export default function Home() {
             </div>
           )}
 
+          {permissionListScopeOpen &&
+            selectedPermissionEmployee &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+                onClick={closePermissionListScopeModal}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex h-[calc(100dvh-16px)] w-[calc(100vw-16px)] max-w-none flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">
+                          リストの絞り込み範囲
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          ここで表示されているリスト範囲を、この従業員に適用します
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={closePermissionListScopeModal}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="flex flex-1 flex-col overflow-hidden px-4 py-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2">
+                        <div className="min-w-[320px] flex-1 text-xs leading-5 text-sky-100">
+                          上部のリスト内フィルタや検索条件で絞り込んだ状態を確認し、
+                          右下の「適用」を押すと、この従業員はその絞り込み範囲のリストだけを操作対象にできます。
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPermissionListScopeSearchOpen(true)}
+                            className="inline-flex h-10 min-w-[88px] items-center justify-center rounded-xl border border-sky-400/40 bg-sky-500/20 px-4 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/30"
+                          >
+                            検索
+                          </button>
+
+                          <div className="flex h-10 min-w-[110px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
+                            <span className="text-xs text-slate-400">総件数</span>
+                            <span className="text-sm font-semibold text-white">
+                              {total.toLocaleString()}件
+                            </span>
+                          </div>
+
+                          <div className="flex h-10 min-w-[110px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
+                            <span className="text-xs text-slate-400">現在ページ</span>
+                            <span className="text-sm font-semibold text-white">
+                              {page}
+                            </span>
+                          </div>
+
+                          <div className="flex h-10 min-w-[110px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
+                            <span className="text-xs text-slate-400">総ページ数</span>
+                            <span className="text-sm font-semibold text-white">
+                              {totalPages.toLocaleString()}
+                            </span>
+                          </div>
+
+                          <div className="flex h-10 min-w-[140px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
+                            <span className="text-xs text-slate-400">表示件数</span>
+                            <select
+                              value={limit}
+                              onChange={(e) => {
+                                setLimit(e.target.value);
+                                setPage(1);
+                              }}
+                              className="h-7 rounded-lg border border-white/10 bg-[#0f172a] px-2 text-center text-xs text-slate-100 outline-none focus:border-sky-500"
+                            >
+                              {pageSizeOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mb-2 text-xs text-slate-400">
+                        対象従業員：{selectedPermissionEmployee.name}
+                      </div>
+
+                      <div className="app-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-[#0b1326]/90">
+                        <div className="min-w-[5230px]">
+                          <div
+                            className="sticky top-0 z-20 grid border-b border-white/10 bg-[#162033]/95 backdrop-blur-xl"
+                            style={{
+                              gridTemplateColumns: GRID_TEMPLATE,
+                            }}
+                          >
+                            {COLUMN_DEFS.map((column) => (
+                              <HeaderCell
+                                key={`permission-scope-${column.key}`}
+                                label={column.label}
+                                filterKey={column.key}
+                                filterState={draftColumnStates[column.key]}
+                                isOpen={openFilterKey === column.key}
+                                canShowFilterButton={true}
+                                onToggleOpen={handleOpenFilter}
+                                onSortChange={updateSort}
+                                onConditionTypeChange={updateConditionType}
+                                onConditionValueChange={updateConditionValue}
+                                onValueSearchChange={updateValueSearch}
+                                onToggleValue={toggleSelectedValue}
+                                onSelectAllVisible={selectAllVisibleValues}
+                                onClearVisible={clearVisibleValues}
+                                onLoadPreviousValues={loadPreviousFilterValues}
+                                onLoadMoreValues={loadMoreFilterValues}
+                                onOpenClearConfirm={(key) =>
+                                  setSingleFilterClearConfirm({
+                                    type: "column",
+                                    key,
+                                  })
+                                }
+                                onApply={applyColumnFilter}
+                                onClear={clearColumnFilter}
+                              />
+                            ))}
+                          </div>
+
+                          {rows.length === 0 ? (
+                            <div className="px-4 py-10 text-center text-sm text-slate-500">
+                              表示できるリストがありません
+                            </div>
+                          ) : (
+                            rows.map((row, rowIndex) => (
+                              <div
+                                key={`permission-scope-row-${rowIndex}`}
+                                className="grid border-b border-white/5 bg-[#0f172a]/60 transition hover:bg-[#162033]"
+                                style={{ gridTemplateColumns: GRID_TEMPLATE }}
+                              >
+                                {COLUMN_DEFS.map((column) => {
+                                  const value = row[column.key];
+
+                                  return (
+                                    <div
+                                      key={`permission-scope-cell-${rowIndex}-${column.key}`}
+                                      title={value || ""}
+                                      className="truncate px-4 py-3 text-sm text-slate-100"
+                                    >
+                                      {value && value.trim() !== "" ? (
+                                        value
+                                      ) : (
+                                        <span className="text-slate-500">-</span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                      <div className="mt-2 mb-3 flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPage(1)}
+                          disabled={page <= 1 || limit === "all"}
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                        >
+                          最初
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPage((p) => Math.max(1, p - 1))}
+                          disabled={page <= 1 || limit === "all"}
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                        >
+                          前へ
+                        </button>
+
+                        {pageNumbers[0] > 1 && (
+                          <span className="px-1 text-sm text-slate-500">...</span>
+                        )}
+
+                        {pageNumbers.map((n) => (
+                          <button
+                            key={`permission-scope-page-${n}`}
+                            type="button"
+                            onClick={() => setPage(n)}
+                            disabled={limit === "all"}
+                            className={`rounded-xl px-4 py-2 text-sm transition ${
+                              page === n
+                                ? "bg-sky-500 text-white"
+                                : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                            } ${limit === "all" ? "opacity-40" : ""}`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+
+                        {pageNumbers[pageNumbers.length - 1] < totalPages && (
+                          <span className="px-1 text-sm text-slate-500">...</span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                          disabled={page >= totalPages || limit === "all"}
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                        >
+                          次へ
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setPage(totalPages)}
+                          disabled={page >= totalPages || limit === "all"}
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                        >
+                          最後
+                        </button>
+                      </div>
+
+                    <div className="flex justify-end gap-2 border-t border-white/10 px-4 py-4">
+                      <button
+                        type="button"
+                        onClick={closePermissionListScopeModal}
+                        className="h-10 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                      >
+                        キャンセル
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleApplyPermissionListScope}
+                        className="h-10 rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        適用
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+            {permissionListScopeSearchOpen &&
+              selectedPermissionEmployee &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <div
+                  className="app-modal-root fixed inset-0 z-[10000] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+                  onClick={() => setPermissionListScopeSearchOpen(false)}
+                >
+                  <div className="flex min-h-full items-center justify-center">
+                    <div
+                      className="flex w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+                        <div>
+                          <div className="text-sm font-semibold text-slate-100">
+                            検索
+                          </div>
+                          <div className="mt-1 text-xs text-slate-400">
+                            絞り込みに使う項目を選択してください
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setPermissionListScopeSearchOpen(false)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="p-4">
+                        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+                          {ADVANCED_FILTER_BUTTONS.filter((button) =>
+                            canUsePermission(
+                              getAdvancedFilterPermissionKey(button.key)
+                            )
+                          ).map((button) => {
+                            const active = hasActiveAdvancedFilter(
+                              button.key,
+                              appliedAdvancedFilters
+                            );
+
+                            return (
+                              <button
+                                key={`permission-scope-search-popup-${button.key}`}
+                                type="button"
+                                onClick={() => {
+                                  setPermissionListScopeSearchOpen(false);
+                                  void handleOpenAdvancedFilter(button.key);
+                                }}
+                                className={`h-10 rounded-xl border px-3 text-xs font-medium transition ${
+                                  active
+                                    ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
+                                    : "border-white/10 bg-[#0b1220] text-slate-200 hover:bg-white/10"
+                                }`}
+                              >
+                                {button.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
+
           {settingsTab === "loginHistory" && (
             <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -4559,6 +5841,293 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          {loginUser?.role === "管理者" &&
+            settingsTab === "permissionManagement" && (
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+                <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        従業員アカウント
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        同じ所属の従業員のみ表示します
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => void fetchPermissionEmployees()}
+                      disabled={permissionLoading}
+                      className="h-8 rounded-lg border border-white/10 bg-white/5 px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
+                    >
+                      更新
+                    </button>
+                  </div>
+
+                  {permissionLoading ? (
+                    <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      読み込み中です...
+                    </div>
+                  ) : permissionEmployees.length === 0 ? (
+                    <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
+                      表示できる従業員アカウントがありません
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {permissionEmployees.map((employee) => {
+                        const active = employee.id === selectedPermissionEmployeeId;
+
+                        return (
+                          <button
+                            key={employee.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPermissionEmployeeId(employee.id);
+                              setPermissionError("");
+                              setPermissionMessage("");
+                              setPermissionListScopeOpen(false);
+                              setPermissionListScopeSearchOpen(false);
+                              setOpenFilterKey(null);
+                              setOpenAdvancedFilterKey(null);
+                            }}
+                            className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                              active
+                                ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
+                                : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                            }`}
+                          >
+                            <div className="truncate text-sm font-semibold">
+                              {employee.name}
+                            </div>
+                            <div className="mt-1 truncate text-xs text-slate-400">
+                              ID：{employee.id}
+                            </div>
+                            <div className="mt-1 truncate text-xs text-slate-500">
+                              所属：{employee.organization || "-"}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {permissionError && (
+                    <div className="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                      {permissionError}
+                    </div>
+                  )}
+
+                  {permissionMessage && (
+                    <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                      {permissionMessage}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
+                  {!selectedPermissionEmployee ? (
+                    <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-10 text-center text-sm text-slate-400">
+                      左側から従業員アカウントを選択してください
+                    </div>
+                  ) : (
+                    <div className="space-y-5">
+                      <div className="flex flex-col gap-3 border-b border-white/10 pb-4 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="text-sm font-semibold text-slate-100">
+                            {selectedPermissionEmployee.name} の権限
+                          </div>
+                          <div className="mt-1 text-xs text-slate-400">
+                            チェックを外した項目は、この従業員では使えない設定にします
+                          </div>
+                        </div>
+
+                        <div className="flex min-w-[190px] shrink-0 flex-col items-end gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSaveEmployeePermissions}
+                            disabled={permissionSaving}
+                            className="inline-flex h-10 w-fit items-center justify-center rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:opacity-50"
+                          >
+                            {permissionSaving ? "保存中..." : "保存"}
+                          </button>
+
+                          <div className="flex min-w-[180px] shrink-0 items-center justify-end gap-2 self-end">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleSetAllEmployeePermissions(
+                                  selectedPermissionEmployee.id,
+                                  true
+                                )
+                              }
+                              className="inline-flex h-8 min-w-[76px] items-center justify-center whitespace-nowrap rounded-lg border border-white/10 bg-white/5 px-3 text-center text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                            >
+                              全選択
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleSetAllEmployeePermissions(
+                                  selectedPermissionEmployee.id,
+                                  false
+                                )
+                              }
+                              className="inline-flex h-8 min-w-[92px] items-center justify-center whitespace-nowrap rounded-lg border border-white/10 bg-white/5 px-3 text-center text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                            >
+                              選択解除
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-slate-100">
+                              リストデータ
+                            </div>
+                            <div className="mt-1 text-xs text-slate-400">
+                              この従業員が操作できるリスト範囲を設定します
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={openPermissionListScopeModal}
+                            className="inline-flex h-8 items-center justify-center whitespace-nowrap rounded-lg border border-white/10 bg-white/5 px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                          >
+                            リストの絞り込み範囲
+                          </button>
+                        </div>
+
+                        <div className="space-y-2">
+                          {LIST_DATA_PERMISSION_ITEMS.map((permission) => (
+                            <label
+                              key={permission.key}
+                              className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-200 transition hover:bg-white/5"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={
+                                  selectedPermissionEmployee.permissions[
+                                    permission.key
+                                  ] !== false
+                                }
+                                onChange={() =>
+                                  handleToggleEmployeePermission(
+                                    selectedPermissionEmployee.id,
+                                    permission.key
+                                  )
+                                }
+                                className="h-4 w-4 accent-sky-500"
+                              />
+                              <span className="min-w-0 flex-1">
+                                {permission.label}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+                          <div className="text-xs text-slate-400">
+                            設定状況：
+                            {selectedPermissionEmployee.allowedFilters?.listScopeFilters
+                              ? "絞り込み範囲あり"
+                              : "全リストを表示"}
+                          </div>
+
+                          {Boolean(selectedPermissionEmployee.allowedFilters?.listScopeFilters) && (
+                            <button
+                              type="button"
+                              onClick={handleClearPermissionListScope}
+                              className="inline-flex h-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                            >
+                              範囲解除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
+                        {MASTER_DATA_PERMISSION_GROUPS.map((group) => (
+                          <div
+                            key={group.title}
+                            className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4"
+                          >
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                              <div className="text-sm font-semibold text-slate-100">
+                                {group.title}
+                              </div>
+
+                              <div className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleSetEmployeePermissionGroup(
+                                      selectedPermissionEmployee.id,
+                                      group.items.map((item) => item.key),
+                                      true
+                                    )
+                                  }
+                                  className="inline-flex h-7 min-w-[68px] items-center justify-center whitespace-nowrap rounded-lg border border-white/10 bg-white/5 px-2 text-center text-[10px] font-semibold text-slate-200 transition hover:bg-white/10"
+                                >
+                                  全選択
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleSetEmployeePermissionGroup(
+                                      selectedPermissionEmployee.id,
+                                      group.items.map((item) => item.key),
+                                      false
+                                    )
+                                  }
+                                  className="inline-flex h-7 min-w-[68px] items-center justify-center whitespace-nowrap rounded-lg border border-white/10 bg-white/5 px-2 text-center text-[10px] font-semibold text-slate-200 transition hover:bg-white/10"
+                                >
+                                  選択解除
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              {group.items.map((permission) => (
+                                <label
+                                  key={permission.key}
+                                  className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm text-slate-200 transition hover:bg-white/5"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      selectedPermissionEmployee.permissions[
+                                        permission.key
+                                      ] !== false
+                                    }
+                                    onChange={() =>
+                                      handleToggleEmployeePermission(
+                                        selectedPermissionEmployee.id,
+                                        permission.key
+                                      )
+                                    }
+                                    className="h-4 w-4 accent-sky-500"
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    {permission.label}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
         </div>
       );
     }
@@ -7447,7 +9016,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       : openSidebarPanel === "search"
       ? "max-w-[720px]"
       : openSidebarPanel === "settings"
-      ? "max-w-[900px]"
+      ? "max-w-[1180px]"
       : openSidebarPanel === "theme"
       ? "max-w-[420px]"
       : "max-w-[520px]";
@@ -7469,7 +9038,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     activeAdvancedFilterKey === "industry" ||
     activeAdvancedFilterKey === "tag";
 
-  const selectedCrawlFields = getSelectedCrawlFields(crawlFieldSelections);
+  const selectedCrawlFields = visibleCrawlConfirmFieldOptions
+    .filter((field) => crawlFieldSelections[field.key])
+    .map((field) => field.key);
+  
   const hasSelectedCrawlFields = selectedCrawlFields.length > 0;
 
   const selectedItemDeleteFields = getSelectedItemDeleteFields(
@@ -7481,13 +9053,13 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     (column) => itemDeleteSelections[column.key]
   ).map((column) => column.label);
 
-  const selectedItemInspectionFields = getSelectedItemDeleteFields(
-    itemInspectionSelections
-  );
+  const selectedItemInspectionFields = visibleItemInspectionColumnDefs
+    .filter((column) => itemInspectionSelections[column.key])
+    .map((column) => column.key);
 
-  const selectedItemInspectionLabels = COLUMN_DEFS.filter(
-    (column) => itemInspectionSelections[column.key]
-  ).map((column) => column.label);
+  const selectedItemInspectionLabels = visibleItemInspectionColumnDefs
+    .filter((column) => itemInspectionSelections[column.key])
+    .map((column) => column.label);
 
   const hasSelectedItemInspectionFields =
     selectedItemInspectionFields.length > 0;
@@ -7757,7 +9329,38 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               </div>
 
               <div className="space-y-2">
-                {SIDEBAR_MENU_ITEMS.map((item) => {
+                {SIDEBAR_MENU_ITEMS.filter((item) => {
+                  if (item.key === "search") {
+                    return canUseAnyPermission(
+                      ADVANCED_FILTER_BUTTONS.map((button) =>
+                        getAdvancedFilterPermissionKey(button.key)
+                      )
+                    );
+                  }
+
+                  if (item.key === "list") {
+                    return canUseAnyPermission([
+                      "list.add",
+                      "list.delete",
+                      "list.itemDelete",
+                      "list.dedupe",
+                    ]);
+                  }
+
+                  if (item.key === "csv") {
+                    return canUseAnyPermission([
+                      "csv.import",
+                      "csv.export",
+                      "csv.template",
+                    ]);
+                  }
+
+                  if (item.key === "inspection") {
+                    return canUseCrawlPanel || canUseItemInspectionPanel;
+                  }
+
+                  return true;
+                }).map((item) => {
                   const isActive = openSidebarPanel === item.key;
 
                   return (
@@ -7785,6 +9388,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           type="button"
                           onClick={() => {
                             setOpenSidebarPanel(null);
+                            setPermissionListScopeSearchOpen(false);
                             setOpenFilterKey(null);
                             setOpenAdvancedFilterKey(null);
                             setAllFiltersClearConfirmOpen(true);
@@ -8562,7 +10166,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         type="button"
                         onClick={() =>
                           setItemInspectionSelections(
-                            createInitialItemDeleteSelections()
+                            createVisibleItemInspectionSelections(true)
                           )
                         }
                         disabled={itemInspecting}
@@ -8575,7 +10179,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         type="button"
                         onClick={() =>
                           setItemInspectionSelections(
-                            createEmptyItemDeleteSelections()
+                            createVisibleItemInspectionSelections(false)
                           )
                         }
                         disabled={itemInspecting}
@@ -8599,7 +10203,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                      {COLUMN_DEFS.map((field) => (
+                      {visibleItemInspectionColumnDefs.map((field) => (
                         <label
                           key={field.key}
                           className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
@@ -9916,7 +11520,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setCrawlFieldSelections(createInitialCrawlFieldSelections())}
+                        onClick={() => setCrawlFieldSelections(createVisibleCrawlFieldSelections(true))}
                         disabled={crawling}
                         className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
                       >
@@ -9925,7 +11529,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                       <button
                         type="button"
-                        onClick={() => setCrawlFieldSelections(createEmptyCrawlFieldSelections())}
+                        onClick={() => setCrawlFieldSelections(createVisibleCrawlFieldSelections(false))}
                         disabled={crawling}
                         className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
                       >
@@ -9949,7 +11553,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                      {CRAWL_CONFIRM_FIELD_OPTIONS.map((field) => (
+                      {visibleCrawlConfirmFieldOptions.map((field) => (
                         <label
                           key={field.key}
                           className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
@@ -10974,6 +12578,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     filterKey={column.key}
                     filterState={draftColumnStates[column.key]}
                     isOpen={openFilterKey === column.key}
+                    canShowFilterButton={canShowListColumnFilters}
                     onToggleOpen={handleOpenFilter}
                     onSortChange={updateSort}
                     onConditionTypeChange={updateConditionType}

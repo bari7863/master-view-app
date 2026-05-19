@@ -3,7 +3,11 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 import { dbReady, pool } from "@/lib/db";
-import { requireMasterDataAuth } from "@/lib/master-data-auth";
+import { requireMasterDataUser } from "@/lib/master-data-auth";
+import {
+  getMasterDataUserPermissionSettings,
+  requireMasterDataPermission,
+} from "@/lib/master-data-permissions";
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -645,6 +649,109 @@ function buildWhereClause(searchParams: URLSearchParams) {
   return { whereSql, params };
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function buildSearchParamsFromListScopeFilters(
+  allowedFilters: Record<string, unknown> | undefined
+) {
+  const listScopeFilters = allowedFilters?.listScopeFilters;
+
+  if (!isObjectRecord(listScopeFilters)) {
+    return null;
+  }
+
+  const searchParams = new URLSearchParams();
+
+  searchParams.set(
+    "filterModels",
+    JSON.stringify(
+      isObjectRecord(listScopeFilters.filterModels)
+        ? listScopeFilters.filterModels
+        : {}
+    )
+  );
+
+  searchParams.set(
+    "advancedFilters",
+    JSON.stringify(
+      isObjectRecord(listScopeFilters.advancedFilters)
+        ? listScopeFilters.advancedFilters
+        : {}
+    )
+  );
+
+  return searchParams;
+}
+
+function shiftSqlParams(sql: string, offset: number) {
+  if (offset <= 0) return sql;
+  return sql.replace(/\$(\d+)/g, (_, index) => `$${Number(index) + offset}`);
+}
+
+function mergeWhereClauses(
+  baseWhereSql: string,
+  baseParams: unknown[],
+  scopeWhereSql: string,
+  scopeParams: unknown[]
+) {
+  if (!scopeWhereSql) {
+    return {
+      whereSql: baseWhereSql,
+      params: baseParams,
+    };
+  }
+
+  const scopeCondition = shiftSqlParams(scopeWhereSql, baseParams.length)
+    .replace(/^WHERE\s+/i, "")
+    .trim();
+
+  return {
+    whereSql: baseWhereSql
+      ? `${baseWhereSql} AND (${scopeCondition})`
+      : `WHERE (${scopeCondition})`,
+    params: [...baseParams, ...scopeParams],
+  };
+}
+
+async function buildExportWhereClauseWithListScope(
+  req: NextRequest,
+  searchParams: URLSearchParams | null
+) {
+  const base = searchParams
+    ? buildWhereClause(searchParams)
+    : { whereSql: "", params: [] as unknown[] };
+
+  const { user } = requireMasterDataUser(req);
+
+  if (!user || user.role === "管理者") {
+    return base;
+  }
+
+  const settings = await getMasterDataUserPermissionSettings(
+    user.id,
+    user.organization
+  );
+
+  const scopeSearchParams = buildSearchParamsFromListScopeFilters(
+    settings.allowedFilters
+  );
+
+  if (!scopeSearchParams) {
+    return base;
+  }
+
+  const scope = buildWhereClause(scopeSearchParams);
+
+  return mergeWhereClauses(
+    base.whereSql,
+    base.params,
+    scope.whereSql,
+    scope.params
+  );
+}
+
 function buildOrderBy(searchParams: URLSearchParams) {
   const sortKey = searchParams.get("sortKey") as FilterKey | null;
   const sortDirection = searchParams.get("sortDirection") as
@@ -780,7 +887,7 @@ function buildSearchParamsFromExportPayload(payload: Record<string, unknown>) {
   return searchParams;
 }
 
-async function handleExportRequest(searchParams: URLSearchParams) {
+async function handleExportRequest(req: NextRequest, searchParams: URLSearchParams) {
   await dbReady;
   await ensureMasterDataIdColumn(pool);
 
@@ -789,8 +896,8 @@ async function handleExportRequest(searchParams: URLSearchParams) {
 
   const { whereSql, params } =
     exportScope === "all"
-      ? { whereSql: "", params: [] as unknown[] }
-      : buildWhereClause(searchParams);
+      ? await buildExportWhereClauseWithListScope(req, null)
+      : await buildExportWhereClauseWithListScope(req, searchParams);
 
   const baseSql = `
     SELECT
@@ -859,11 +966,14 @@ function createFileName() {
 
 export async function GET(req: NextRequest) {
   try {
-    const authError = requireMasterDataAuth(req);
-    if (authError) return authError;
+    const permission = await requireMasterDataPermission(req, "csv.export");
+
+    if (permission.errorResponse) {
+      return permission.errorResponse;
+    }
 
     const { searchParams } = new URL(req.url);
-    return await handleExportRequest(searchParams);
+    return await handleExportRequest(req, searchParams);
   } catch (error) {
     return NextResponse.json(
       {
@@ -877,12 +987,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authError = requireMasterDataAuth(req);
-    if (authError) return authError;
+    const permission = await requireMasterDataPermission(req, "csv.export");
+
+    if (permission.errorResponse) {
+      return permission.errorResponse;
+    }
 
     const payload = (await req.json()) as Record<string, unknown>;
     const searchParams = buildSearchParamsFromExportPayload(payload);
-    return await handleExportRequest(searchParams);
+    return await handleExportRequest(req, searchParams);
   } catch (error) {
     return NextResponse.json(
       {
