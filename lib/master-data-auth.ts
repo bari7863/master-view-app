@@ -214,6 +214,14 @@ export function getCurrentMasterDataUser(req: NextRequest) {
   return parseMasterDataAuthUserPayload(payload);
 }
 
+export function refreshMasterDataAuthCookie(
+  response: NextResponse,
+  req: NextRequest
+) {
+  const currentUser = getCurrentMasterDataUser(req);
+  setMasterDataAuthCookie(response, currentUser ?? undefined);
+}
+
 export function requireMasterDataUser(req: NextRequest): MasterDataAuthResult {
   const authError = requireMasterDataAuth(req);
 

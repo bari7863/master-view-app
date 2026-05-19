@@ -14,6 +14,10 @@
 │  │     │  └─ route.ts
 │  │     ├─ mynavi
 │  │     │  └─ route.ts
+│  │     ├─ permissions
+│  │     │  ├─ me
+│  │     │  │  └─ route.ts
+│  │     │  └─ route.ts
 │  │     └─ route.ts
 │  ├─ favicon.ico
 │  ├─ globals.css
@@ -27,7 +31,8 @@
 ├─ lib
 │  ├─ db.ts
 │  ├─ master-data-auth.ts
-│  └─ master-data-crawler.ts
+│  ├─ master-data-crawler.ts
+│  └─ master-data-permissions.ts
 ├─ public
 │  ├─ file.svg
 │  ├─ globe.svg
@@ -46,6 +51,7 @@
 │  └─ add_column.sql
 ├─ .gitignore
 ├─ CLAUDE.md
+├─ directory-tree.txt
 ├─ eslint.config.mjs
 ├─ next.config.ts
 ├─ package.json

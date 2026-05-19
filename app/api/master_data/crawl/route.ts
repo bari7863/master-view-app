@@ -10,6 +10,7 @@ import {
   type CrawlExtractedOffice,
 } from "@/lib/master-data-crawler";
 import {
+  refreshMasterDataAuthCookie,
   requireMasterDataAuth,
   requireMasterDataUser,
 } from "@/lib/master-data-auth";
@@ -1180,12 +1181,23 @@ function buildOfficeLabeledCandidates(
 ) {
   const values: string[] = [];
   const labelMap: Record<string, string> = {};
+  const seenNumbers = new Set<string>();
 
   for (const office of offices) {
     const officeLabel = getOfficeDisplayLabel(office);
     const candidates = uniqueTextValues(office[key]);
 
     for (const candidate of candidates) {
+      const normalizedNumber = normalizeContactNumberForCompare(candidate);
+
+      if (normalizedNumber && seenNumbers.has(normalizedNumber)) {
+        continue;
+      }
+
+      if (normalizedNumber) {
+        seenNumbers.add(normalizedNumber);
+      }
+
       const displayValue = officeLabel ? `${officeLabel}：${candidate}` : candidate;
 
       if (values.includes(displayValue)) {
@@ -1454,11 +1466,11 @@ function buildPreviewChanges(
 }
 
 function getDefaultSelectedValue(change: CrawlPreviewChange) {
-  return change.candidates.length > 1
-    ? null
-    : normalizeNullableText(change.after) ??
-        normalizeNullableText(change.candidates[0]) ??
-        null;
+  return (
+    normalizeNullableText(change.after) ??
+    normalizeNullableText(change.candidates[0]) ??
+    null
+  );
 }
 
 function buildEffectiveSelectedMap(
@@ -1726,6 +1738,51 @@ function buildPreviewChangesFromItem(
     item.bundle,
     new Set(selectedFields)
   );
+}
+
+function normalizePreviewCandidateForCompare(
+  change: CrawlPreviewChange,
+  bundle: CrawlPayloadBundle,
+  candidate: string
+) {
+  const resolvedCandidate =
+    change.key === "phone"
+      ? resolveOfficeLabeledCandidateValue(candidate, bundle.officeLabelMap?.phone)
+      : change.key === "fax"
+      ? resolveOfficeLabeledCandidateValue(candidate, bundle.officeLabelMap?.fax)
+      : normalizeNullableText(candidate);
+
+  if (!resolvedCandidate) return "";
+
+  if (change.key === "phone" || change.key === "fax") {
+    return normalizeContactNumberForCompare(resolvedCandidate);
+  }
+
+  return resolvedCandidate
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function hasMultipleEffectiveCandidates(
+  item: CrawlJobPreviewItem,
+  change: CrawlPreviewChange
+) {
+  const uniqueCandidates = new Set<string>();
+
+  for (const candidate of change.candidates) {
+    const normalized = normalizePreviewCandidateForCompare(
+      change,
+      item.bundle,
+      candidate
+    );
+
+    if (normalized) {
+      uniqueCandidates.add(normalized);
+    }
+  }
+
+  return uniqueCandidates.size > 1;
 }
 
 type CrawlJobState = {
@@ -2622,7 +2679,7 @@ async function buildPublicPreviewRows(
         const changes = buildPreviewChangesFromItem(
           item,
           job.selectedFields
-        ).filter((change) => change.candidates.length > 1);
+        ).filter((change) => hasMultipleEffectiveCandidates(item, change));
 
         return {
           row_id: item.row_id,
@@ -2787,6 +2844,16 @@ function buildJobResponse(job: CrawlJobState) {
     completed: job.completed,
     error: job.error,
   };
+}
+
+function shouldRefreshCrawlProgressAuthCookie(job: CrawlJobState) {
+  return (
+    job.running &&
+    !job.completed &&
+    !job.paused &&
+    !job.pauseRequested &&
+    !job.error
+  );
 }
 
 async function createCrawlTargets(
@@ -4217,7 +4284,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "get_job_status") {
-      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
+      const statusJobId = normalizeNullableText(body.jobId);
+      const isLocal = isLocalDevelopmentRequest(req);
+
+      if (!isLocal && statusJobId) {
+        crawlJobs.delete(statusJobId);
+      }
+
+      const job = await getCrawlJobFromMemoryOrFile(statusJobId);
 
       if (!job) {
         return NextResponse.json(
@@ -4233,8 +4307,6 @@ export async function POST(req: NextRequest) {
         !job.error;
 
       if (shouldContinueJob) {
-        const isLocal = isLocalDevelopmentRequest(req);
-
         if (isLocal && !runningCrawlJobIds.has(job.jobId)) {
           job.running = true;
           job.paused = false;
@@ -4252,7 +4324,13 @@ export async function POST(req: NextRequest) {
         job.paused || job.completed || !!job.error;
 
       if (!includePreviewRows) {
-        return NextResponse.json(buildJobResponse(job));
+        const response = NextResponse.json(buildJobResponse(job));
+
+        if (shouldRefreshCrawlProgressAuthCookie(job)) {
+          refreshMasterDataAuthCookie(response, req);
+        }
+
+        return response;
       }
 
       client = await pool.connect();
@@ -4265,13 +4343,19 @@ export async function POST(req: NextRequest) {
         body.previewTab ?? "candidate"
       );
 
-      return NextResponse.json({
+      const response = NextResponse.json({
         ...buildJobResponse(job),
         previewRows: previewResult.rows,
         previewTotal: previewResult.total,
         previewPage: previewResult.page,
         previewPageSize: previewResult.pageSize,
       });
+
+      if (shouldRefreshCrawlProgressAuthCookie(job)) {
+        refreshMasterDataAuthCookie(response, req);
+      }
+
+      return response;
     }
 
     if (action === "cancel_job") {

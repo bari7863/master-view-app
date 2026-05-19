@@ -18,8 +18,10 @@ GitHubで最初に読む概要は `README.md` を参照してください。
 - 企業HPからのクローリング
 - クローリング候補値の確認・保存
 - フォーム営業・テレアポ・営業リスト精査への活用
+- 管理者・従業員ごとのログイン制御
+- 権限管理による操作範囲の制御
 
-このプロジェクトでは、**取得精度と既存機能の維持を最優先**にします。
+このプロジェクトでは、**取得精度、既存機能、データ、権限管理の維持を最優先**にします。
 
 ---
 
@@ -35,9 +37,12 @@ app/api/master_data/crawl/route.ts
 app/api/master_data/export/route.ts
 app/api/master_data/item_inspection/route.ts
 app/api/master_data/login/route.ts
+app/api/master_data/permissions/route.ts
+app/api/master_data/permissions/me/route.ts
 app/api/master_data/mynavi/route.ts
 lib/db.ts
 lib/master-data-auth.ts
+lib/master-data-permissions.ts
 lib/master-data-crawler.ts
 scripts/crawl-worker.ts
 dist/worker/crawl-worker.cjs
@@ -46,6 +51,7 @@ scripts/mynavi_shinsotsu_unified.py
 sql/add_column.sql
 README.md
 docs/handover.md
+directory-tree.txt
 ```
 
 ---
@@ -54,7 +60,7 @@ docs/handover.md
 
 修正前に、以下を確認してください。
 
-- 依頼内容がUI修正か、API修正か、クローリング修正か
+- 依頼内容がUI修正か、API修正か、クローリング修正か、権限管理修正か
 - 関係するファイルはどれか
 - 既存機能への影響があるか
 - DB変更が必要か
@@ -63,6 +69,8 @@ docs/handover.md
 - ローカル環境に影響するか
 - workerに影響するか
 - クローリング精度が下がらないか
+- ログイン制御に影響するか
+- 権限管理に影響するか
 - `dist/worker/crawl-worker.cjs` を直接修正すべき内容か、`scripts/crawl-worker.ts` を修正すべき内容か
 
 ---
@@ -83,6 +91,7 @@ docs/handover.md
 - 個別データ更新
 - 項目精査
 - ログイン機能
+- 権限管理機能
 - クローリング開始
 - クローリング結果画面
 - worker連携
@@ -109,7 +118,35 @@ docs/handover.md
 
 ---
 
-### 3. 不要コードを勝手に削除しない
+### 3. 権限管理を壊さない
+
+権限管理は、管理者・従業員ごとの操作範囲を守る重要な機能です。
+
+必ず以下を守ってください。
+
+- 権限がないユーザーに操作を許可しない
+- 画面で非表示にするだけでなく、API側でも制御する
+- 管理者と従業員の扱いを混同しない
+- 権限キー名を勝手に変えない
+- 権限の初期値を勝手に変えない
+- 既存ユーザーの権限が意図せず変わらないようにする
+- `permissions/me` の返却内容を変える場合は、画面側の判定も確認する
+- `lib/master-data-permissions.ts` を変更する場合は、使っているAPIと画面を確認する
+
+権限管理に関係する主なファイル。
+
+```text
+app/page.tsx
+app/api/master_data/login/route.ts
+app/api/master_data/permissions/route.ts
+app/api/master_data/permissions/me/route.ts
+lib/master-data-auth.ts
+lib/master-data-permissions.ts
+```
+
+---
+
+### 4. 不要コードを勝手に削除しない
 
 不要そうに見えるコードでも、必ず参照関係を確認してください。
 
@@ -121,11 +158,12 @@ docs/handover.md
 - npm scriptsから参照されていないか
 - Vercelやworkerで使われていないか
 - 状態保存や復元に使われていないか
+- 権限管理で使われていないか
 - release配下のexeやconfigに影響しないか
 
 ---
 
-### 4. 大規模リファクタリングを勝手にしない
+### 5. 大規模リファクタリングを勝手にしない
 
 依頼されていない大規模な整理、共通化、ファイル分割、命名変更は避けてください。
 
@@ -133,7 +171,7 @@ docs/handover.md
 
 ---
 
-### 5. DB・API・画面・CSVの整合性を保つ
+### 6. DB・API・画面・CSV・権限管理の整合性を保つ
 
 カラムを追加・変更する場合は、以下を必ず確認してください。
 
@@ -149,6 +187,17 @@ docs/handover.md
 - CSV出力
 - 保存処理
 - クローリング結果保存
+- 権限管理への影響
+
+権限管理の保存形式を変更する場合は、以下も確認してください。
+
+- 権限の取得API
+- 権限の保存API
+- ログイン中ユーザーの権限取得
+- 画面側の表示制御
+- API側の操作制御
+- 管理者の初期権限
+- 従業員の初期権限
 
 ---
 
@@ -212,6 +261,35 @@ UI修正では、以下を守ってください。
 - 長いラベルは必要に応じて文字サイズや幅を調整する
 - ポップアップの位置や余白を崩さない
 - ロゴやヘッダーの配置を勝手に変えない
+- 権限管理画面のチェック項目やボタンを見切れさせない
+- 全選択・選択解除・保存などのボタン配置を崩さない
+- 権限がない機能は、画面上で分かりやすく非表示または操作不可にする
+
+---
+
+## 権限管理修正の注意点
+
+権限管理では、以下を守ってください。
+
+- 管理者だけが権限設定を変更できるようにする
+- 従業員が他ユーザーの権限を変更できないようにする
+- ログイン中ユーザー自身の権限は `permissions/me` で確認する
+- 権限設定の保存・取得は `permissions` APIを確認する
+- 共通の権限定義や判定は `lib/master-data-permissions.ts` を確認する
+- 画面側だけの制御で終わらせない
+- API側でも権限チェックを行う
+- Vercel環境でもローカル環境でも同じ判定になるようにする
+
+権限管理に関係する修正をした場合は、少なくとも以下を確認してください。
+
+```text
+app/page.tsx
+app/api/master_data/login/route.ts
+app/api/master_data/permissions/route.ts
+app/api/master_data/permissions/me/route.ts
+lib/master-data-auth.ts
+lib/master-data-permissions.ts
+```
 
 ---
 
@@ -229,6 +307,8 @@ UI修正では、以下を守ってください。
 - `dist/worker/crawl-worker.cjs` はビルド後ファイルのため、直接編集は慎重に判断する
 - `release/MasterCrawlWorker/` は配布・実行用のworker関連ファイルとして扱う
 
+権限管理の修正をした場合も、Vercel環境でログイン・権限取得が正しく動くか確認してください。
+
 ---
 
 ## 秘密情報の扱い
@@ -244,6 +324,8 @@ UI修正では、以下を守ってください。
 
 `release/MasterCrawlWorker/worker-config.json` や `worker-id.txt` に環境依存情報が含まれる場合は、取り扱いに注意してください。
 
+権限管理に関係するユーザー情報やログイン情報も、外部に出さないでください。
+
 ---
 
 ## 参照すべき資料
@@ -253,6 +335,7 @@ UI修正では、以下を守ってください。
 ```text
 README.md
 docs/handover.md
+directory-tree.txt
 ```
 
-READMEは概要、handover.mdは詳細仕様です。
+READMEは概要、handover.mdは詳細仕様、directory-tree.txtは現在のディレクトリ構成確認用です。

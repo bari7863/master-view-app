@@ -26,6 +26,7 @@ https://master-view-app-ruby.vercel.app/
 - クローリング進捗の表示
 - クローリング結果画面の復元
 - ログイン制御
+- 権限管理
 - Vercel環境での公開
 - ローカル環境での開発・検証
 - workerによるクローリング処理
@@ -97,6 +98,10 @@ master-view-app/
 │  │     │  └─ route.ts
 │  │     ├─ mynavi
 │  │     │  └─ route.ts
+│  │     ├─ permissions
+│  │     │  ├─ me
+│  │     │  │  └─ route.ts
+│  │     │  └─ route.ts
 │  │     └─ route.ts
 │  ├─ favicon.ico
 │  ├─ globals.css
@@ -110,7 +115,8 @@ master-view-app/
 ├─ lib
 │  ├─ db.ts
 │  ├─ master-data-auth.ts
-│  └─ master-data-crawler.ts
+│  ├─ master-data-crawler.ts
+│  └─ master-data-permissions.ts
 ├─ public
 │  ├─ file.svg
 │  ├─ globe.svg
@@ -129,6 +135,7 @@ master-view-app/
 │  └─ add_column.sql
 ├─ .gitignore
 ├─ CLAUDE.md
+├─ directory-tree.txt
 ├─ eslint.config.mjs
 ├─ next.config.ts
 ├─ package.json
@@ -146,7 +153,7 @@ master-view-app/
 
 メイン画面です。
 
-一覧表示、検索、フィルタ、CSV取込、CSV抽出、クローリング確認、クローリング結果画面、ログイン画面、UI全般を担当します。
+一覧表示、検索、フィルタ、CSV取込、CSV抽出、クローリング確認、クローリング結果画面、ログイン画面、権限管理画面、権限に応じた表示制御、UI全般を担当します。
 
 ---
 
@@ -198,6 +205,20 @@ CSV出力・エクスポート系のAPIです。
 
 ---
 
+### `app/api/master_data/permissions/route.ts`
+
+権限管理用のAPIです。
+
+権限一覧の取得、従業員ごとの権限取得、権限保存、権限設定画面との連携などに関係する可能性があります。
+
+---
+
+### `app/api/master_data/permissions/me/route.ts`
+
+ログイン中ユーザー自身の権限を取得するAPIです。
+
+画面側で、メニュー・ボタン・操作範囲などを権限に応じて出し分ける処理に関係する可能性があります。
+
 ### `app/api/master_data/mynavi/route.ts`
 
 マイナビ系データの処理に関係するAPIです。
@@ -221,6 +242,12 @@ DB接続設定です。
 ログイン情報、認証トークン、管理者・従業員の判定などに関係する可能性があります。
 
 ---
+
+### `lib/master-data-permissions.ts`
+
+権限管理の共通処理に関係するファイルです。
+
+権限定義、権限キー、管理者・従業員ごとの権限判定、API側や画面側で使う権限チェックなどに関係する可能性があります。
 
 ### `lib/master-data-crawler.ts`
 
@@ -294,6 +321,14 @@ Claude Code向けの作業ルールです。
 
 ---
 
+### `directory-tree.txt`
+
+現在のディレクトリ構成を確認するためのファイルです。
+
+AIや別担当者にプロジェクト構成を共有するときに使います。
+
+---
+
 ## 関連ドキュメント
 
 このREADMEでは、開発に入るための概要を中心にまとめています。
@@ -327,6 +362,7 @@ Claude Codeに守らせる作業ルールです。
 - 代表者名・従業員数・電話番号・フォームURLの抽出方針
 - 過去に起きたエラー
 - Vercel / worker / ローカル環境の考え方
+- 権限管理の考え方
 - 今後の改善候補
 
 ---
@@ -689,8 +725,9 @@ npm run build
 1. 取得精度を落とさない
 2. 既存機能を壊さない
 3. データを壊さない
-4. 不要コードを安易に削除しない
-5. DB・API・画面・CSVの整合性を保つ
-6. Vercel環境とローカル環境の違いを理解する
-7. worker構成を理解する
-8. 速度よりも安全性と正確性を優先する
+4. 権限管理を壊さない
+5. 不要コードを安易に削除しない
+6. DB・API・画面・CSVの整合性を保つ
+7. Vercel環境とローカル環境の違いを理解する
+8. worker構成を理解する
+9. 速度よりも安全性と正確性を優先する

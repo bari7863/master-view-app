@@ -1741,13 +1741,24 @@ function HeaderCell({
   onClear: (key: FilterKey) => void;
 }) {
   const active = canShowFilterButton && hasActiveFilter(filterState);
-  const visibleValues = filterState.availableValues.filter((value) => {
-    if (!filterState.valueSearch.trim()) return true;
-    const labelValue = value === "" ? "(空白)" : value;
-    return labelValue
-      .toLowerCase()
-      .includes(filterState.valueSearch.trim().toLowerCase());
-  });
+
+  const visibleValues = useMemo(() => {
+    const searchText = filterState.valueSearch.trim().toLowerCase();
+
+    if (!searchText) {
+      return filterState.availableValues;
+    }
+
+    return filterState.availableValues.filter((value) => {
+      const labelValue = value === "" ? "(空白)" : value;
+      return labelValue.toLowerCase().includes(searchText);
+    });
+  }, [filterState.availableValues, filterState.valueSearch]);
+
+const selectedValueSet = useMemo(
+  () => new Set(filterState.selectedValues),
+  [filterState.selectedValues]
+);
 
   const totalItemCount = filterState.totalItemCount;
   const checkedItemCount = filterState.checkedItemCount;
@@ -1760,6 +1771,41 @@ function HeaderCell({
       filterState.availableValueTotal / Math.max(filterState.valueLimit, 1)
     )
   );
+
+  const filterPanelBodyRef = useRef<HTMLDivElement | null>(null);
+  const filterValueListBoxRef = useRef<HTMLDivElement | null>(null);
+  const filterValueScrollTargetRef = useRef<HTMLElement | null>(null);
+
+  const scrollFilterValuesTop = () => {
+    filterPanelBodyRef.current?.scrollTo({ top: 0 });
+
+    const listBox = filterValueListBoxRef.current;
+    if (!listBox) return;
+
+    listBox.scrollTo({ top: 0 });
+
+    const cachedTarget = filterValueScrollTargetRef.current;
+
+    if (cachedTarget && listBox.contains(cachedTarget)) {
+      cachedTarget.scrollTo({ top: 0 });
+      return;
+    }
+
+    const listScrollTarget = listBox.querySelector<HTMLElement>("div");
+
+    if (listScrollTarget) {
+      filterValueScrollTargetRef.current = listScrollTarget;
+      listScrollTarget.scrollTo({ top: 0 });
+    }
+};
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    window.requestAnimationFrame(() => {
+      scrollFilterValuesTop();
+    });
+  }, [isOpen, filterState.valueOffset, filterState.valueSearch]);
 
   return (
     <div className="relative border-r border-white/5 last:border-r-0">
@@ -1829,7 +1875,7 @@ function HeaderCell({
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-4 py-4">
+                <div ref={filterPanelBodyRef} className="flex-1 overflow-y-auto px-4 py-4">
                   <div className="mb-4">
                     <div className="mb-2 text-xs font-semibold text-slate-300">
                       並び替え
@@ -1946,7 +1992,10 @@ function HeaderCell({
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
-                              onClick={() => onLoadPreviousValues(filterKey)}
+                              onClick={() => {
+                                scrollFilterValuesTop();
+                                onLoadPreviousValues(filterKey);
+                              }}
                               disabled={filterState.valueLoading || !hasPreviousValues}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/5 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
                             >
@@ -1959,7 +2008,10 @@ function HeaderCell({
 
                             <button
                               type="button"
-                              onClick={() => onLoadMoreValues(filterKey)}
+                              onClick={() => {
+                                scrollFilterValuesTop();
+                                onLoadMoreValues(filterKey);
+                              }}
                               disabled={filterState.valueLoading || !filterState.hasMoreValues}
                               className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-white/5 text-xs text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
                             >
@@ -1990,7 +2042,7 @@ function HeaderCell({
                       </div>
                     </div>
 
-                    <div className="rounded-xl border border-white/10 bg-[#0f172a] p-2">
+                    <div ref={filterValueListBoxRef} className="rounded-xl border border-white/10 bg-[#0f172a] p-2">
                       {visibleValues.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-slate-500">
                           {filterState.valueLoading ? "読み込み中です..." : "候補がありません"}
@@ -2005,6 +2057,7 @@ function HeaderCell({
                             visibleValues,
                             filterKey,
                             filterState,
+                            selectedValueSet,
                             onToggleValue,
                           }}
                           style={{ width: "100%" }}
@@ -2046,17 +2099,18 @@ function FilterValueRow({
   visibleValues,
   filterKey,
   filterState,
+  selectedValueSet,
   onToggleValue,
 }: RowComponentProps<{
   visibleValues: string[];
   filterKey: FilterKey;
   filterState: ColumnFilterState;
+  selectedValueSet: Set<string>;
   onToggleValue: (key: FilterKey, value: string) => void;
 }>) {
   const value = visibleValues[index];
   const checked =
-    !filterState.valueFilterEnabled ||
-    filterState.selectedValues.includes(value);
+    !filterState.valueFilterEnabled || selectedValueSet.has(value);
 
   return (
     <div style={style} className="px-2">
@@ -2215,6 +2269,7 @@ export default function Home() {
   const [crawlCurrentFields, setCrawlCurrentFields] = useState<string[]>([]);
   const [crawlRemainingCount, setCrawlRemainingCount] = useState(0);
   const crawlStatusTimerRef = useRef<number | null>(null);
+  const crawlStatusRequestIdRef = useRef(0);
 
   const crawlRecoveringRef = useRef(false);
   const crawlStatusErrorCountRef = useRef(0);
@@ -2605,6 +2660,10 @@ export default function Home() {
   const fetchDataRequestIdRef = useRef(0);
   const filterValueRequestIdRef = useRef<Partial<Record<FilterKey, number>>>({});
   const crawlPreviewRequestIdRef = useRef(0);
+  const masterListScrollRef = useRef<HTMLDivElement | null>(null);
+  const permissionListScopeScrollRef = useRef<HTMLDivElement | null>(null);
+  const crawlPreviewScrollRef = useRef<HTMLDivElement | null>(null);
+  const itemInspectionPreviewScrollRef = useRef<HTMLDivElement | null>(null);
 
   const fetchCurrentUserPermissions = async (targetUser = loginUser) => {
     setCurrentUserPermissionLoaded(false);
@@ -3347,19 +3406,25 @@ export default function Home() {
       filterValueRequestIdRef.current[key] = requestId;
 
       setDraftColumnStates((prev) => {
-        const next = cloneColumnStates(prev);
-        next[key].valueLoading = true;
+        const current = prev[key];
 
-        if (reset) {
-          next[key].availableValues = [];
-          next[key].valueCounts = {};
-          next[key].availableValueTotal = 0;
-          next[key].availableValueMatchedCount = 0;
-          next[key].hasMoreValues = false;
-          next[key].valueOffset = 0;
-        }
-
-        return next;
+        return {
+          ...prev,
+          [key]: {
+            ...current,
+            valueLoading: true,
+            ...(reset
+              ? {
+                  availableValues: [],
+                  valueCounts: {},
+                  availableValueTotal: 0,
+                  availableValueMatchedCount: 0,
+                  hasMoreValues: false,
+                  valueOffset: 0,
+                }
+              : {}),
+          },
+        };
       });
 
       try {
@@ -3391,42 +3456,46 @@ export default function Home() {
             return prev;
           }
 
-          const next = cloneColumnStates(prev);
+          const current = prev[key];
           const incomingValues = data.values || [];
-          const incomingAllValues = Array.isArray(data.allValues)
-            ? data.allValues
-            : next[key].allValues;
-          const initialSelectedValues =
-            incomingAllValues.length > 0 ? incomingAllValues : incomingValues;
+          const incomingAllValues =
+            reset && Array.isArray(data.allValues)
+              ? data.allValues
+              : current.allValues;
 
-          next[key].availableValues = incomingValues;
-          next[key].allValues = incomingAllValues;
-          next[key].valueCounts = data.valueCounts || {};
-          next[key].availableValueTotal = data.valueTotal || 0;
-          next[key].availableValueMatchedCount = data.valueMatchedCount || 0;
-          next[key].totalItemCount = data.totalItemCount || 0;
-          next[key].checkedItemCount = data.checkedItemCount || 0;
-          next[key].valueOffset = data.valueOffset ?? currentOffset;
-          next[key].valueLimit = data.valueLimit || currentLimit;
-          next[key].hasMoreValues = data.hasMoreValues ?? false;
-          next[key].valueLoading = false;
-
-          if (!currentState.valueFilterEnabled) {
-            next[key].selectedValues = initialSelectedValues;
-          }
-
-          return next;
+          return {
+            ...prev,
+            [key]: {
+              ...current,
+              availableValues: incomingValues,
+              allValues: incomingAllValues,
+              valueCounts: data.valueCounts || {},
+              availableValueTotal: data.valueTotal || 0,
+              availableValueMatchedCount: data.valueMatchedCount || 0,
+              totalItemCount: data.totalItemCount || 0,
+              checkedItemCount: data.checkedItemCount || 0,
+              valueOffset: data.valueOffset ?? currentOffset,
+              valueLimit: data.valueLimit || currentLimit,
+              hasMoreValues: data.hasMoreValues ?? false,
+              valueLoading: false,
+              selectedValues: currentState.valueFilterEnabled
+                ? current.selectedValues
+                : [],
+            },
+          };
         });
       } catch (e) {
         if (filterValueRequestIdRef.current[key] !== requestId) {
           return;
         }
 
-        setDraftColumnStates((prev) => {
-          const next = cloneColumnStates(prev);
-          next[key].valueLoading = false;
-          return next;
-        });
+        setDraftColumnStates((prev) => ({
+          ...prev,
+          [key]: {
+            ...prev[key],
+            valueLoading: false,
+          },
+        }));
         console.error(e);
       }
     };
@@ -3598,6 +3667,11 @@ export default function Home() {
   }, [page, limit, appliedColumnStates, appliedAdvancedFilters, loginStatus]);
 
   useEffect(() => {
+    masterListScrollRef.current?.scrollTo({ top: 0 });
+    permissionListScopeScrollRef.current?.scrollTo({ top: 0 });
+  }, [page, limit]);
+
+  useEffect(() => {
     if (!canShowListColumnFilters) {
       setOpenFilterKey(null);
     }
@@ -3618,15 +3692,13 @@ export default function Home() {
 
     const timer = window.setInterval(() => {
       const activeCrawlJobId = crawlJobId ?? loadActiveCrawlJobId();
-      const hasActiveCrawlJob =
-        !!activeCrawlJobId &&
-        (
-          crawling ||
-          crawlJobStatus === "running" ||
-          crawlJobStatus === "paused"
-        );
 
-      if (hasActiveCrawlJob) {
+      const isCrawlProgressScreenActive =
+        crawlProgressOpen &&
+        !!activeCrawlJobId &&
+        (crawling || crawlJobStatus === "running");
+
+      if (isCrawlProgressScreenActive) {
         window.sessionStorage.setItem(
           MASTER_DATA_LOGIN_EXPIRES_AT_KEY,
           String(Date.now() + MASTER_DATA_LOGIN_SESSION_MS)
@@ -3649,7 +3721,7 @@ export default function Home() {
     return () => {
       window.clearInterval(timer);
     };
-  }, [loginStatus, crawlJobId, crawlJobStatus, crawling]);
+  }, [loginStatus, crawlJobId, crawlJobStatus, crawlProgressOpen, crawling]);
 
   const checkLocalCrawlWorker = async () => {
     if (isLocalAppRuntime()) {
@@ -3734,14 +3806,21 @@ export default function Home() {
       selectedValues: appliedColumnStates[key].valueFilterEnabled
         ? [...appliedColumnStates[key].selectedValues]
         : [],
+
+      allValues: appliedColumnStates[key].valueFilterEnabled
+        ? [...appliedColumnStates[key].allValues]
+        : [],
+        
       availableValues:
         draftColumnStates[key].availableValues.length > 0
           ? [...draftColumnStates[key].availableValues]
           : [...appliedColumnStates[key].availableValues],
+
       valueCounts:
         Object.keys(draftColumnStates[key].valueCounts).length > 0
           ? { ...draftColumnStates[key].valueCounts }
           : { ...appliedColumnStates[key].valueCounts },
+
       valueOffset: 0,
       valueSearch: "",
     };
@@ -5337,26 +5416,28 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
-                    <div className="mb-2 text-xs font-semibold text-slate-400">
-                      姓
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                      <div className="mb-2 text-xs font-semibold text-slate-400">
+                        姓
+                      </div>
+                      <div className="truncate text-sm font-semibold text-slate-100">
+                        {nameParts.lastName}
+                      </div>
                     </div>
-                    <div className="truncate text-sm font-semibold text-slate-100">
-                      {nameParts.lastName}
+
+                    <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
+                      <div className="mb-2 text-xs font-semibold text-slate-400">
+                        名
+                      </div>
+                      <div className="truncate text-sm font-semibold text-slate-100">
+                        {nameParts.firstName}
+                      </div>
                     </div>
                   </div>
 
                   <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4">
-                    <div className="mb-2 text-xs font-semibold text-slate-400">
-                      名
-                    </div>
-                    <div className="truncate text-sm font-semibold text-slate-100">
-                      {nameParts.firstName}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-white/10 bg-[#0b1220]/80 p-4 md:col-span-2">
                     <div className="mb-2 text-xs font-semibold text-slate-400">
                       所属
                     </div>
@@ -5560,7 +5641,10 @@ export default function Home() {
                         対象従業員：{selectedPermissionEmployee.name}
                       </div>
 
-                      <div className="app-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-[#0b1326]/90">
+                      <div
+                        ref={permissionListScopeScrollRef}
+                        className="app-scrollbar min-h-0 flex-1 overflow-auto rounded-xl border border-white/10 bg-[#0b1326]/90"
+                      >
                         <div className="min-w-[5230px]">
                           <div
                             className="sticky top-0 z-20 grid border-b border-white/10 bg-[#162033]/95 backdrop-blur-xl"
@@ -7388,6 +7472,7 @@ const handlePreviewCsvExport = async () => {
     setCrawlPreviewLoading(true);
     setCrawlPreviewRows([]);
     setCrawlPreviewPage(nextPage);
+    crawlPreviewScrollRef.current?.scrollTo({ top: 0 });
 
     try {
       const res = await fetch("/api/master_data/crawl", {
@@ -7626,6 +7711,8 @@ const handlePreviewCsvExport = async () => {
       : Math.round((crawlUpdatedCount / crawlProcessedCount) * 100);
 
   const clearCrawlStatusPolling = () => {
+    crawlStatusRequestIdRef.current += 1;
+
     if (crawlStatusTimerRef.current !== null) {
       window.clearInterval(crawlStatusTimerRef.current);
       crawlStatusTimerRef.current = null;
@@ -7796,6 +7883,12 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   const startCrawlStatusPolling = (jobId: string) => {
     clearCrawlStatusPolling();
 
+    const pollingRequestId = crawlStatusRequestIdRef.current + 1;
+    crawlStatusRequestIdRef.current = pollingRequestId;
+
+    const isActivePollingRequest = () =>
+      crawlStatusRequestIdRef.current === pollingRequestId;
+
     const poll = async () => {
       try {
         const res = await fetch("/api/master_data/crawl", {
@@ -7814,10 +7907,15 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
         const data = await readApiResponse(res);
 
+        if (!isActivePollingRequest()) {
+          return;
+        }
+
         if (!res.ok || !data.ok) {
           throw new Error(data.error || "クローリング進捗の取得に失敗しました");
         }
 
+        clearCrawlRestoreTimer();
         applyCrawlStatus(data);
 
         if (data.jobStatus === "paused") {
@@ -7845,8 +7943,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
           stopCrawlElapsedTracking();
           clearCrawlStatusPolling();
+          clearCrawlRestoreTimer();
           setCrawling(false);
           setCrawlProgressOpen(false);
+          setCrawlJobStatus("completed");
 
           if (previewTotal === 0) {
             setCrawlPreviewRows([]);
@@ -7857,11 +7957,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             setCrawlSelectedChanges({});
             setCrawlJobId(null);
             saveActiveCrawlJobId(null);
-            setCrawlJobStatus("completed");
           } else {
             setCrawlPreviewRows(previewRows);
             setCrawlPreviewTotalCount(previewTotal);
             setCrawlPreviewPage(data.previewPage ?? 1);
+            setCrawlSelectedChanges({});
             setCrawlPreviewOpen(true);
             saveActiveCrawlJobId(jobId);
           }
@@ -7876,6 +7976,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
           stopCrawlElapsedTracking();
           clearCrawlStatusPolling();
+          clearCrawlRestoreTimer();
           setCrawling(false);
           setCrawlProgressOpen(false);
           setCrawlPreviewRows(previewRows);
@@ -7888,10 +7989,16 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           return;
         }
       } catch (e) {
+        if (!isActivePollingRequest()) {
+          return;
+        }
+
         const message =
           e instanceof Error ? e.message : "クローリング進捗取得でエラーが発生しました";
 
         if (message.includes("クローリングジョブが見つかりません")) {
+          clearCrawlStatusPolling();
+          clearCrawlRestoreTimer();
           setCrawlJobId(null);
           saveActiveCrawlJobId(null);
           setCrawlProgressOpen(false);
@@ -8542,6 +8649,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   ) => {
     setItemInspectionPreviewTab(nextTab);
     setItemInspectionPreviewPage(1);
+    itemInspectionPreviewScrollRef.current?.scrollTo({ top: 0 });
 
     if (nextTab === "excluded" && itemInspectionJobId) {
       try {
@@ -8561,6 +8669,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
     if (itemInspectionPreviewTab === "candidate") {
       setItemInspectionPreviewPage(nextPage);
+      itemInspectionPreviewScrollRef.current?.scrollTo({ top: 0 });
       return;
     }
 
@@ -8569,7 +8678,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     }
 
     try {
-      await fetchItemInspectionExcludedPreviewPage(itemInspectionJobId, nextPage);
+      itemInspectionPreviewScrollRef.current?.scrollTo({ top: 0 });
     } catch (e) {
       setItemInspectionError(
         e instanceof Error ? e.message : "候補外取得でエラーが発生しました"
@@ -9103,6 +9212,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     if (usingVirtual) {
       return (
         <List
+          key={`master-list-${page}-${limit}`}
           defaultHeight={650}
           rowComponent={VirtualRow}
           rowCount={rows.length}
@@ -10658,7 +10768,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           </div>
                         </div>
 
-                        <div className="grid max-h-[60vh] grid-cols-1 gap-2 overflow-y-auto">
+                        <div
+                          ref={itemInspectionPreviewScrollRef}
+                          className="grid max-h-[60vh] grid-cols-1 gap-2 overflow-y-auto"
+                        >
                           {visibleItemInspectionPreviewChanges.map((row) => (
                             <label
                               key={row.rowId}
@@ -11748,7 +11861,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       </div>
                     </div>
 
-                    <div className="max-h-[70vh] overflow-auto px-4 py-4 space-y-4">
+                    <div
+                      ref={crawlPreviewScrollRef}
+                      className="max-h-[70vh] overflow-auto px-4 py-4 space-y-4"
+                    >
                       {crawlPreviewLoading ? (
                         <div className="px-4 py-12 text-center text-slate-400">
                           クローリング結果確認を読み込み中です...
@@ -12562,7 +12678,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         </div>
 
         <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden border border-white/10 bg-[#0b1326]/90 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
-          <div className="app-scrollbar flex-1 overflow-auto">
+          <div ref={masterListScrollRef} className="app-scrollbar flex-1 overflow-auto">
             <div className="min-w-[5230px]">
               <div
                 className="sticky z-20 grid border-b border-white/10 bg-[#162033]/95 backdrop-blur-xl"
