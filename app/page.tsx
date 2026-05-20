@@ -6712,6 +6712,84 @@ const handleImport = async (shouldDeduplicate: boolean) => {
   }
 };
 
+const getCsvFileNameFromContentDisposition = (contentDisposition: string | null) => {
+  if (!contentDisposition) {
+    return null;
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].replace(/^"|"$/g, ""));
+    } catch {
+      return utf8Match[1].replace(/^"|"$/g, "");
+    }
+  }
+
+  const filenameMatch =
+    contentDisposition.match(/filename="([^"]+)"/i) ??
+    contentDisposition.match(/filename=([^;]+)/i);
+
+  return filenameMatch?.[1]?.trim().replace(/^"|"$/g, "") ?? null;
+};
+
+const downloadBlobByAnchor = (blob: Blob, fileName: string) => {
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = downloadUrl;
+  a.download = fileName;
+  a.style.display = "none";
+
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(downloadUrl);
+  }, 1000);
+};
+
+const writeResponseBodyToFile = async (
+  res: Response,
+  fileHandle: {
+    createWritable: () => Promise<{
+      write: (data: Blob | Uint8Array | string) => Promise<void>;
+      close: () => Promise<void>;
+    }>;
+  }
+) => {
+  const writable = await fileHandle.createWritable();
+
+  try {
+    if (!res.body) {
+      await writable.write(await res.blob());
+      return;
+    }
+
+    const reader = res.body.getReader();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        if (value) {
+          await writable.write(value);
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } finally {
+    await writable.close();
+  }
+};
+
 const handleExport = async (shouldDeduplicate: boolean) => {
   setImportError("");
   setImportMessage("");
@@ -6729,30 +6807,33 @@ const handleExport = async (shouldDeduplicate: boolean) => {
           }>;
         }) => Promise<{
           createWritable: () => Promise<{
-            write: (data: Blob) => Promise<void>;
+            write: (data: Blob | Uint8Array | string) => Promise<void>;
             close: () => Promise<void>;
           }>;
         }>;
       }
     ).showSaveFilePicker;
 
-    if (!showSaveFilePicker) {
-      throw new Error("この環境では保存場所の選択に対応していません");
-    }
+    let fileHandle: {
+      createWritable: () => Promise<{
+        write: (data: Blob | Uint8Array | string) => Promise<void>;
+        close: () => Promise<void>;
+      }>;
+    } | null = null;
 
-    const tempFileName = "master_data.csv";
-
-    const fileHandle = await showSaveFilePicker({
-      suggestedName: tempFileName,
-      types: [
-        {
-          description: "CSVファイル",
-          accept: {
-            "text/csv": [".csv"],
+    if (showSaveFilePicker) {
+      fileHandle = await showSaveFilePicker({
+        suggestedName: "master_data.csv",
+        types: [
+          {
+            description: "CSVファイル",
+            accept: {
+              "text/csv": [".csv"],
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
+    }
 
     const body: Record<string, unknown> = {
       exportScope: exportMode,
@@ -6791,10 +6872,17 @@ const handleExport = async (shouldDeduplicate: boolean) => {
       throw new Error(data.error || "CSV抽出に失敗しました");
     }
 
-    const blob = await res.blob();
-    const writable = await fileHandle.createWritable();
-    await writable.write(blob);
-    await writable.close();
+    const fileName =
+      getCsvFileNameFromContentDisposition(
+        res.headers.get("Content-Disposition")
+      ) ?? "master_data.csv";
+
+    if (fileHandle) {
+      await writeResponseBodyToFile(res, fileHandle);
+    } else {
+      const blob = await res.blob();
+      downloadBlobByAnchor(blob, fileName);
+    }
 
     setImportMessage("CSVを保存しました");
   } catch (e) {
@@ -7076,42 +7164,11 @@ const handlePreviewCsvExport = async () => {
   };
 
   const savePreviewCsvText = async (csvText: string, fileName: string) => {
-    const showSaveFilePicker = (
-      window as Window & {
-        showSaveFilePicker?: (options?: {
-          suggestedName?: string;
-          types?: Array<{
-            description?: string;
-            accept: Record<string, string[]>;
-          }>;
-        }) => Promise<{
-          createWritable: () => Promise<{
-            write: (data: Blob) => Promise<void>;
-            close: () => Promise<void>;
-          }>;
-        }>;
-      }
-    ).showSaveFilePicker;
-
-    if (!showSaveFilePicker) {
-      throw new Error("この環境では保存場所の選択に対応していません");
-    }
-
-    const fileHandle = await showSaveFilePicker({
-      suggestedName: fileName,
-      types: [
-        {
-          description: "CSVファイル",
-          accept: {
-            "text/csv": [".csv"],
-          },
-        },
-      ],
+    const csvBlob = new Blob([csvText], {
+      type: "text/csv;charset=utf-8;",
     });
 
-    const writable = await fileHandle.createWritable();
-    await writable.write(new Blob([csvText], { type: "text/csv;charset=utf-8;" }));
-    await writable.close();
+    downloadBlobByAnchor(csvBlob, fileName);
   };
 
   const buildPreviewCsvHeaders = (candidateKeys: Array<keyof Row>) => {
