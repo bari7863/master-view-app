@@ -343,8 +343,9 @@ async function processJob(jobId: string) {
     const targets = targetRes.targets || [];
 
     if (targets.length === 0) {
-      status.lastMessage = "処理対象なし";
-      break;
+      status.lastMessage = "処理対象を再確認中";
+      await sleep(config.pollIntervalMs || 3000);
+      continue;
     }
 
     status.lastMessage = `まとめ取得中: ${targets.length}件`;

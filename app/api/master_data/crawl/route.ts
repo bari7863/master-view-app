@@ -1922,6 +1922,9 @@ const CRAWL_COMPANY_TIMEOUT_MS = 90 * 1000;
 const CRAWL_COMPANY_TIMEOUT_ERROR_MESSAGE =
   "__MASTER_DATA_CRAWL_COMPANY_TIMEOUT__";
 
+const WORKER_JOB_STALE_INTERVAL_SQL = "2 minutes";
+const CRAWL_TARGET_LOCK_INTERVAL_SQL = "20 minutes";
+
 function startCrawlJobRunner(jobId: string) {
   if (runningCrawlJobIds.has(jobId)) return;
 
@@ -2979,6 +2982,14 @@ async function markCrawlTargetStatus(
         status = $3,
         skip_reason = CASE WHEN $3 = 'skipped' THEN $4 ELSE skip_reason END,
         error_message = CASE WHEN $3 = 'failed' THEN $4 ELSE error_message END,
+        locked_by = CASE
+          WHEN $3 IN ('done', 'skipped', 'failed') THEN NULL
+          ELSE locked_by
+        END,
+        locked_until = CASE
+          WHEN $3 IN ('done', 'skipped', 'failed') THEN NULL
+          ELSE locked_until
+        END,
         started_at = CASE
           WHEN $5::timestamptz IS NOT NULL THEN $5::timestamptz
           WHEN $3 = 'processing' THEN COALESCE(started_at, now())
@@ -3007,7 +3018,8 @@ async function markCrawlTargetStatus(
 async function markCrawlTargetsProcessing(
   client: DbClient,
   jobId: string,
-  targetIndexes: number[]
+  targetIndexes: number[],
+  workerId: string
 ) {
   if (targetIndexes.length === 0) return;
 
@@ -3015,11 +3027,16 @@ async function markCrawlTargetsProcessing(
     `
       UPDATE public.master_data_crawl_targets
       SET
-        status = 'processing'
+        status = 'processing',
+        locked_by = $3,
+        locked_until = now() + interval '${CRAWL_TARGET_LOCK_INTERVAL_SQL}',
+        started_at = COALESCE(started_at, now()),
+        finished_at = NULL,
+        attempt_count = attempt_count + 1
       WHERE job_id = $1
         AND target_index = ANY($2::int[])
     `,
-    [jobId, targetIndexes]
+    [jobId, targetIndexes, workerId]
   );
 }
 
@@ -3061,6 +3078,28 @@ async function registerWorker(
         updated_at = now()
     `,
     [workerId, workerName, message ?? null]
+  );
+}
+
+async function refreshRunningWorkerJobHeartbeat(
+  client: DbClient,
+  workerId: string
+) {
+  await client.query(
+    `
+      UPDATE public.master_data_crawl_jobs
+      SET
+        worker_heartbeat_at = now(),
+        updated_at = now()
+      WHERE completed = false
+        AND pause_requested = false
+        AND COALESCE(status, 'queued') = 'running'
+        AND (
+          worker_id = $1
+          OR assigned_worker_id = $1
+        )
+    `,
+    [workerId]
   );
 }
 
@@ -3109,14 +3148,29 @@ async function claimWorkerJob(
   try {
     const res = await client.query(
       `
-        SELECT job_id
-        FROM public.master_data_crawl_jobs
-        WHERE assigned_worker_id = $1
-          AND completed = false
-          AND pause_requested = false
-          AND COALESCE(status, 'queued') IN ('queued', 'running')
-        ORDER BY created_at ASC
-        FOR UPDATE SKIP LOCKED
+        SELECT j.job_id
+        FROM public.master_data_crawl_jobs AS j
+        LEFT JOIN public.master_data_crawl_workers AS assigned_worker
+          ON assigned_worker.worker_id = j.assigned_worker_id
+        LEFT JOIN public.master_data_crawl_workers AS running_worker
+          ON running_worker.worker_id = j.worker_id
+        WHERE j.completed = false
+          AND j.pause_requested = false
+          AND COALESCE(j.status, 'queued') IN ('queued', 'running')
+          AND (
+            j.assigned_worker_id = $1
+            OR j.assigned_worker_id IS NULL
+            OR COALESCE(
+              running_worker.last_seen_at,
+              assigned_worker.last_seen_at,
+              j.worker_heartbeat_at,
+              j.updated_at
+            ) < now() - interval '${WORKER_JOB_STALE_INTERVAL_SQL}'
+          )
+        ORDER BY
+          CASE WHEN j.assigned_worker_id = $1 THEN 0 ELSE 1 END,
+          j.created_at ASC
+        FOR UPDATE OF j SKIP LOCKED
         LIMIT 1
       `,
       [workerId]
@@ -3136,8 +3190,10 @@ async function claimWorkerJob(
           status = 'running',
           running = true,
           paused = false,
+          assigned_worker_id = $2,
           worker_id = $2,
           worker_heartbeat_at = now(),
+          worker_message = 'ジョブ処理中',
           last_started_at = COALESCE(last_started_at, now()),
           updated_at = now()
         WHERE job_id = $1
@@ -3309,7 +3365,8 @@ async function claimWorkerTargets(
   await markCrawlTargetsProcessing(
     client,
     job.jobId,
-    targets.map((target) => target.targetIndex)
+    targets.map((target) => target.targetIndex),
+    workerId
   );
 
   await persistCrawlJobState(job);
@@ -4115,6 +4172,10 @@ export async function POST(req: NextRequest) {
             workerName,
             action === "worker_register" ? "worker登録" : "heartbeat"
           );
+
+          if (action === "worker_heartbeat") {
+            await refreshRunningWorkerJobHeartbeat(client, workerId);
+          }
 
           return NextResponse.json({
             ok: true,

@@ -632,6 +632,31 @@ const MASTER_DATA_LOGIN_USER_KEY = "master-data-login-user";
 const MASTER_DATA_LOGIN_EXPIRES_AT_KEY = "master-data-login-expires-at";
 const MASTER_DATA_LOGIN_SESSION_MS = 30 * 60 * 1000;
 
+function getMasterDataLoginExpiresAt() {
+  if (typeof window === "undefined") return 0;
+
+  return Number(
+    window.sessionStorage.getItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY)
+  );
+}
+
+function refreshMasterDataLoginExpiresAt() {
+  if (typeof window === "undefined") return;
+
+  window.sessionStorage.setItem(
+    MASTER_DATA_LOGIN_EXPIRES_AT_KEY,
+    String(Date.now() + MASTER_DATA_LOGIN_SESSION_MS)
+  );
+}
+
+function clearMasterDataLoginSessionStorage() {
+  if (typeof window === "undefined") return;
+
+  window.sessionStorage.removeItem(MASTER_DATA_LOGIN_SESSION_KEY);
+  window.sessionStorage.removeItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY);
+  window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
+}
+
 const LOCAL_CRAWL_WORKER_STATUS_URL = "http://127.0.0.1:39281/status";
 
 async function fetchMasterDataLoginHistory(userId: string | undefined) {
@@ -1076,6 +1101,40 @@ const ADVANCED_FILTER_TITLES: Record<AdvancedFilterModalKey, string> = {
   capital: "資本金",
   employeeCount: "従業員数",
   tag: "タグ",
+};
+
+const ADVANCED_FILTER_PANEL_META: Record<
+  AdvancedFilterModalKey,
+  { icon: string; description: string }
+> = {
+  companyName: {
+    icon: "Aa",
+    description: "企業名に含まれる文字で絞り込みます",
+  },
+  prefecture: {
+    icon: "📍",
+    description: "都道府県や市区町村から探します",
+  },
+  industry: {
+    icon: "🏭",
+    description: "大業種・小業種で分類します",
+  },
+  established: {
+    icon: "📅",
+    description: "設立年月の範囲で絞り込みます",
+  },
+  capital: {
+    icon: "¥",
+    description: "資本金の金額範囲で絞り込みます",
+  },
+  employeeCount: {
+    icon: "👥",
+    description: "従業員数の範囲で絞り込みます",
+  },
+  tag: {
+    icon: "＃",
+    description: "登録済みタグでリストを探します",
+  },
 };
 
 type SidebarPanelKey =
@@ -1701,6 +1760,103 @@ function PreviewChangeValue({
   return <span className="whitespace-pre-wrap break-words">{value}</span>;
 }
 
+type SelectionOptionTone =
+  | "sky"
+  | "emerald"
+  | "amber"
+  | "cyan"
+  | "violet"
+  | "rose";
+
+const SELECTION_OPTION_TONE_CLASSES: Record<
+  SelectionOptionTone,
+  {
+    card: string;
+    icon: string;
+    badge: string;
+  }
+> = {
+  sky: {
+    card: "border-sky-300/20 bg-gradient-to-br from-sky-500/18 via-[#0f172a] to-[#0b1220] hover:border-sky-300/40 hover:bg-sky-500/10",
+    icon: "border-sky-300/25 bg-sky-400/10 text-sky-100",
+    badge: "border-sky-300/25 bg-sky-400/10 text-sky-100",
+  },
+  emerald: {
+    card: "border-emerald-300/20 bg-gradient-to-br from-emerald-500/18 via-[#0f172a] to-[#0b1220] hover:border-emerald-300/40 hover:bg-emerald-500/10",
+    icon: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100",
+    badge: "border-emerald-300/25 bg-emerald-400/10 text-emerald-100",
+  },
+  amber: {
+    card: "border-amber-300/20 bg-gradient-to-br from-amber-500/18 via-[#0f172a] to-[#0b1220] hover:border-amber-300/40 hover:bg-amber-500/10",
+    icon: "border-amber-300/25 bg-amber-400/10 text-amber-100",
+    badge: "border-amber-300/25 bg-amber-400/10 text-amber-100",
+  },
+  cyan: {
+    card: "border-cyan-300/20 bg-gradient-to-br from-cyan-500/18 via-[#0f172a] to-[#0b1220] hover:border-cyan-300/40 hover:bg-cyan-500/10",
+    icon: "border-cyan-300/25 bg-cyan-400/10 text-cyan-100",
+    badge: "border-cyan-300/25 bg-cyan-400/10 text-cyan-100",
+  },
+  violet: {
+    card: "border-violet-300/20 bg-gradient-to-br from-violet-500/18 via-[#0f172a] to-[#0b1220] hover:border-violet-300/40 hover:bg-violet-500/10",
+    icon: "border-violet-300/25 bg-violet-400/10 text-violet-100",
+    badge: "border-violet-300/25 bg-violet-400/10 text-violet-100",
+  },
+  rose: {
+    card: "border-rose-300/20 bg-gradient-to-br from-rose-500/18 via-[#0f172a] to-[#0b1220] hover:border-rose-300/40 hover:bg-rose-500/10",
+    icon: "border-rose-300/25 bg-rose-400/10 text-rose-100",
+    badge: "border-rose-300/25 bg-rose-400/10 text-rose-100",
+  },
+};
+
+function SelectionOptionCard({
+  tone,
+  icon,
+  title,
+  description,
+  badge,
+  onClick,
+}: {
+  tone: SelectionOptionTone;
+  icon: ReactNode;
+  title: string;
+  description: string;
+  badge?: string;
+  onClick: () => void;
+}) {
+  const toneClass = SELECTION_OPTION_TONE_CLASSES[tone];
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group min-h-[150px] rounded-2xl border p-5 text-left transition ${toneClass.card}`}
+    >
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div
+          className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-lg font-bold ${toneClass.icon}`}
+        >
+          {icon}
+        </div>
+
+        {badge && (
+          <span
+            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-bold tracking-wide ${toneClass.badge}`}
+          >
+            {badge}
+          </span>
+        )}
+      </div>
+
+      <div className="break-words text-base font-bold text-slate-100">
+        {title}
+      </div>
+      <div className="mt-2 break-words text-sm leading-6 text-slate-400">
+        {description}
+      </div>
+    </button>
+  );
+}
+
 function HeaderCell({
   label,
   filterKey,
@@ -2192,6 +2348,11 @@ export default function Home() {
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState("200");
+
+  const [openPageSizeDropdown, setOpenPageSizeDropdown] = useState<
+    "main" | "permission" | null
+  >(null);
+
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -2525,7 +2686,9 @@ export default function Home() {
   const [openSidebarPanel, setOpenSidebarPanel] =
     useState<SidebarPanelKey | null>(null);
 
-  const [themeMode, setThemeMode] = useState<"dark" | "light">("dark");
+  const [themeMode, setThemeMode] = useState<"system" | "dark" | "light">("system");
+  const [systemThemeMode, setSystemThemeMode] = useState<"dark" | "light">("dark");
+  const effectiveThemeMode = themeMode === "system" ? systemThemeMode : themeMode;
 
   const [settingsTab, setSettingsTab] = useState<
     "profile" | "loginHistory" | "permissionManagement"
@@ -3241,10 +3404,7 @@ export default function Home() {
 
             if (typeof window !== "undefined") {
               window.sessionStorage.setItem(MASTER_DATA_LOGIN_SESSION_KEY, "1");
-              window.sessionStorage.setItem(
-                MASTER_DATA_LOGIN_EXPIRES_AT_KEY,
-                String(Date.now() + MASTER_DATA_LOGIN_SESSION_MS)
-              );
+              refreshMasterDataLoginExpiresAt();
 
               if (nextLoginUser) {
                 window.sessionStorage.setItem(
@@ -3282,11 +3442,7 @@ export default function Home() {
       // ログアウト時は画面側の状態を戻すことを優先します
     }
 
-    if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem(MASTER_DATA_LOGIN_SESSION_KEY);
-      window.sessionStorage.removeItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY);
-      window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
-    }
+    clearMasterDataLoginSessionStorage();
 
     setLoginUser(null);
     setLoginHistory([]);
@@ -3620,6 +3776,8 @@ export default function Home() {
         window.sessionStorage.removeItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY);
         window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
       } else {
+        refreshMasterDataLoginExpiresAt();
+
         try {
           const savedLoginUserText = window.sessionStorage.getItem(
             MASTER_DATA_LOGIN_USER_KEY
@@ -3687,41 +3845,69 @@ export default function Home() {
     void fetchCurrentUserPermissions(loginUser);
   }, [loginStatus, loginUser?.id, loginUser?.role, loginUser?.organization]);
 
+    useEffect(() => {
+      if (loginStatus !== "logged_in") return;
+
+      const timer = window.setInterval(() => {
+        const savedLoginExpiresAt = getMasterDataLoginExpiresAt();
+
+        if (
+          !Number.isFinite(savedLoginExpiresAt) ||
+          savedLoginExpiresAt <= Date.now()
+        ) {
+          void handleLogout();
+        }
+      }, 30 * 1000);
+
+      return () => {
+        window.clearInterval(timer);
+      };
+    }, [loginStatus]);
+
   useEffect(() => {
     if (loginStatus !== "logged_in") return;
 
-    const timer = window.setInterval(() => {
-      const activeCrawlJobId = crawlJobId ?? loadActiveCrawlJobId();
+    const refreshLoginSessionByActivity = () => {
+      const savedLoginSession = window.sessionStorage.getItem(
+        MASTER_DATA_LOGIN_SESSION_KEY
+      );
 
-      const isCrawlProgressScreenActive =
-        crawlProgressOpen &&
-        !!activeCrawlJobId &&
-        (crawling || crawlJobStatus === "running");
+      const savedLoginExpiresAt = getMasterDataLoginExpiresAt();
 
-      if (isCrawlProgressScreenActive) {
-        window.sessionStorage.setItem(
-          MASTER_DATA_LOGIN_EXPIRES_AT_KEY,
-          String(Date.now() + MASTER_DATA_LOGIN_SESSION_MS)
-        );
+      if (
+        savedLoginSession !== "1" ||
+        !Number.isFinite(savedLoginExpiresAt)
+      ) {
         return;
       }
 
-      const savedLoginExpiresAt = Number(
-        window.sessionStorage.getItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY)
-      );
-
-      if (
-        !Number.isFinite(savedLoginExpiresAt) ||
-        savedLoginExpiresAt <= Date.now()
-      ) {
+      if (savedLoginExpiresAt <= Date.now()) {
         void handleLogout();
+        return;
       }
-    }, 30 * 1000);
+
+      refreshMasterDataLoginExpiresAt();
+    };
+
+    const activityEvents: Array<keyof WindowEventMap> = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "scroll",
+      "wheel",
+      "touchstart",
+    ];
+
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, refreshLoginSessionByActivity);
+    });
 
     return () => {
-      window.clearInterval(timer);
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, refreshLoginSessionByActivity);
+      });
     };
-  }, [loginStatus, crawlJobId, crawlJobStatus, crawlProgressOpen, crawling]);
+  }, [loginStatus]);
 
   const checkLocalCrawlWorker = async () => {
     if (isLocalAppRuntime()) {
@@ -3779,14 +3965,31 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+    const updateSystemThemeMode = () => {
+      setSystemThemeMode(mediaQuery.matches ? "dark" : "light");
+    };
+
+    updateSystemThemeMode();
+    mediaQuery.addEventListener("change", updateSystemThemeMode);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateSystemThemeMode);
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof document === "undefined") return;
 
-    document.body.setAttribute("data-app-theme", themeMode);
+    document.body.setAttribute("data-app-theme", effectiveThemeMode);
 
     return () => {
       document.body.removeAttribute("data-app-theme");
     };
-  }, [themeMode]);
+  }, [effectiveThemeMode]);
 
   const handleOpenFilter = async (key: FilterKey) => {
     if (openFilterKey === key) {
@@ -4966,37 +5169,98 @@ export default function Home() {
         canUsePermission(getAdvancedFilterPermissionKey(button.key))
       );
 
+      const searchPanelMeta: Record<
+        AdvancedFilterModalKey,
+        { icon: string; description: string }
+      > = {
+        companyName: {
+          icon: "Aa",
+          description: "企業名に含まれる文字で絞り込みます",
+        },
+        prefecture: {
+          icon: "📍",
+          description: "都道府県や市区町村から探します",
+        },
+        industry: {
+          icon: "🏭",
+          description: "大業種・小業種で分類します",
+        },
+        established: {
+          icon: "📅",
+          description: "設立年月の範囲で絞り込みます",
+        },
+        capital: {
+          icon: "¥",
+          description: "資本金の金額範囲で絞り込みます",
+        },
+        employeeCount: {
+          icon: "👥",
+          description: "従業員数の範囲で絞り込みます",
+        },
+        tag: {
+          icon: "＃",
+          description: "登録済みタグでリストを探します",
+        },
+      };
+
       return (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="space-y-4">
           {visibleAdvancedFilterButtons.length === 0 && (
-            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400 sm:col-span-2">
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
               使用できる検索項目がありません
             </div>
           )}
-          {visibleAdvancedFilterButtons.map((button) => {
-            const active = hasActiveAdvancedFilter(
-              button.key,
-              appliedAdvancedFilters
-            );
 
-            return (
-              <button
-                key={button.key}
-                type="button"
-                onClick={() => {
-                  setOpenSidebarPanel(null);
-                  handleOpenAdvancedFilter(button.key);
-                }}
-                className={`h-11 rounded-xl border px-3 text-sm font-medium transition ${
-                  active
-                    ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
-                    : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
-                }`}
-              >
-                {button.label}
-              </button>
-            );
-          })}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {visibleAdvancedFilterButtons.map((button) => {
+              const active = hasActiveAdvancedFilter(
+                button.key,
+                appliedAdvancedFilters
+              );
+              const meta = searchPanelMeta[button.key];
+
+              return (
+                <button
+                  key={button.key}
+                  type="button"
+                  onClick={() => {
+                    setOpenSidebarPanel(null);
+                    handleOpenAdvancedFilter(button.key);
+                  }}
+                  className={`group min-h-[118px] rounded-2xl border p-4 text-left transition ${
+                    active
+                      ? "border-sky-400/40 bg-gradient-to-br from-sky-500/20 via-[#0f172a] to-indigo-500/10 text-sky-100 shadow-[0_0_28px_rgba(56,189,248,0.16)] hover:bg-sky-500/25"
+                      : "border-white/10 bg-gradient-to-br from-white/10 via-[#0f172a] to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
+                  }`}
+                >
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div
+                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border text-sm font-bold ${
+                        active
+                          ? "border-sky-300/30 bg-sky-400/20 text-sky-100"
+                          : "border-white/10 bg-white/5 text-slate-100 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
+                      }`}
+                    >
+                      {meta.icon}
+                    </div>
+
+                    {active && (
+                      <span className="rounded-full border border-sky-300/30 bg-sky-400/10 px-2 py-1 text-[10px] font-semibold text-sky-100">
+                        適用中
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-sm font-semibold text-slate-100">
+                    {button.label}
+                  </div>
+                  <div className="mt-2 text-xs leading-5 text-slate-400">
+                    {meta.description}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       );
     }
@@ -5004,27 +5268,16 @@ export default function Home() {
     if (openSidebarPanel === "list") {
       return (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {!canUseAnyPermission([
               "list.delete",
               "list.add",
               "list.itemDelete",
               "list.dedupe",
             ]) && (
-              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400 sm:col-span-4">
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400 sm:col-span-2">
                 使用できるリスト操作がありません
               </div>
-            )}
-
-            {canUsePermission("list.delete") && (
-              <button
-                type="button"
-                onClick={() => setListDeleteScopeOpen(true)}
-                disabled={listDeleting}
-                className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-rose-500 disabled:opacity-50"
-              >
-                リスト削除
-              </button>
             )}
 
             {canUsePermission("list.add") && (
@@ -5032,9 +5285,36 @@ export default function Home() {
                 type="button"
                 onClick={handleOpenListAdd}
                 disabled={mynaviLoading}
-                className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                className="group min-h-[132px] rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-emerald-300/40 hover:bg-emerald-500/10 disabled:opacity-50"
               >
-                {mynaviLoading ? "取得中..." : "リスト追加"}
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-400/10 text-lg text-emerald-100">
+                  ＋
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  {mynaviLoading ? "取得中..." : "リスト追加"}
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  新しい企業リストを取り込み、管理対象に追加します
+                </div>
+              </button>
+            )}
+
+            {canUsePermission("list.delete") && (
+              <button
+                type="button"
+                onClick={() => setListDeleteScopeOpen(true)}
+                disabled={listDeleting}
+                className="group min-h-[132px] rounded-2xl border border-rose-300/20 bg-gradient-to-br from-rose-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-rose-300/40 hover:bg-rose-500/10 disabled:opacity-50"
+              >
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-rose-300/25 bg-rose-400/10 text-lg text-rose-100">
+                  🗑
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  リスト削除
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  条件に合うリスト、または全リストを削除します
+                </div>
               </button>
             )}
 
@@ -5049,9 +5329,17 @@ export default function Home() {
                   setItemDeleteScopeOpen(true);
                 }}
                 disabled={itemDeleting}
-                className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-cyan-500 disabled:opacity-50"
+                className="group min-h-[132px] rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-cyan-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-cyan-300/40 hover:bg-cyan-500/10 disabled:opacity-50"
               >
-                項目削除
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-300/25 bg-cyan-400/10 text-lg text-cyan-100">
+                  ✂
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  項目削除
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  選択した項目の中身だけをまとめて削除します
+                </div>
               </button>
             )}
 
@@ -5063,9 +5351,17 @@ export default function Home() {
                   setDedupeScopeOpen(true);
                 }}
                 disabled={deduplicating}
-                className="h-11 rounded-xl bg-violet-600 px-5 text-sm font-medium whitespace-nowrap text-white transition hover:bg-violet-500 disabled:opacity-50"
+                className="group min-h-[132px] rounded-2xl border border-violet-300/20 bg-gradient-to-br from-violet-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-violet-300/40 hover:bg-violet-500/10 disabled:opacity-50"
               >
-                {deduplicating ? "重複削除中..." : "重複削除"}
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-violet-300/25 bg-violet-400/10 text-lg text-violet-100">
+                  ⧉
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  {deduplicating ? "重複削除中..." : "重複削除"}
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  重複している企業データを整理します
+                </div>
               </button>
             )}
           </div>
@@ -5148,23 +5444,42 @@ export default function Home() {
       return (
         <div className="space-y-4">
           {canUsePermission("csv.import") && (
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              multiple
-              onChange={(e) => {
-                const newFiles = Array.from(e.target.files ?? []);
-                setSelectedFiles((prev) => [...prev, ...newFiles]);
-                setCheckedImportFiles((prev) => ({
-                  ...prev,
-                  ...Object.fromEntries(
-                    newFiles.map((file) => [buildImportFileKey(file), true])
-                  ),
-                }));
-                e.currentTarget.value = "";
-              }}
-              className="block w-full rounded-xl border border-white/10 bg-[#0f172a] px-4 py-3 text-sm text-slate-200 file:mr-4 file:rounded-lg file:border-0 file:bg-sky-500 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-sky-400"
-            />
+            <label className="group flex min-h-[118px] cursor-pointer items-center gap-4 rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/18 via-[#0f172a] to-[#0b1220] p-4 transition hover:border-emerald-300/40 hover:bg-emerald-500/10">
+              <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-400/10 text-lg text-emerald-100">
+                📁
+              </span>
+
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-100">
+                  ファイル選択
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-slate-400">
+                  CSVファイルを選択して、投入候補として追加します
+                </span>
+              </span>
+
+              <span className="shrink-0 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                CSV
+              </span>
+
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                multiple
+                onChange={(e) => {
+                  const newFiles = Array.from(e.target.files ?? []);
+                  setSelectedFiles((prev) => [...prev, ...newFiles]);
+                  setCheckedImportFiles((prev) => ({
+                    ...prev,
+                    ...Object.fromEntries(
+                      newFiles.map((file) => [buildImportFileKey(file), true])
+                    ),
+                  }));
+                  e.currentTarget.value = "";
+                }}
+                className="hidden"
+              />
+            </label>
           )}
 
           {canUsePermission("csv.import") && selectedFiles.length > 0 && (
@@ -5205,9 +5520,9 @@ export default function Home() {
             </div>
           )}
 
-          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!canUseAnyPermission(["csv.import", "csv.export", "csv.template"]) && (
-              <div className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400">
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400 sm:col-span-3">
                 使用できるCSV操作がありません
               </div>
             )}
@@ -5216,27 +5531,71 @@ export default function Home() {
               <button
                 onClick={handleImportClick}
                 disabled={importing}
-                className="h-11 min-w-[160px] rounded-xl bg-emerald-500 px-5 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
+                className="group min-h-[126px] rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-emerald-300/40 hover:bg-emerald-500/10 disabled:opacity-50"
               >
-                {importing ? "投入中..." : "CSV投入"}
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-400/10 text-emerald-100">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="h-5 w-5"
+                  >
+                    <path d="M12 19V5" />
+                    <path d="M6 11l6-6 6 6" />
+                    <path d="M5 19h14" />
+                  </svg>
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  {importing ? "投入中..." : "CSV投入"}
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  選択したCSVをデータベースに取り込みます
+                </div>
               </button>
             )}
 
             {canUsePermission("csv.export") && (
               <button
                 onClick={handleExportClick}
-                className="h-11 min-w-[160px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
+                className="group min-h-[126px] rounded-2xl border border-teal-300/20 bg-gradient-to-br from-teal-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-teal-300/40 hover:bg-teal-500/10"
               >
-                CSV抽出
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-teal-300/25 bg-teal-400/10 text-teal-100">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="h-5 w-5"
+                  >
+                    <path d="M12 5v14" />
+                    <path d="M18 13l-6 6-6-6" />
+                    <path d="M5 5h14" />
+                  </svg>
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  CSV抽出
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  現在のリストをCSVとして出力します
+                </div>
               </button>
             )}
 
             {canUsePermission("csv.template") && (
               <button
                 onClick={handleDownloadTemplate}
-                className="h-11 min-w-[160px] rounded-xl bg-indigo-500 px-5 text-sm font-medium text-white transition hover:bg-indigo-400"
+                className="group min-h-[126px] rounded-2xl border border-indigo-300/20 bg-gradient-to-br from-indigo-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-indigo-300/40 hover:bg-indigo-500/10"
               >
-                CSVテンプレート
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-indigo-300/25 bg-indigo-400/10 text-lg text-indigo-100">
+                  ⬚
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  CSVテンプレート
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  投入用CSVのひな形をダウンロードします
+                </div>
               </button>
             )}
           </div>
@@ -5261,7 +5620,7 @@ export default function Home() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {!canUseCrawlPanel && !canUseItemInspectionPanel && (
-              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center text-sm text-slate-400 sm:col-span-2">
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400 sm:col-span-2">
                 使用できる精査操作がありません
               </div>
             )}
@@ -5275,9 +5634,17 @@ export default function Home() {
                   setCrawlScopeOpen(true);
                 }}
                 disabled={crawling}
-                className="h-11 rounded-xl bg-amber-600 px-5 text-sm font-medium text-white transition hover:bg-amber-500 disabled:opacity-50"
+                className="group min-h-[138px] rounded-2xl border border-amber-300/20 bg-gradient-to-br from-amber-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-amber-300/40 hover:bg-amber-500/10 disabled:opacity-50"
               >
-                {crawling ? "クローリング中..." : "クローリング"}
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-amber-300/25 bg-amber-400/10 text-lg text-amber-100">
+                  🤖
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  {crawling ? "クローリング中..." : "クローリング"}
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  企業サイトを確認し、選択した項目の候補を取得します
+                </div>
               </button>
             )}
 
@@ -5303,9 +5670,17 @@ export default function Home() {
                   setItemInspectionScopeOpen(true);
                 }}
                 disabled={itemInspecting}
-                className="h-11 rounded-xl bg-cyan-600 px-5 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+                className="group min-h-[138px] rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-cyan-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-cyan-300/40 hover:bg-cyan-500/10 disabled:opacity-50"
               >
-                {itemInspecting ? "項目精査中..." : "項目精査"}
+                <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-300/25 bg-cyan-400/10 text-lg text-cyan-100">
+                  ✓
+                </div>
+                <div className="text-sm font-semibold text-slate-100">
+                  {itemInspecting ? "項目精査中..." : "項目精査"}
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-400">
+                  登録済みデータを確認し、不要な値や修正候補を精査します
+                </div>
               </button>
             )}
           </div>
@@ -5343,20 +5718,25 @@ export default function Home() {
       return (
         <div className="space-y-5">
           <div
-            className={`sticky top-0 z-30 grid gap-2 rounded-2xl border border-white/10 bg-[#0f172a]/95 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl ${
+            className={`sticky top-0 z-30 grid gap-2 rounded-2xl border border-sky-300/10 bg-gradient-to-br from-white/8 via-[#0f172a]/95 to-[#0b1220]/95 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl ${
               loginUser?.role === "管理者" ? "grid-cols-3" : "grid-cols-2"
             }`}
           >
             <button
               type="button"
               onClick={() => setSettingsTab("profile")}
-              className={`h-11 rounded-xl border px-3 text-sm font-semibold transition ${
+              className={`group flex h-12 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition ${
                 settingsTab === "profile"
-                  ? "border-sky-400/40 bg-sky-500/20 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
-                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                  ? "border-sky-400/40 bg-gradient-to-br from-sky-500/24 via-white/8 to-indigo-500/10 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
+                  : "border-white/10 bg-white/5 text-slate-300 hover:border-sky-300/30 hover:bg-white/10"
               }`}
             >
-              プロフィール
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-300/20 bg-violet-400/10">
+                👤
+              </span>
+              <span className="font-black" style={{ fontWeight: 900 }}>
+                プロフィール
+              </span>
             </button>
 
             {loginUser?.role === "管理者" && (
@@ -5366,26 +5746,36 @@ export default function Home() {
                   setSettingsTab("permissionManagement");
                   void fetchPermissionEmployees();
                 }}
-                className={`h-11 rounded-xl border px-3 text-sm font-semibold transition ${
+                className={`group flex h-12 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition ${
                   settingsTab === "permissionManagement"
-                    ? "border-sky-400/40 bg-sky-500/20 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
-                    : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                    ? "border-sky-400/40 bg-gradient-to-br from-sky-500/24 via-white/8 to-indigo-500/10 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
+                    : "border-white/10 bg-white/5 text-slate-300 hover:border-sky-300/30 hover:bg-white/10"
                 }`}
               >
-                権限管理
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-300/20 bg-violet-400/10">
+                  🔐
+                </span>
+                <span className="font-black" style={{ fontWeight: 900 }}>
+                  権限管理
+                </span>
               </button>
             )}
 
             <button
               type="button"
               onClick={() => setSettingsTab("loginHistory")}
-              className={`h-11 rounded-xl border px-3 text-sm font-semibold transition ${
+              className={`group flex h-12 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-bold transition ${
                 settingsTab === "loginHistory"
-                  ? "border-sky-400/40 bg-sky-500/20 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
-                  : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+                  ? "border-sky-400/40 bg-gradient-to-br from-sky-500/24 via-white/8 to-indigo-500/10 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
+                  : "border-white/10 bg-white/5 text-slate-300 hover:border-sky-300/30 hover:bg-white/10"
               }`}
             >
-              ログイン履歴
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-300/20 bg-violet-400/10">
+                🕘
+              </span>
+              <span className="font-black" style={{ fontWeight: 900 }}>
+                ログイン履歴
+              </span>
             </button>
           </div>
 
@@ -5581,58 +5971,114 @@ export default function Home() {
                     </div>
 
                     <div className="flex flex-1 flex-col overflow-hidden px-4 py-3">
-                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-400/20 bg-sky-500/10 px-4 py-2">
-                        <div className="min-w-[320px] flex-1 text-xs leading-5 text-sky-100">
-                          上部のリスト内フィルタや検索条件で絞り込んだ状態を確認し、
-                          右下の「適用」を押すと、この従業員はその絞り込み範囲のリストだけを操作対象にできます。
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-300/20 bg-gradient-to-br from-sky-500/14 via-[#0f172a]/90 to-[#0b1220]/95 px-4 py-3 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+                        <div className="min-w-[360px] flex-1 text-sm font-medium leading-6 text-sky-100">
+                          <span className="block">
+                            上部のリスト内フィルタや検索条件で絞り込んだ状態を確認してください。
+                          </span>
+                          <span className="mt-1 block">
+                            右下の「適用」を押すと、この従業員はその絞り込み範囲のリストだけを操作対象にできます。
+                          </span>
                         </div>
 
                         <div className="flex flex-wrap items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => setPermissionListScopeSearchOpen(true)}
-                            className="inline-flex h-10 min-w-[88px] items-center justify-center rounded-xl border border-sky-400/40 bg-sky-500/20 px-4 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/30"
+                            className="group inline-flex min-h-[72px] min-w-[170px] flex-col items-center justify-center gap-1 rounded-2xl border border-sky-300/30 bg-gradient-to-br from-sky-500/24 via-white/8 to-indigo-500/10 px-4 py-2 text-sm font-black text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)] transition hover:border-sky-300/50 hover:bg-sky-500/20"
                           >
-                            検索
+                            <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-sky-300/25 bg-sky-400/10">
+                              🔎
+                            </span>
+                            <span className="font-black" style={{ fontWeight: 900 }}>
+                              検索
+                            </span>
                           </button>
 
-                          <div className="flex h-10 min-w-[110px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
-                            <span className="text-xs text-slate-400">総件数</span>
-                            <span className="text-sm font-semibold text-white">
+                          <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-sky-300/15 bg-gradient-to-br from-sky-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
+                            <span className="text-[11px] font-semibold text-slate-400">総件数</span>
+                            <span className="mt-0.5 text-sm font-bold text-white">
                               {total.toLocaleString()}件
                             </span>
                           </div>
 
-                          <div className="flex h-10 min-w-[110px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
-                            <span className="text-xs text-slate-400">現在ページ</span>
-                            <span className="text-sm font-semibold text-white">
+                          <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-indigo-300/15 bg-gradient-to-br from-indigo-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
+                            <span className="text-[11px] font-semibold text-slate-400">
+                              現在ページ
+                            </span>
+                            <span className="mt-0.5 text-sm font-bold text-white">
                               {page}
                             </span>
                           </div>
 
-                          <div className="flex h-10 min-w-[110px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
-                            <span className="text-xs text-slate-400">総ページ数</span>
-                            <span className="text-sm font-semibold text-white">
+                          <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-cyan-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
+                            <span className="text-[11px] font-semibold text-slate-400">
+                              総ページ数
+                            </span>
+                            <span className="mt-0.5 text-sm font-bold text-white">
                               {totalPages.toLocaleString()}
                             </span>
                           </div>
 
-                          <div className="flex h-10 min-w-[140px] items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-center">
-                            <span className="text-xs text-slate-400">表示件数</span>
-                            <select
-                              value={limit}
-                              onChange={(e) => {
-                                setLimit(e.target.value);
-                                setPage(1);
+                          <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-emerald-300/15 bg-gradient-to-br from-emerald-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
+                            <span className="text-[11px] font-semibold text-slate-400">
+                              表示件数
+                            </span>
+
+                            <div
+                              className="relative mt-1"
+                              onBlur={(e) => {
+                                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                                  setOpenPageSizeDropdown(null);
+                                }
                               }}
-                              className="h-7 rounded-lg border border-white/10 bg-[#0f172a] px-2 text-center text-xs text-slate-100 outline-none focus:border-sky-500"
                             >
-                              {pageSizeOptions.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                  {opt.label}
-                                </option>
-                              ))}
-                            </select>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOpenPageSizeDropdown((current) =>
+                                    current === "permission" ? null : "permission"
+                                  )
+                                }
+                                className="group/size relative flex h-9 min-w-[100px] items-center justify-between gap-2 rounded-xl border border-emerald-300/30 bg-gradient-to-br from-emerald-400/15 via-[#0f172a] to-[#07111f] px-3 text-xs font-black text-slate-100 shadow-inner outline-none transition hover:border-emerald-300/50 hover:bg-emerald-500/15 focus:border-emerald-300/60 focus:ring-2 focus:ring-emerald-300/20"
+                              >
+                                <span className="font-black" style={{ fontWeight: 900 }}>
+                                  {pageSizeOptions.find((opt) => opt.value === limit)?.label ?? `${limit}件`}
+                                </span>
+                                <span className="text-[10px] font-black text-emerald-100 transition group-hover/size:translate-y-0.5">
+                                  ▾
+                                </span>
+                              </button>
+
+                              {openPageSizeDropdown === "permission" && (
+                                <div className="absolute left-1/2 top-[calc(100%+8px)] z-[120] w-[118px] -translate-x-1/2 overflow-hidden rounded-2xl border border-emerald-300/25 bg-[#07111f]/98 p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+                                  {pageSizeOptions.map((opt) => {
+                                    const active = limit === opt.value;
+
+                                    return (
+                                      <button
+                                        key={opt.value}
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => {
+                                          setLimit(opt.value);
+                                          setPage(1);
+                                          setOpenPageSizeDropdown(null);
+                                        }}
+                                        className={`flex h-9 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                                          active
+                                            ? "bg-gradient-to-r from-emerald-400 to-cyan-400 text-[#03131f] shadow-[0_0_18px_rgba(45,212,191,0.24)]"
+                                            : "text-slate-100 hover:bg-emerald-400/12 hover:text-emerald-100"
+                                        }`}
+                                        style={{ fontWeight: 900 }}
+                                      >
+                                        {opt.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -5717,12 +6163,12 @@ export default function Home() {
                       </div>
                     </div>
 
-                      <div className="mt-2 mb-3 flex flex-wrap items-center justify-center gap-2">
+                      <div className="mx-4 mt-2 mb-3 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-gradient-to-br from-white/8 via-[#0b1326]/85 to-[#08101d]/90 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
                         <button
                           type="button"
                           onClick={() => setPage(1)}
                           disabled={page <= 1 || limit === "all"}
-                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
                         >
                           最初
                         </button>
@@ -5731,7 +6177,7 @@ export default function Home() {
                           type="button"
                           onClick={() => setPage((p) => Math.max(1, p - 1))}
                           disabled={page <= 1 || limit === "all"}
-                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
                         >
                           前へ
                         </button>
@@ -5746,10 +6192,10 @@ export default function Home() {
                             type="button"
                             onClick={() => setPage(n)}
                             disabled={limit === "all"}
-                            className={`rounded-xl px-4 py-2 text-sm transition ${
+                            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
                               page === n
-                                ? "bg-sky-500 text-white"
-                                : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                                ? "border border-sky-300/40 bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-[0_0_22px_rgba(56,189,248,0.24)]"
+                                : "border border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100"
                             } ${limit === "all" ? "opacity-40" : ""}`}
                           >
                             {n}
@@ -5764,7 +6210,7 @@ export default function Home() {
                           type="button"
                           onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                           disabled={page >= totalPages || limit === "all"}
-                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
                         >
                           次へ
                         </button>
@@ -5773,7 +6219,7 @@ export default function Home() {
                           type="button"
                           onClick={() => setPage(totalPages)}
                           disabled={page >= totalPages || limit === "all"}
-                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+                          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
                         >
                           最後
                         </button>
@@ -5812,7 +6258,7 @@ export default function Home() {
                 >
                   <div className="flex min-h-full items-center justify-center">
                     <div
-                      className="flex w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                      className="flex w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -5835,16 +6281,15 @@ export default function Home() {
                       </div>
 
                       <div className="p-4">
-                        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           {ADVANCED_FILTER_BUTTONS.filter((button) =>
-                            canUsePermission(
-                              getAdvancedFilterPermissionKey(button.key)
-                            )
+                            canUsePermission(getAdvancedFilterPermissionKey(button.key))
                           ).map((button) => {
                             const active = hasActiveAdvancedFilter(
                               button.key,
                               appliedAdvancedFilters
                             );
+                            const meta = ADVANCED_FILTER_PANEL_META[button.key];
 
                             return (
                               <button
@@ -5854,13 +6299,36 @@ export default function Home() {
                                   setPermissionListScopeSearchOpen(false);
                                   void handleOpenAdvancedFilter(button.key);
                                 }}
-                                className={`h-10 rounded-xl border px-3 text-xs font-medium transition ${
+                                className={`group min-h-[118px] rounded-2xl border p-4 text-left transition ${
                                   active
-                                    ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
-                                    : "border-white/10 bg-[#0b1220] text-slate-200 hover:bg-white/10"
+                                    ? "border-sky-400/40 bg-gradient-to-br from-sky-500/20 via-[#0f172a] to-indigo-500/10 text-sky-100 shadow-[0_0_28px_rgba(56,189,248,0.16)] hover:bg-sky-500/25"
+                                    : "border-white/10 bg-gradient-to-br from-white/10 via-[#0f172a] to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
                                 }`}
                               >
-                                {button.label}
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                  <div
+                                    className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl border text-sm font-bold ${
+                                      active
+                                        ? "border-sky-300/30 bg-sky-400/20 text-sky-100"
+                                        : "border-white/10 bg-white/5 text-slate-100 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
+                                    }`}
+                                  >
+                                    {meta.icon}
+                                  </div>
+
+                                  {active && (
+                                    <span className="rounded-full border border-sky-300/30 bg-sky-400/10 px-2 py-1 text-[10px] font-semibold text-sky-100">
+                                      適用中
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="text-sm font-semibold text-slate-100">
+                                  {button.label}
+                                </div>
+                                <div className="mt-2 text-xs leading-5 text-slate-400">
+                                  {meta.description}
+                                </div>
                               </button>
                             );
                           })}
@@ -6217,37 +6685,83 @@ export default function Home() {
     }
 
     if (openSidebarPanel === "theme") {
-      return (
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={() => {
-              setThemeMode("light");
-              setOpenSidebarPanel(null);
-            }}
-            className={`h-11 w-full rounded-xl border px-3 text-sm font-medium transition ${
-              themeMode === "light"
-                ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
-                : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
-            }`}
-          >
-            ライト
-          </button>
+      const themeOptions: {
+        key: "system" | "light" | "dark";
+        label: string;
+        description: string;
+        icon: string;
+      }[] = [
+        {
+          key: "system",
+          label: "システム",
+          description: "PCやブラウザの設定に合わせて自動で切り替えます",
+          icon: "🖥",
+        },
+        {
+          key: "light",
+          label: "ライト",
+          description: "明るい画面で表示します",
+          icon: "☀",
+        },
+        {
+          key: "dark",
+          label: "ダーク",
+          description: "暗い画面で表示します",
+          icon: "☾",
+        },
+      ];
 
-          <button
-            type="button"
-            onClick={() => {
-              setThemeMode("dark");
-              setOpenSidebarPanel(null);
-            }}
-            className={`h-11 w-full rounded-xl border px-3 text-sm font-medium transition ${
-              themeMode === "dark"
-                ? "border-sky-400/40 bg-sky-500/20 text-sky-100 hover:bg-sky-500/30"
-                : "border-white/10 bg-[#0f172a] text-slate-200 hover:bg-white/10"
-            }`}
-          >
-            ダーク
-          </button>
+      return (
+        <div className="grid grid-cols-1 gap-3">
+          {themeOptions.map((option) => {
+            const active = themeMode === option.key;
+
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => {
+                  setThemeMode(option.key);
+                  setOpenSidebarPanel(null);
+                }}
+                className={`group rounded-2xl border p-4 text-left transition ${
+                  active
+                    ? "border-sky-400/40 bg-gradient-to-br from-sky-500/20 via-[#0f172a] to-indigo-500/10 text-sky-100 shadow-[0_0_28px_rgba(56,189,248,0.16)] hover:bg-sky-500/25"
+                    : "border-white/10 bg-gradient-to-br from-white/10 via-[#0f172a] to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-xl ${
+                      active
+                        ? "border-sky-300/30 bg-sky-400/20 text-sky-100"
+                        : "border-white/10 bg-white/5 text-slate-100 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
+                    }`}
+                  >
+                    {option.icon}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-100">
+                        {option.label}
+                      </div>
+
+                      {active && (
+                        <span className="shrink-0 rounded-full border border-sky-300/40 bg-sky-400/15 px-4 py-1.5 text-xs font-bold text-sky-100">
+                          選択中
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-1 text-xs leading-5 text-slate-400">
+                      {option.description}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
         </div>
       );
     }
@@ -9022,7 +9536,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       const data = await readApiResponse(res);
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "項目精査開始に失敗しました");
+        throw new Error(data.error || "項目精査 開始に失敗しました");
       }
 
       if (!data.jobId) {
@@ -9043,7 +9557,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       setItemInspecting(false);
       setItemInspectionProgressOpen(false);
       setItemInspectionError(
-        e instanceof Error ? e.message : "項目精査開始でエラーが発生しました"
+        e instanceof Error ? e.message : "項目精査 開始でエラーが発生しました"
       );
     }
   };
@@ -9179,12 +9693,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   const sidebarPanelMaxWidthClass =
     openSidebarPanel === "csv"
       ? "max-w-[920px]"
-      : openSidebarPanel === "search"
-      ? "max-w-[720px]"
+      : openSidebarPanel === "inspection"
+      ? "max-w-[900px]"
+      : openSidebarPanel === "search" || openSidebarPanel === "list"
+      ? "max-w-[760px]"
       : openSidebarPanel === "settings"
       ? "max-w-[1180px]"
       : openSidebarPanel === "theme"
-      ? "max-w-[420px]"
+      ? "max-w-[560px]"
       : "max-w-[520px]";
 
   const activeAdvancedFilterTitle = openAdvancedFilterKey
@@ -9326,7 +9842,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
   return (
     <main
-      data-theme={themeMode}
+      data-theme={effectiveThemeMode}
       className={`app-responsive-root ${
         sidebarOpen ? "app-sidebar-open" : "app-sidebar-closed"
       } h-[100dvh] overflow-hidden bg-transparent text-slate-100`}
@@ -9348,7 +9864,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           </div>
         </div>
       ) : loginStatus !== "logged_in" ? (
-        <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-white lg:grid-cols-2">
+        <div className="master-data-login-screen grid h-full min-h-0 grid-cols-1 overflow-hidden bg-white lg:grid-cols-2">
           <section className="flex min-h-[320px] flex-col items-center justify-center bg-[#05070d] px-8 py-10 text-center">
             <MasterDataBrandLogo className="h-auto w-[min(600px,82vw)] shrink-0 -translate-y-[40px]" />
 
@@ -9472,26 +9988,36 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             />
           </div>
 
-          <div className="app-scrollbar max-h-[calc(100dvh-var(--app-sidebar-menu-offset))] overflow-y-auto rounded-[var(--app-radius-lg)] border border-white/10 bg-[#08101d]/90 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
+          <div className="app-scrollbar max-h-[calc(100dvh-var(--app-sidebar-menu-offset))] overflow-y-auto rounded-[var(--app-radius-lg)] border border-sky-300/10 bg-gradient-to-b from-[#0b1326]/95 via-[#08101d]/92 to-[#050b14]/95 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
             <div className="rounded-[var(--app-radius-md)] border border-white/10 bg-[#0b1326]/85 p-[var(--app-panel-pad)]">
 
               <div
-                className={`mb-2 flex items-center ${
+                className={`mb-3 flex items-center ${
                   sidebarOpen ? "justify-between" : "justify-center"
                 }`}
               >
                 {sidebarOpen && (
-                  <div className="px-2 text-sm font-semibold text-slate-200">
-                    メニュー
+                  <div className="min-w-0 px-1">
+                    <div
+                      className="master-data-brand-logo__wordmark bg-gradient-to-r from-sky-100 via-white to-cyan-200 bg-clip-text text-[13px] font-black uppercase tracking-[0.32em] text-transparent drop-shadow-[0_0_16px_rgba(56,189,248,0.35)]"
+                      style={{
+                        WebkitTextStroke: "0.28px rgba(255, 255, 255, 0.55)",
+                        textShadow:
+                          "0 0 1px rgba(255, 255, 255, 0.95), 0 0 14px rgba(56, 189, 248, 0.42)",
+                      }}
+                    >
+                      NAVIGATION
+                    </div>
                   </div>
                 )}
 
                 <button
                   type="button"
                   onClick={() => setSidebarOpen((prev) => !prev)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-200 transition hover:bg-white/10"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-300/20 bg-[#0f172a]/90 text-sky-100 shadow-[0_0_20px_rgba(56,189,248,0.12)] transition hover:border-sky-300/40 hover:bg-sky-500/10"
+                  title={sidebarOpen ? "メニューを閉じる" : "メニューを開く"}
                 >
-                  {sidebarOpen ? "←" : "→"}
+                  {sidebarOpen ? "‹" : "›"}
                 </button>
               </div>
 
@@ -9535,13 +10061,19 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       <button
                         type="button"
                         onClick={() => handleOpenSidebarPanel(item.key)}
-                        className={`flex w-full items-center gap-2 rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-medium transition ${
+                        className={`group relative flex w-full items-center gap-2 overflow-hidden rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-semibold transition ${
                           isActive
-                            ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
-                            : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                            ? "border-sky-400/40 bg-gradient-to-br from-sky-500/22 via-white/8 to-indigo-500/10 text-sky-100 shadow-[0_0_26px_rgba(56,189,248,0.16)]"
+                            : "border-white/10 bg-gradient-to-br from-white/8 via-white/5 to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
                         } ${sidebarOpen ? "justify-start" : "justify-center"}`}
                       >
-                        <span className="inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl bg-[#0f172a]">
+                        <span
+                          className={`inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl border transition ${
+                            isActive
+                              ? "border-sky-300/30 bg-sky-400/15 text-sky-100"
+                              : "border-white/10 bg-[#0f172a] text-slate-200 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
+                          }`}
+                        >
                           <SidebarMenuIcon menuKey={item.key} />
                         </span>
 
@@ -9560,11 +10092,19 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                             setOpenAdvancedFilterKey(null);
                             setAllFiltersClearConfirmOpen(true);
                           }}
-                          className={`flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-medium text-slate-200 transition hover:bg-white/10 ${
-                            sidebarOpen ? "justify-start" : "justify-center"
-                          }`}
+                          className={`group flex w-full items-center gap-2 rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-semibold transition ${
+                            allFiltersClearConfirmOpen
+                              ? "border-sky-400/40 bg-gradient-to-br from-sky-500/20 via-white/8 to-indigo-500/10 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
+                              : "border-white/10 bg-gradient-to-br from-white/8 via-white/5 to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
+                          } ${sidebarOpen ? "justify-start" : "justify-center"}`}
                         >
-                          <span className="inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl bg-[#0f172a] text-base">
+                          <span
+                            className={`inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl border text-base ${
+                              allFiltersClearConfirmOpen
+                                ? "border-sky-300/30 bg-sky-400/20 text-sky-100"
+                                : "border-white/10 bg-[#0f172a] text-slate-200 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
+                            }`}
+                          >
                             ↺
                           </span>
 
@@ -9594,60 +10134,109 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               </div>
 
               <div className="grid grid-cols-2 gap-[var(--app-gap-sm)] xl:grid-cols-6">
-                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
-                  <div className="text-xs text-slate-400">総件数</div>
-                  <div className="mt-1 text-lg font-semibold text-white md:text-xl">
+                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-hidden rounded-2xl border border-sky-300/20 bg-gradient-to-br from-sky-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.22),transparent_42%)] opacity-0 transition group-hover:opacity-100" />
+                  <div className="relative text-xs font-semibold text-sky-100/80">総件数</div>
+                  <div className="relative mt-1 text-lg font-bold text-white md:text-xl">
                     {total.toLocaleString()}件
                   </div>
                 </div>
 
-                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
-                  <div className="text-xs text-slate-400">現在ページ</div>
-                  <div className="mt-1 text-lg font-semibold text-white md:text-xl">
+                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-hidden rounded-2xl border border-indigo-300/20 bg-gradient-to-br from-indigo-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(129,140,248,0.22),transparent_42%)] opacity-0 transition group-hover:opacity-100" />
+                  <div className="relative text-xs font-semibold text-indigo-100/80">
+                    現在ページ
+                  </div>
+                  <div className="relative mt-1 text-lg font-bold text-white md:text-xl">
                     {page}
                   </div>
                 </div>
 
-                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center">
-                  <div className="text-xs text-slate-400">総ページ数</div>
-                  <div className="mt-1 text-lg font-semibold text-white md:text-xl">
+                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-hidden rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-cyan-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.22),transparent_42%)] opacity-0 transition group-hover:opacity-100" />
+                  <div className="relative text-xs font-semibold text-cyan-100/80">
+                    総ページ数
+                  </div>
+                  <div className="relative mt-1 text-lg font-bold text-white md:text-xl">
                     {totalPages}
                   </div>
                 </div>
 
-                <div className="flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center rounded-[var(--app-radius-md)] border border-white/10 bg-white/5 px-[var(--app-card-x)] py-[var(--app-card-y)] text-center xl:mr-8">
-                  <div className="text-xs text-slate-400">表示件数</div>
-                  <div className="mt-2">
-                    <select
-                      value={limit}
-                      onChange={(e) => {
-                        setLimit(e.target.value);
-                        setPage(1);
-                      }}
-                      className="h-9 w-full rounded-xl border border-white/10 bg-[#0f172a] px-3 text-center text-sm outline-none focus:border-sky-500"
+                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-visible rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)] xl:mr-8">
+                  <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.22),transparent_42%)] opacity-0 transition group-hover:opacity-100" />
+                  <div className="relative text-xs font-semibold text-emerald-100/80">
+                    表示件数
+                  </div>
+
+                  <div
+                    className="relative mt-2"
+                    onBlur={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                        setOpenPageSizeDropdown(null);
+                      }
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenPageSizeDropdown((current) =>
+                          current === "main" ? null : "main"
+                        )
+                      }
+                      className="group/size relative flex h-10 min-w-[104px] items-center justify-between gap-2 rounded-xl border border-emerald-300/30 bg-gradient-to-br from-emerald-400/15 via-[#0f172a] to-[#07111f] px-3 text-sm font-black text-slate-100 shadow-inner outline-none transition hover:border-emerald-300/50 hover:bg-emerald-500/15 focus:border-emerald-300/60 focus:ring-2 focus:ring-emerald-300/20"
                     >
-                      {pageSizeOptions.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                      <span className="font-black" style={{ fontWeight: 900 }}>
+                        {pageSizeOptions.find((opt) => opt.value === limit)?.label ?? `${limit}件`}
+                      </span>
+                      <span className="text-xs font-black text-emerald-100 transition group-hover/size:translate-y-0.5">
+                        ▾
+                      </span>
+                    </button>
+
+                    {openPageSizeDropdown === "main" && (
+                      <div className="absolute left-1/2 top-[calc(100%+8px)] z-[120] w-[118px] -translate-x-1/2 overflow-hidden rounded-2xl border border-emerald-300/25 bg-[#07111f]/98 p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+                        {pageSizeOptions.map((opt) => {
+                          const active = limit === opt.value;
+
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setLimit(opt.value);
+                                setPage(1);
+                                setOpenPageSizeDropdown(null);
+                              }}
+                              className={`flex h-9 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                                active
+                                  ? "bg-gradient-to-r from-emerald-400 to-cyan-400 text-[#03131f] shadow-[0_0_18px_rgba(45,212,191,0.24)]"
+                                  : "text-slate-100 hover:bg-emerald-400/12 hover:text-emerald-100"
+                              }`}
+                              style={{ fontWeight: 900 }}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div
-                  className={`flex min-h-[var(--app-stat-card-h)] items-center justify-center rounded-[var(--app-radius-md)] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center ${
+                  className={`group relative flex min-h-[var(--app-stat-card-h)] items-center justify-center overflow-hidden rounded-2xl px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)] ${
                     loginUser?.role === "従業員"
-                      ? "border border-amber-300/20 bg-gradient-to-br from-amber-500/15 to-yellow-500/10"
-                      : "border border-white/10 bg-gradient-to-br from-sky-500/15 to-indigo-500/10"
+                      ? "border border-amber-300/20 bg-gradient-to-br from-amber-500/18 via-white/5 to-[#0b1220]"
+                      : "border border-sky-300/20 bg-gradient-to-br from-sky-500/18 via-white/5 to-[#0b1220]"
                   }`}
                 >
                   <div className="flex min-w-0 items-center justify-center gap-2">
                     <span
                       className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${
                         loginUser?.role === "従業員"
-                          ? "border-amber-300/20 bg-amber-400/10 text-amber-100"
-                          : "border-sky-300/20 bg-sky-400/10 text-sky-100"
+                          ? "border-amber-300/25 bg-amber-400/10 text-amber-100"
+                          : "border-sky-300/25 bg-sky-400/10 text-sky-100"
                       }`}
                     >
                       <svg
@@ -9664,7 +10253,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                     <div className="min-w-0 text-left leading-tight">
                       <div
-                        className="max-w-[120px] truncate text-sm font-semibold text-white"
+                        className="max-w-[120px] truncate text-sm font-bold text-white"
                         title={loginUser?.name ?? ""}
                       >
                         {loginUser?.name ?? "-"}
@@ -9683,24 +10272,28 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   </div>
                 </div>
 
-                <div className="flex min-h-[var(--app-stat-card-h)] items-center justify-center translate-x-[0px] translate-y-[0px]">
+                <div className="flex min-h-[var(--app-stat-card-h)] items-center justify-center">
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                    className="group inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-rose-300/20 bg-gradient-to-br from-rose-500/18 via-white/5 to-[#0b1220] px-4 text-sm font-semibold text-rose-100 shadow-[0_14px_34px_rgba(0,0,0,0.18)] transition hover:border-rose-300/40 hover:bg-rose-500/10"
                   >
                     <svg
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="1.8"
+                      strokeWidth="2.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                       className="h-4 w-4"
                     >
                       <path d="M10 17l5-5-5-5" />
                       <path d="M15 12H3" />
                       <path d="M21 3v18" />
                     </svg>
-                    <span>ログアウト</span>
+                    <span className="font-black" style={{ fontWeight: 900 }}>
+                      ログアウト
+                    </span>
                   </button>
                 </div>
               </div>
@@ -9742,46 +10335,52 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             document.body
           )}
 
-                  {listAddSourceOpen &&
-          typeof document !== "undefined" &&
-          createPortal(
-            <div
-              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
-              onClick={() => setListAddSourceOpen(false)}
-            >
-              <div className="flex min-h-full items-center justify-center">
-                <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-100">
-                      リスト追加 項目選択
+          {listAddSourceOpen &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+                onClick={() => setListAddSourceOpen(false)}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-emerald-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">
+                          リスト追加 項目選択
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          追加するリストの取得元を選択してください
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setListAddSourceOpen(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                      >
+                        ×
+                      </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setListAddSourceOpen(false)}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
-                    >
-                      ×
-                    </button>
-                  </div>
-
-                  <div className="px-4 py-6">
-                    <button
-                      type="button"
-                      onClick={handleOpenMynaviYear}
-                      className="h-11 w-full rounded-xl bg-emerald-600 px-5 text-sm font-medium text-white transition hover:bg-emerald-500"
-                    >
-                      マイナビ新卒
-                    </button>
+                    <div className="px-4 py-5">
+                      <SelectionOptionCard
+                        tone="emerald"
+                        icon="＋"
+                        title="マイナビ新卒"
+                        description="マイナビ新卒から企業リストを取得して、管理対象に追加します"
+                        badge="追加"
+                        onClick={handleOpenMynaviYear}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>,
-            document.body
-          )}
+              </div>,
+              document.body
+            )}
 
         {mynaviYearOpen &&
           typeof document !== "undefined" &&
@@ -9826,22 +10425,26 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </select>
                   </div>
 
-                  <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                  <div className="flex justify-end gap-2 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
-                      onClick={() => setMynaviYearOpen(false)}
-                      className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
+                      onClick={() => setImportConfirmOpen(false)}
+                      disabled={importing}
+                      className="h-10 min-w-[96px] rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
                     </button>
 
                     <button
                       type="button"
-                      onClick={handleConfirmMynaviGradYear}
-                      disabled={mynaviLoading}
-                      className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+                      onClick={() => {
+                        setImportConfirmOpen(false);
+                        setImportDuplicateConfirmOpen(true);
+                      }}
+                      disabled={importing}
+                      className="h-10 min-w-[96px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      はい
+                      {importing ? "投入中..." : "はい"}
                     </button>
                   </div>
                 </div>
@@ -10325,7 +10928,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      項目精査確認
+                      項目精査 確認
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -10953,12 +11556,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-amber-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-100">
-                      クローリング 対象選択
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        クローリング 対象選択
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        クローリングするリスト範囲を選択してください
+                      </div>
                     </div>
 
                     <button
@@ -10973,31 +11581,33 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </button>
                   </div>
 
-                  <div className="px-4 py-4">
+                  <div className="px-4 py-5">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="amber"
+                        icon="◎"
+                        title="全てのリスト"
+                        description="登録されている全リストを対象にします"
+                        badge="全件"
                         onClick={() => {
                           setCrawlScopeOpen(false);
                           setCrawlTargetScope("all");
                           setCrawlConfirmOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-amber-600 px-4 text-sm font-medium text-white transition hover:bg-amber-500"
-                      >
-                        全てのリスト
-                      </button>
+                      />
 
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="sky"
+                        icon="🔎"
+                        title="絞り込みリストのみ"
+                        description="検索・フィルタで絞り込んだ現在のリストだけを対象にします"
+                        badge="条件あり"
                         onClick={() => {
                           setCrawlScopeOpen(false);
                           setCrawlTargetScope("filtered");
                           setCrawlConfirmOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-amber-500 px-4 text-sm font-medium text-white transition hover:bg-amber-400"
-                      >
-                        絞り込みリストのみ
-                      </button>
+                      />
                     </div>
                   </div>
                 </div>
@@ -11018,12 +11628,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-100">
-                      項目精査 対象選択
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        項目精査 対象選択
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        項目精査するリスト範囲を選択してください
+                      </div>
                     </div>
 
                     <button
@@ -11038,31 +11653,33 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </button>
                   </div>
 
-                  <div className="px-4 py-4">
+                  <div className="px-4 py-5">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="cyan"
+                        icon="◎"
+                        title="全てのリスト"
+                        description="登録されている全リストを対象にします"
+                        badge="全件"
                         onClick={() => {
                           setItemInspectionScopeOpen(false);
                           setItemInspectionTargetScope("all");
                           setItemInspectionFieldOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-cyan-600 px-4 text-sm font-medium text-white transition hover:bg-cyan-500"
-                      >
-                        全てのリスト
-                      </button>
+                      />
 
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="sky"
+                        icon="🔎"
+                        title="絞り込みリストのみ"
+                        description="検索・フィルタで絞り込んだ現在のリストだけを対象にします"
+                        badge="条件あり"
                         onClick={() => {
                           setItemInspectionScopeOpen(false);
                           setItemInspectionTargetScope("filtered");
                           setItemInspectionFieldOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-cyan-500 px-4 text-sm font-medium text-white transition hover:bg-cyan-400"
-                      >
-                        絞り込みリストのみ
-                      </button>
+                      />
                     </div>
                   </div>
                 </div>
@@ -11083,12 +11700,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-100">
-                      重複削除 対象選択
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        重複削除 対象選択
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        重複削除するリスト範囲を選択してください
+                      </div>
                     </div>
 
                     <button
@@ -11103,31 +11725,33 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </button>
                   </div>
 
-                  <div className="px-4 py-4">
+                  <div className="px-4 py-5">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="violet"
+                        icon="◎"
+                        title="全てのリスト"
+                        description="登録されている全リストを対象にします"
+                        badge="全件"
                         onClick={() => {
                           setDedupeScopeOpen(false);
                           setDedupeTargetScope("all");
                           setDedupeConfirmOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-violet-600 px-4 text-sm font-medium text-white transition hover:bg-violet-500"
-                      >
-                        全てのリスト
-                      </button>
+                      />
 
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="sky"
+                        icon="🔎"
+                        title="絞り込みリストのみ"
+                        description="検索・フィルタで絞り込んだ現在のリストだけを対象にします"
+                        badge="条件あり"
                         onClick={() => {
                           setDedupeScopeOpen(false);
                           setDedupeTargetScope("filtered");
                           setDedupeConfirmOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition hover:bg-violet-400"
-                      >
-                        絞り込みリストのみ
-                      </button>
+                      />
                     </div>
                   </div>
                 </div>
@@ -11148,12 +11772,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-100">
-                      項目削除 対象選択
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        項目削除 対象選択
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        項目削除するリスト範囲を選択してください
+                      </div>
                     </div>
 
                     <button
@@ -11168,31 +11797,33 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </button>
                   </div>
 
-                  <div className="px-4 py-4">
+                  <div className="px-4 py-5">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="cyan"
+                        icon="◎"
+                        title="全てのリスト"
+                        description="登録されている全リストを対象にします"
+                        badge="全件"
                         onClick={() => {
                           setItemDeleteScopeOpen(false);
                           setItemDeleteTarget("all");
                           setItemDeleteFieldOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-cyan-600 px-4 text-sm font-medium text-white transition hover:bg-cyan-500"
-                      >
-                        全てのリスト
-                      </button>
+                      />
 
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="sky"
+                        icon="🔎"
+                        title="絞り込みリストのみ"
+                        description="検索・フィルタで絞り込んだ現在のリストだけを対象にします"
+                        badge="条件あり"
                         onClick={() => {
                           setItemDeleteScopeOpen(false);
                           setItemDeleteTarget("filtered");
                           setItemDeleteFieldOpen(true);
                         }}
-                        className="h-11 rounded-xl bg-cyan-500 px-4 text-sm font-medium text-white transition hover:bg-cyan-400"
-                      >
-                        絞り込みリストのみ
-                      </button>
+                      />
                     </div>
                   </div>
                 </div>
@@ -11220,7 +11851,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      項目削除確認
+                      項目削除 確認
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -11336,7 +11967,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
-                    項目削除確認
+                    項目削除 確認
                   </div>
 
                   <div className="px-4 py-6 text-sm leading-7 text-slate-300">
@@ -11404,12 +12035,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-rose-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
-                    <div className="text-sm font-semibold text-slate-100">
-                      リスト削除 対象選択
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        リスト削除 対象選択
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        削除するリスト範囲を選択してください
+                      </div>
                     </div>
 
                     <button
@@ -11421,29 +12057,31 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </button>
                   </div>
 
-                  <div className="px-4 py-4">
+                  <div className="px-4 py-5">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="rose"
+                        icon="◎"
+                        title="全てのリスト"
+                        description="登録されている全リストを対象にします"
+                        badge="全件"
                         onClick={() => {
                           setListDeleteScopeOpen(false);
                           setListDeleteConfirmTarget("all");
                         }}
-                        className="h-11 rounded-xl bg-rose-600 px-4 text-sm font-medium text-white transition hover:bg-rose-500"
-                      >
-                        全てのリスト
-                      </button>
+                      />
 
-                      <button
-                        type="button"
+                      <SelectionOptionCard
+                        tone="sky"
+                        icon="🔎"
+                        title="絞り込みリストのみ"
+                        description="検索・フィルタで絞り込んだ現在のリストだけを対象にします"
+                        badge="条件あり"
                         onClick={() => {
                           setListDeleteScopeOpen(false);
                           setListDeleteConfirmTarget("filtered");
                         }}
-                        className="h-11 rounded-xl bg-rose-500 px-4 text-sm font-medium text-white transition hover:bg-rose-400"
-                      >
-                        絞り込みリストのみ
-                      </button>
+                      />
                     </div>
                   </div>
                 </div>
@@ -12391,7 +13029,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             document.body
           )}
 
-                    {previewCsvScopeOpen &&
+          {previewCsvScopeOpen &&
             typeof document !== "undefined" &&
             createPortal(
               <div
@@ -12408,7 +13046,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   >
                     <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                       <div className="text-sm font-semibold text-slate-100">
-                        CSV抽出対象選択
+                        CSV抽出 対象選択
                       </div>
 
                       <button
@@ -12531,12 +13169,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               >
                 <div className="flex min-h-full items-center justify-center">
                   <div
-                    className="flex w-full max-w-[640px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    className="flex w-full max-w-[1080px] flex-col overflow-hidden rounded-2xl border border-sky-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
-                      <div className="text-sm font-semibold text-slate-100">
-                        CSV抽出対象選択
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">
+                          CSV抽出 対象選択
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          CSVを抽出するリスト範囲を選択してください
+                        </div>
                       </div>
 
                       <button
@@ -12548,34 +13191,34 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       </button>
                     </div>
 
-                    <div className="px-4 py-6 text-sm leading-7 text-slate-300">
-                      CSVを抽出する対象を選択してください。
-                    </div>
+                    <div className="px-4 py-5">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <SelectionOptionCard
+                          tone="sky"
+                          icon="◎"
+                          title="全てのリスト"
+                          description="登録されている全リストをCSVに出力します"
+                          badge="全件"
+                          onClick={() => {
+                            setExportMode("all");
+                            setExportScopeOpen(false);
+                            setExportConfirmOpen(true);
+                          }}
+                        />
 
-                    <div className="grid gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExportMode("all");
-                          setExportScopeOpen(false);
-                          setExportConfirmOpen(true);
-                        }}
-                        className="h-10 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
-                      >
-                        全てのリスト
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExportMode("filtered");
-                          setExportScopeOpen(false);
-                          setExportConfirmOpen(true);
-                        }}
-                        className="h-10 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400"
-                      >
-                        絞り込みリストのみ
-                      </button>
+                        <SelectionOptionCard
+                          tone="emerald"
+                          icon="🔎"
+                          title="絞り込みリストのみ"
+                          description="検索・フィルタで絞り込んだ現在のリストだけをCSVに出力します"
+                          badge="条件あり"
+                          onClick={() => {
+                            setExportMode("filtered");
+                            setExportScopeOpen(false);
+                            setExportConfirmOpen(true);
+                          }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -12708,7 +13351,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         <button
                           type="button"
                           onClick={() => setAllFiltersClearConfirmOpen(false)}
-                          className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+                          className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
                         >
                           いいえ
                         </button>
@@ -12776,19 +13419,21 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           </div>
         </div>
 
-        <div className="mt-[var(--app-gap-lg)] shrink-0 flex flex-wrap items-center justify-center gap-[var(--app-gap-sm)]">
+        <div className="mt-[var(--app-gap-lg)] shrink-0 flex flex-wrap items-center justify-center gap-[var(--app-gap-sm)] rounded-2xl border border-white/10 bg-gradient-to-br from-white/8 via-[#0b1326]/85 to-[#08101d]/90 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
           <button
+            type="button"
             onClick={() => setPage(1)}
             disabled={page <= 1 || limit === "all"}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
           >
             最初
           </button>
 
           <button
+            type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1 || limit === "all"}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
           >
             前へ
           </button>
@@ -12796,12 +13441,13 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           {pageNumbers.map((n) => (
             <button
               key={n}
+              type="button"
               onClick={() => setPage(n)}
               disabled={limit === "all"}
-              className={`rounded-xl px-4 py-2 text-sm transition ${
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
                 page === n
-                  ? "bg-sky-500 text-white"
-                  : "border border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
+                  ? "border border-sky-300/40 bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-[0_0_22px_rgba(56,189,248,0.24)]"
+                  : "border border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100"
               } ${limit === "all" ? "opacity-40" : ""}`}
             >
               {n}
@@ -12809,17 +13455,19 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           ))}
 
           <button
+            type="button"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages || limit === "all"}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
           >
             次へ
           </button>
 
           <button
+            type="button"
             onClick={() => setPage(totalPages)}
             disabled={page >= totalPages || limit === "all"}
-            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200 transition hover:bg-white/10 disabled:opacity-40"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100 disabled:opacity-40"
           >
             最後
           </button>
@@ -13333,14 +13981,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           color: #64748b !important;
         }
 
-        main[data-theme="light"] button[class*="bg-sky-500"],
-        body[data-app-theme="light"] button[class*="bg-sky-500"],
-        main[data-theme="light"] button[class*="bg-emerald-500"],
-        body[data-app-theme="light"] button[class*="bg-emerald-500"],
-        main[data-theme="light"] button[class*="bg-amber-500"],
-        body[data-app-theme="light"] button[class*="bg-amber-500"],
-        main[data-theme="light"] button[class*="bg-rose-500"],
-        body[data-app-theme="light"] button[class*="bg-rose-500"] {
+        main[data-theme="light"] button[class~="bg-sky-500"],
+        body[data-app-theme="light"] button[class~="bg-sky-500"],
+        main[data-theme="light"] button[class~="bg-emerald-500"],
+        body[data-app-theme="light"] button[class~="bg-emerald-500"],
+        main[data-theme="light"] button[class~="bg-amber-500"],
+        body[data-app-theme="light"] button[class~="bg-amber-500"],
+        main[data-theme="light"] button[class~="bg-rose-500"],
+        body[data-app-theme="light"] button[class~="bg-rose-500"] {
           color: #ffffff !important;
         }
 
@@ -13374,6 +14022,296 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         main[data-theme="light"] [class*="hover:bg-white/5"]:hover,
         body[data-app-theme="light"] [class*="hover:bg-white/5"]:hover {
           background: rgba(15, 23, 42, 0.08) !important;
+        }
+
+        /* ライトモード専用：暗いグラデーションUIを見やすく補正 */
+        main[data-theme="light"] [class*="bg-gradient-to-br"]:not([class*="bg-clip-text"]),
+        body[data-app-theme="light"] [class*="bg-gradient-to-br"]:not([class*="bg-clip-text"]),
+        main[data-theme="light"] [class*="bg-gradient-to-b"]:not([class*="bg-clip-text"]),
+        body[data-app-theme="light"] [class*="bg-gradient-to-b"]:not([class*="bg-clip-text"]) {
+          background-color: #ffffff !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(255, 255, 255, 0.98),
+            rgba(248, 250, 252, 0.96),
+            rgba(226, 232, 240, 0.88)
+          ) !important;
+          border-color: rgba(15, 23, 42, 0.14) !important;
+          box-shadow: 0 14px 34px rgba(15, 23, 42, 0.10) !important;
+        }
+
+        main[data-theme="light"] [class*="bg-gradient-to-r"]:not([class*="bg-clip-text"]),
+        body[data-app-theme="light"] [class*="bg-gradient-to-r"]:not([class*="bg-clip-text"]) {
+          background-color: #ffffff !important;
+          background-image: linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.98),
+            rgba(241, 245, 249, 0.96),
+            rgba(226, 232, 240, 0.88)
+          ) !important;
+          border-color: rgba(15, 23, 42, 0.14) !important;
+        }
+
+        main[data-theme="light"] [class*="bg-[#07111f]"],
+        body[data-app-theme="light"] [class*="bg-[#07111f]"],
+        main[data-theme="light"] [class*="bg-[#05070d]"],
+        body[data-app-theme="light"] [class*="bg-[#05070d]"],
+        main[data-theme="light"] [class*="bg-[#050b14]"],
+        body[data-app-theme="light"] [class*="bg-[#050b14]"] {
+          background: #ffffff !important;
+        }
+
+        /* ライトモード専用：サイドメニュー・カード・ポップアップ内の色文字を濃くする */
+        main[data-theme="light"] [class*="text-sky-100"],
+        body[data-app-theme="light"] [class*="text-sky-100"] {
+          color: #075985 !important;
+        }
+
+        main[data-theme="light"] [class*="text-cyan-100"],
+        body[data-app-theme="light"] [class*="text-cyan-100"] {
+          color: #0e7490 !important;
+        }
+
+        main[data-theme="light"] [class*="text-emerald-100"],
+        body[data-app-theme="light"] [class*="text-emerald-100"] {
+          color: #047857 !important;
+        }
+
+        main[data-theme="light"] [class*="text-amber-100"],
+        body[data-app-theme="light"] [class*="text-amber-100"] {
+          color: #92400e !important;
+        }
+
+        main[data-theme="light"] [class*="text-rose-100"],
+        body[data-app-theme="light"] [class*="text-rose-100"] {
+          color: #be123c !important;
+        }
+
+        main[data-theme="light"] [class*="text-indigo-100"],
+        body[data-app-theme="light"] [class*="text-indigo-100"] {
+          color: #4338ca !important;
+        }
+
+        main[data-theme="light"] [class*="text-violet-100"],
+        body[data-app-theme="light"] [class*="text-violet-100"] {
+          color: #6d28d9 !important;
+        }
+
+        /* ライトモード専用：NAVIGATIONの文字を白飛びしない色にする */
+        main[data-theme="light"] .master-data-brand-logo__wordmark[class*="bg-gradient-to-r"][class*="text-transparent"],
+        body[data-app-theme="light"] .master-data-brand-logo__wordmark[class*="bg-gradient-to-r"][class*="text-transparent"] {
+          background-image: linear-gradient(90deg, #0f172a, #2563eb, #0e7490) !important;
+          color: transparent !important;
+          -webkit-text-stroke: 0.28px rgba(15, 23, 42, 0.35) !important;
+          text-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.90),
+            0 0 12px rgba(14, 165, 233, 0.22) !important;
+        }
+
+        /* ライトモード専用：ページ番号の選択中ボタンは青で分かりやすく残す */
+        main[data-theme="light"] button[class*="from-sky-500"][class*="to-cyan-500"],
+        body[data-app-theme="light"] button[class*="from-sky-500"][class*="to-cyan-500"] {
+          background-color: #0284c7 !important;
+          background-image: linear-gradient(135deg, #0284c7, #06b6d4) !important;
+          color: #ffffff !important;
+          border-color: rgba(2, 132, 199, 0.45) !important;
+          box-shadow: 0 0 22px rgba(14, 165, 233, 0.24) !important;
+        }
+
+        /* ライトモード専用：表示件数ドロップダウンの選択中ボタン */
+        main[data-theme="light"] button[class*="from-emerald-400"][class*="to-cyan-400"],
+        body[data-app-theme="light"] button[class*="from-emerald-400"][class*="to-cyan-400"] {
+          background-color: #14b8a6 !important;
+          background-image: linear-gradient(90deg, #34d399, #22d3ee) !important;
+          color: #03131f !important;
+          border-color: rgba(20, 184, 166, 0.45) !important;
+        }
+
+        /* ライトモード専用：表示件数ドロップダウン本体 */
+        main[data-theme="light"] [class*="bg-[#07111f]/98"],
+        body[data-app-theme="light"] [class*="bg-[#07111f]/98"] {
+          background: rgba(255, 255, 255, 0.98) !important;
+          border-color: rgba(15, 23, 42, 0.14) !important;
+          box-shadow: 0 18px 44px rgba(15, 23, 42, 0.18) !important;
+        }
+
+        /* ライトモード専用：モーダル内の見出し・入力欄・候補リストの背景を明るくする */
+        body[data-app-theme="light"] .app-modal-root > div > div {
+          background: rgba(255, 255, 255, 0.98) !important;
+          border-color: rgba(15, 23, 42, 0.14) !important;
+          box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root input,
+        body[data-app-theme="light"] .app-modal-root select,
+        body[data-app-theme="light"] .app-modal-root textarea {
+          background: #ffffff !important;
+          color: #0f172a !important;
+          border-color: rgba(15, 23, 42, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root input::placeholder,
+        body[data-app-theme="light"] .app-modal-root textarea::placeholder {
+          color: #94a3b8 !important;
+        }
+
+        /* ライトモード専用：ホバー時も白飛び・黒つぶれしないようにする */
+        main[data-theme="light"] [class*="hover:bg-sky-500/10"]:hover,
+        body[data-app-theme="light"] [class*="hover:bg-sky-500/10"]:hover,
+        main[data-theme="light"] [class*="hover:bg-emerald-500/10"]:hover,
+        body[data-app-theme="light"] [class*="hover:bg-emerald-500/10"]:hover,
+        main[data-theme="light"] [class*="hover:bg-rose-500/10"]:hover,
+        body[data-app-theme="light"] [class*="hover:bg-rose-500/10"]:hover,
+        main[data-theme="light"] [class*="hover:bg-cyan-500/10"]:hover,
+        body[data-app-theme="light"] [class*="hover:bg-cyan-500/10"]:hover,
+        main[data-theme="light"] [class*="hover:bg-violet-500/10"]:hover,
+        body[data-app-theme="light"] [class*="hover:bg-violet-500/10"]:hover {
+          background-color: rgba(14, 165, 233, 0.08) !important;
+        }
+
+        /* ライトモード専用：表示件数の数字を黒くする */
+        main[data-theme="light"] button[class*="group/size"],
+        body[data-app-theme="light"] button[class*="group/size"],
+        main[data-theme="light"] button[class*="group/size"] *,
+        body[data-app-theme="light"] button[class*="group/size"] * {
+          color: #0f172a !important;
+        }
+
+        /* ライトモード専用：ログアウト文字・矢印を黒くする */
+        main[data-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"],
+        body[data-app-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"],
+        main[data-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"] *,
+        body[data-app-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"] * {
+          color: #0f172a !important;
+          stroke: currentColor !important;
+        }
+
+        /* ライトモード専用：NAVIGATIONを黒くする */
+        main[data-theme="light"] .master-data-brand-logo__wordmark[class*="text-transparent"],
+        body[data-app-theme="light"] .master-data-brand-logo__wordmark[class*="text-transparent"] {
+          background-image: none !important;
+          color: #0f172a !important;
+          -webkit-text-fill-color: #0f172a !important;
+          -webkit-text-stroke: 0 !important;
+          text-shadow: none !important;
+        }
+
+        /* ライトモード専用：左メニューの折り畳みボタンを黒くする */
+        main[data-theme="light"] button[title="メニューを閉じる"],
+        body[data-app-theme="light"] button[title="メニューを閉じる"],
+        main[data-theme="light"] button[title="メニューを開く"],
+        body[data-app-theme="light"] button[title="メニューを開く"] {
+          color: #0f172a !important;
+        }
+
+        /* ライトモード専用：フィルタ解除の文字・マークを黒くする */
+        main[data-theme="light"] button[class*="from-rose-500/14"],
+        body[data-app-theme="light"] button[class*="from-rose-500/14"],
+        main[data-theme="light"] button[class*="from-rose-500/14"] *,
+        body[data-app-theme="light"] button[class*="from-rose-500/14"] * {
+          color: #0f172a !important;
+        }
+
+        /* ライトモード専用：CSV抽出アイコンをCSV投入と同じくらい見やすくする */
+        main[data-theme="light"] [class*="text-teal-100"],
+        body[data-app-theme="light"] [class*="text-teal-100"] {
+          color: #047857 !important;
+        }
+
+        /* ライトモード専用：確認ポップアップの「いいえ / はい」だけ白文字に戻す */
+        main[data-theme="light"] button[class~="bg-rose-600"],
+        body[data-app-theme="light"] button[class~="bg-rose-600"],
+        main[data-theme="light"] button[class~="bg-rose-600"] *,
+        body[data-app-theme="light"] button[class~="bg-rose-600"] *,
+        main[data-theme="light"] button[class~="bg-sky-500"],
+        body[data-app-theme="light"] button[class~="bg-sky-500"],
+        main[data-theme="light"] button[class~="bg-sky-500"] *,
+        body[data-app-theme="light"] button[class~="bg-sky-500"] * {
+          color: #ffffff !important;
+        }
+
+        /* ライトモード専用：左メニューの「フィルタ解除」マーク背景だけ白にする */
+        main[data-theme="light"] button[class*="from-rose-500/14"] > span:first-child,
+        body[data-app-theme="light"] button[class*="from-rose-500/14"] > span:first-child {
+          background: #ffffff !important;
+          background-image: none !important;
+          border-color: rgba(15, 23, 42, 0.14) !important;
+          color: #0f172a !important;
+        }
+
+        /* ライトモード専用：ログイン画面だけはダークモードと同じ背景を維持する */
+        main[data-theme="light"] .master-data-login-screen [class*="bg-[#05070d]"],
+        body[data-app-theme="light"] .master-data-login-screen [class*="bg-[#05070d]"] {
+          background: #05070d !important;
+        }
+
+        main[data-theme="light"] .master-data-login-screen button[type="submit"][class*="bg-[#0b1326]"],
+        body[data-app-theme="light"] .master-data-login-screen button[type="submit"][class*="bg-[#0b1326]"] {
+          background: #0b1326 !important;
+          color: #ffffff !important;
+        }
+
+        main[data-theme="light"] .master-data-login-screen button[type="submit"][class*="bg-[#0b1326]"]:hover,
+        body[data-app-theme="light"] .master-data-login-screen button[type="submit"][class*="bg-[#0b1326]"]:hover {
+          background: #111d38 !important;
+          color: #ffffff !important;
+        }
+
+        main[data-theme="light"] .master-data-login-screen button[type="submit"][class*="bg-[#0b1326]"] *,
+        body[data-app-theme="light"] .master-data-login-screen button[type="submit"][class*="bg-[#0b1326]"] * {
+          color: #ffffff !important;
+        }
+
+        /* ライトモード専用：ログイン画面のロゴ色をダークモードと同じにする */
+        main[data-theme="light"] .master-data-login-screen .master-data-brand-logo,
+        body[data-app-theme="light"] .master-data-login-screen .master-data-brand-logo {
+          --mdb-gold-1: #f8e7c5 !important;
+          --mdb-gold-2: #ddb879 !important;
+          --mdb-gold-3: #b98542 !important;
+          --mdb-gold-text: #f1d4a4 !important;
+          filter:
+            drop-shadow(0 18px 36px rgba(0, 0, 0, 0.34))
+            drop-shadow(0 4px 14px rgba(247, 227, 191, 0.18)) !important;
+        }
+
+        /* ライトモード専用：ログイン画面の「マスタデータ」文字色をダークモードと同じにする */
+        main[data-theme="light"] .master-data-login-screen .master-data-brand-title,
+        body[data-app-theme="light"] .master-data-login-screen .master-data-brand-title {
+          color: #f1d4a4 !important;
+          text-shadow:
+            0 14px 32px rgba(0, 0, 0, 0.30),
+            0 2px 10px rgba(247, 227, 191, 0.12) !important;
+        }
+
+        /* ライトモード専用：通知メッセージの文字を見やすくする */
+        main[data-theme="light"] [class*="text-rose-200"],
+        body[data-app-theme="light"] [class*="text-rose-200"] {
+          color: #be123c !important;
+        }
+
+        main[data-theme="light"] [class*="text-emerald-200"],
+        body[data-app-theme="light"] [class*="text-emerald-200"] {
+          color: #047857 !important;
+        }
+
+        main[data-theme="light"] [class*="text-sky-200"],
+        body[data-app-theme="light"] [class*="text-sky-200"] {
+          color: #0369a1 !important;
+        }
+
+        main[data-theme="light"] [class*="text-amber-200"],
+        body[data-app-theme="light"] [class*="text-amber-200"] {
+          color: #b45309 !important;
+        }
+
+        main[data-theme="light"] [class*="text-cyan-200"],
+        body[data-app-theme="light"] [class*="text-cyan-200"] {
+          color: #0e7490 !important;
+        }
+
+        main[data-theme="light"] [class*="text-violet-200"],
+        body[data-app-theme="light"] [class*="text-violet-200"] {
+          color: #6d28d9 !important;
         }
 
         main[data-theme="dark"] .master-data-brand-logo,
