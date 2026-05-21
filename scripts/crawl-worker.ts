@@ -130,7 +130,7 @@ const workerId = loadOrCreateWorkerId();
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const TARGET_BATCH_SIZE = 10;
-const REPORT_BATCH_SIZE = 1;
+const REPORT_BATCH_SIZE = 10;
 let lastHeartbeatAt = 0;
 
 const status: WorkerStatus = {
