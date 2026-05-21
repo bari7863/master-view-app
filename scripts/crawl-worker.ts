@@ -108,7 +108,7 @@ function loadConfig(): WorkerConfig {
   return {
     ...config,
     apiBaseUrl: config.apiBaseUrl.replace(/\/+$/, ""),
-    workerName: config.workerName || os.hostname(),
+    workerName: os.hostname(),
     localPort: config.localPort || 39281,
     pollIntervalMs: config.pollIntervalMs || 3000,
   };
@@ -130,7 +130,7 @@ const workerId = loadOrCreateWorkerId();
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const TARGET_BATCH_SIZE = 10;
-const REPORT_BATCH_SIZE = 10;
+const REPORT_BATCH_SIZE = 1;
 let lastHeartbeatAt = 0;
 
 const status: WorkerStatus = {

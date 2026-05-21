@@ -1850,8 +1850,8 @@ if (!globalForCrawlJobs.__masterDataCrawlJobRuns) {
 }
 
 const CRAWL_PAUSED_ERROR_MESSAGE = "__MASTER_DATA_CRAWL_PAUSED__";
-
 const WORKER_TOKEN_HEADER = "x-master-crawl-worker-token";
+const WORKER_HANDOVER_STALE_INTERVAL = "3 minutes";
 
 function getRequiredWorkerToken() {
   return (
@@ -3096,6 +3096,89 @@ async function updateJobWorkerColumns(
   );
 }
 
+async function syncCrawlJobProgressFromTargetStatuses(
+  client: DbClient,
+  job: CrawlJobState
+) {
+  const res = await client.query(
+    `
+      SELECT
+        COUNT(*) FILTER (
+          WHERE status IN ('done', 'skipped', 'failed')
+        )::int AS processed,
+        COUNT(*) FILTER (
+          WHERE status = 'done'
+        )::int AS updated,
+        COUNT(*) FILTER (
+          WHERE status = 'skipped'
+        )::int AS skipped,
+        COUNT(*) FILTER (
+          WHERE status = 'failed'
+        )::int AS failed,
+        COALESCE(
+          MIN(target_index) FILTER (
+            WHERE status NOT IN ('done', 'skipped', 'failed')
+          ),
+          $2::int
+        )::int AS next_index
+      FROM public.master_data_crawl_targets
+      WHERE job_id = $1
+    `,
+    [job.jobId, job.total]
+  );
+
+  const row = res.rows[0] ?? {};
+
+  job.processed = Math.max(Number(row.processed ?? 0), 0);
+  job.updated = Math.max(Number(row.updated ?? 0), 0);
+  job.skipped = Math.max(Number(row.skipped ?? 0), 0);
+  job.failed = Math.max(Number(row.failed ?? 0), 0);
+  job.nextIndex = Math.min(
+    Math.max(Number(row.next_index ?? job.nextIndex), 0),
+    job.total
+  );
+
+  if (job.total > 0 && job.nextIndex >= job.total) {
+    stopCrawlRunTimer(job);
+
+    job.completed = true;
+    job.running = false;
+    job.paused = false;
+    job.pauseRequested = false;
+    job.currentCompany = null;
+    job.currentWebsiteUrl = null;
+  }
+}
+
+async function markCrawlTargetGapAsFailed(
+  client: DbClient,
+  job: CrawlJobState,
+  targetIndex: number
+) {
+  if (targetIndex <= job.nextIndex) return;
+
+  await client.query(
+    `
+      UPDATE public.master_data_crawl_targets
+      SET
+        status = 'failed',
+        error_message = COALESCE(
+          error_message,
+          'workerの進捗が先に進んだため、未完了のまま残っていた対象を失敗扱いにしました'
+        ),
+        started_at = COALESCE(started_at, now()),
+        finished_at = COALESCE(finished_at, now())
+      WHERE job_id = $1
+        AND target_index >= $2
+        AND target_index < $3
+        AND status NOT IN ('done', 'skipped', 'failed')
+    `,
+    [job.jobId, job.nextIndex, targetIndex]
+  );
+
+  await syncCrawlJobProgressFromTargetStatuses(client, job);
+}
+
 async function claimWorkerJob(
   client: DbClient,
   workerId: string,
@@ -3109,17 +3192,33 @@ async function claimWorkerJob(
   try {
     const res = await client.query(
       `
-        SELECT job_id
-        FROM public.master_data_crawl_jobs
-        WHERE assigned_worker_id = $1
-          AND completed = false
-          AND pause_requested = false
-          AND COALESCE(status, 'queued') IN ('queued', 'running')
-        ORDER BY created_at ASC
-        FOR UPDATE SKIP LOCKED
+        SELECT j.job_id
+        FROM public.master_data_crawl_jobs AS j
+        LEFT JOIN public.master_data_crawl_workers AS w
+          ON w.worker_id = j.assigned_worker_id
+        WHERE j.completed = false
+          AND j.pause_requested = false
+          AND COALESCE(j.status, 'queued') IN ('queued', 'running')
+          AND (
+            j.assigned_worker_id = $1
+            OR (
+              $2::text IS NOT NULL
+              AND NULLIF(BTRIM($2::text), '') IS NOT NULL
+              AND j.assigned_worker_id <> $1
+              AND w.worker_name = $2
+              AND (
+                w.last_seen_at IS NULL
+                OR w.last_seen_at < now() - $3::interval
+              )
+            )
+          )
+        ORDER BY
+          CASE WHEN j.assigned_worker_id = $1 THEN 0 ELSE 1 END,
+          j.created_at ASC
+        FOR UPDATE OF j SKIP LOCKED
         LIMIT 1
       `,
-      [workerId]
+      [workerId, workerName, WORKER_HANDOVER_STALE_INTERVAL]
     );
 
     const jobId = res.rows[0]?.job_id ? String(res.rows[0].job_id) : null;
@@ -3136,6 +3235,7 @@ async function claimWorkerJob(
           status = 'running',
           running = true,
           paused = false,
+          assigned_worker_id = $2,
           worker_id = $2,
           worker_heartbeat_at = now(),
           last_started_at = COALESCE(last_started_at, now()),
@@ -3173,6 +3273,8 @@ async function claimWorkerTarget(
 
     return { paused: true, completed: false, target: null };
   }
+
+  await syncCrawlJobProgressFromTargetStatuses(client, job);
 
   if (job.completed || job.nextIndex >= job.total) {
     stopCrawlRunTimer(job);
@@ -3253,6 +3355,8 @@ async function claimWorkerTargets(
 
     return { paused: true, completed: false, targets: [] as WorkerCrawlTarget[] };
   }
+
+  await syncCrawlJobProgressFromTargetStatuses(client, job);
 
   if (job.completed || job.nextIndex >= job.total) {
     stopCrawlRunTimer(job);
@@ -3351,12 +3455,18 @@ async function reportWorkerTargetResult(
     return;
   }
 
+  await syncCrawlJobProgressFromTargetStatuses(client, job);
+
   if (targetIndex < job.nextIndex) {
     return;
   }
 
   if (targetIndex > job.nextIndex) {
-    throw new Error("targetIndex が現在の進捗と一致しません");
+    await markCrawlTargetGapAsFailed(client, job, targetIndex);
+  }
+
+  if (targetIndex < job.nextIndex) {
+    return;
   }
 
   const row = await fetchCrawlTargetByIndex(client, job.jobId, targetIndex);
@@ -3534,6 +3644,8 @@ async function reportWorkerTargetResults(
       deferPersist: true,
     });
   }
+
+  await syncCrawlJobProgressFromTargetStatuses(client, job);
 
   await persistCrawlJobState(job);
 

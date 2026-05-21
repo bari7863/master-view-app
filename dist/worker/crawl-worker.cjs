@@ -3272,7 +3272,7 @@ function loadConfig() {
   return {
     ...config2,
     apiBaseUrl: config2.apiBaseUrl.replace(/\/+$/, ""),
-    workerName: config2.workerName || import_node_os.default.hostname(),
+    workerName: import_node_os.default.hostname(),
     localPort: config2.localPort || 39281,
     pollIntervalMs: config2.pollIntervalMs || 3e3
   };
