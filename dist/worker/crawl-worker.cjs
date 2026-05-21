@@ -3290,7 +3290,7 @@ var config = loadConfig();
 var workerId = loadOrCreateWorkerId();
 var HEARTBEAT_INTERVAL_MS = 30 * 1e3;
 var TARGET_BATCH_SIZE = 10;
-var REPORT_BATCH_SIZE = 10;
+var REPORT_BATCH_SIZE = 1;
 var lastHeartbeatAt = 0;
 var status = {
   ok: true,
@@ -3462,9 +3462,8 @@ async function processJob(jobId) {
     }
     const targets = targetRes.targets || [];
     if (targets.length === 0) {
-      status.lastMessage = "\u51E6\u7406\u5BFE\u8C61\u3092\u518D\u78BA\u8A8D\u4E2D";
-      await sleep(config.pollIntervalMs || 3e3);
-      continue;
+      status.lastMessage = "\u51E6\u7406\u5BFE\u8C61\u306A\u3057";
+      break;
     }
     status.lastMessage = `\u307E\u3068\u3081\u53D6\u5F97\u4E2D: ${targets.length}\u4EF6`;
     let shouldLeaveJob = false;

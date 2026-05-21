@@ -130,7 +130,7 @@ const workerId = loadOrCreateWorkerId();
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const TARGET_BATCH_SIZE = 10;
-const REPORT_BATCH_SIZE = 10;
+const REPORT_BATCH_SIZE = 1;
 let lastHeartbeatAt = 0;
 
 const status: WorkerStatus = {
@@ -343,9 +343,8 @@ async function processJob(jobId: string) {
     const targets = targetRes.targets || [];
 
     if (targets.length === 0) {
-      status.lastMessage = "処理対象を再確認中";
-      await sleep(config.pollIntervalMs || 3000);
-      continue;
+      status.lastMessage = "処理対象なし";
+      break;
     }
 
     status.lastMessage = `まとめ取得中: ${targets.length}件`;
