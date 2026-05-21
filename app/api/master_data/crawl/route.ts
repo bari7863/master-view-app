@@ -3111,11 +3111,22 @@ async function claimWorkerJob(
       `
         SELECT job_id
         FROM public.master_data_crawl_jobs
-        WHERE assigned_worker_id = $1
-          AND completed = false
+        WHERE completed = false
           AND pause_requested = false
           AND COALESCE(status, 'queued') IN ('queued', 'running')
-        ORDER BY created_at ASC
+          AND (
+            assigned_worker_id = $1
+            OR COALESCE(status, 'queued') = 'queued'
+            OR worker_heartbeat_at IS NULL
+            OR worker_heartbeat_at < now() - interval '2 minutes'
+          )
+        ORDER BY
+          CASE
+            WHEN assigned_worker_id = $1 THEN 0
+            WHEN COALESCE(status, 'queued') = 'queued' THEN 1
+            ELSE 2
+          END,
+          created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       `,
@@ -3136,8 +3147,13 @@ async function claimWorkerJob(
           status = 'running',
           running = true,
           paused = false,
+          pause_requested = false,
+          completed = false,
+          error = NULL,
+          assigned_worker_id = $2,
           worker_id = $2,
           worker_heartbeat_at = now(),
+          worker_message = 'ジョブ処理中',
           last_started_at = COALESCE(last_started_at, now()),
           updated_at = now()
         WHERE job_id = $1
@@ -3241,6 +3257,13 @@ async function claimWorkerTargets(
   await ensureCrawlJobTables(client);
 
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 10);
+
+  await updateJobWorkerColumns(client, job.jobId, {
+    status: "running",
+    assignedWorkerId: workerId,
+    workerId,
+    message: "対象取得中",
+  });
 
   if (job.pauseRequested) {
     markCrawlJobPaused(job);
@@ -4114,6 +4137,23 @@ export async function POST(req: NextRequest) {
             workerId,
             workerName,
             action === "worker_register" ? "worker登録" : "heartbeat"
+          );
+
+          await client.query(
+            `
+              UPDATE public.master_data_crawl_jobs
+              SET
+                worker_id = $1,
+                worker_heartbeat_at = now(),
+                updated_at = now()
+              WHERE completed = false
+                AND pause_requested = false
+                AND (
+                  assigned_worker_id = $1
+                  OR worker_id = $1
+                )
+            `,
+            [workerId]
           );
 
           return NextResponse.json({
