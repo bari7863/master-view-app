@@ -1922,8 +1922,8 @@ const CRAWL_COMPANY_TIMEOUT_MS = 90 * 1000;
 const CRAWL_COMPANY_TIMEOUT_ERROR_MESSAGE =
   "__MASTER_DATA_CRAWL_COMPANY_TIMEOUT__";
 
-const WORKER_JOB_STALE_INTERVAL_SQL = "2 minutes";
-const CRAWL_TARGET_LOCK_INTERVAL_SQL = "20 minutes";
+const WORKER_JOB_STALE_INTERVAL_SQL = "30 seconds";
+const CRAWL_TARGET_LOCK_INTERVAL_SQL = "3 minutes";
 
 function startCrawlJobRunner(jobId: string) {
   if (runningCrawlJobIds.has(jobId)) return;
@@ -2944,7 +2944,7 @@ async function fetchCrawlTargetsByRange(
 ) {
   const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 10);
 
-  const res = await client.query(
+  const pendingFromNextIndexRes = await client.query(
     `
       SELECT
         target_index,
@@ -2955,13 +2955,56 @@ async function fetchCrawlTargetsByRange(
       FROM public.master_data_crawl_targets
       WHERE job_id = $1
         AND target_index >= $2
-        AND target_index < $2 + $3
+        AND status = 'pending'
       ORDER BY target_index ASC
+      LIMIT $3
     `,
     [jobId, startIndex, safeLimit]
   );
 
-  return res.rows as Array<Record<string, unknown>>;
+  if (pendingFromNextIndexRes.rows.length > 0) {
+    return pendingFromNextIndexRes.rows as Array<Record<string, unknown>>;
+  }
+
+  const pendingAnyIndexRes = await client.query(
+    `
+      SELECT
+        target_index,
+        row_id::text,
+        company,
+        address,
+        website_url
+      FROM public.master_data_crawl_targets
+      WHERE job_id = $1
+        AND status = 'pending'
+      ORDER BY target_index ASC
+      LIMIT $2
+    `,
+    [jobId, safeLimit]
+  );
+
+  if (pendingAnyIndexRes.rows.length > 0) {
+    return pendingAnyIndexRes.rows as Array<Record<string, unknown>>;
+  }
+
+  const unfinishedAnyIndexRes = await client.query(
+    `
+      SELECT
+        target_index,
+        row_id::text,
+        company,
+        address,
+        website_url
+      FROM public.master_data_crawl_targets
+      WHERE job_id = $1
+        AND status NOT IN ('done', 'skipped', 'failed')
+      ORDER BY target_index ASC
+      LIMIT $2
+    `,
+    [jobId, safeLimit]
+  );
+
+  return unfinishedAnyIndexRes.rows as Array<Record<string, unknown>>;
 }
 
 async function markCrawlTargetStatus(
@@ -3037,6 +3080,39 @@ async function markCrawlTargetsProcessing(
         AND target_index = ANY($2::int[])
     `,
     [jobId, targetIndexes, workerId]
+  );
+}
+
+async function resetCrawlProcessingTargetsForClaim(
+  client: DbClient,
+  jobId: string
+) {
+  await client.query(
+    `
+      UPDATE public.master_data_crawl_targets
+      SET
+        status = 'pending',
+        locked_by = NULL,
+        locked_until = NULL,
+        finished_at = NULL
+      WHERE job_id = $1
+        AND status = 'processing'
+    `,
+    [jobId]
+  );
+
+  await client.query(
+    `
+      UPDATE public.master_data_crawl_targets
+      SET
+        status = 'pending',
+        locked_by = NULL,
+        locked_until = NULL,
+        finished_at = NULL
+      WHERE job_id = $1
+        AND status NOT IN ('pending', 'processing', 'done', 'skipped', 'failed')
+    `,
+    [jobId]
   );
 }
 
@@ -3150,25 +3226,15 @@ async function claimWorkerJob(
       `
         SELECT j.job_id
         FROM public.master_data_crawl_jobs AS j
-        LEFT JOIN public.master_data_crawl_workers AS assigned_worker
-          ON assigned_worker.worker_id = j.assigned_worker_id
-        LEFT JOIN public.master_data_crawl_workers AS running_worker
-          ON running_worker.worker_id = j.worker_id
         WHERE j.completed = false
           AND j.pause_requested = false
           AND COALESCE(j.status, 'queued') IN ('queued', 'running')
-          AND (
-            j.assigned_worker_id = $1
-            OR j.assigned_worker_id IS NULL
-            OR COALESCE(
-              running_worker.last_seen_at,
-              assigned_worker.last_seen_at,
-              j.worker_heartbeat_at,
-              j.updated_at
-            ) < now() - interval '${WORKER_JOB_STALE_INTERVAL_SQL}'
-          )
         ORDER BY
-          CASE WHEN j.assigned_worker_id = $1 THEN 0 ELSE 1 END,
+          CASE
+            WHEN j.assigned_worker_id = $1 THEN 0
+            WHEN j.assigned_worker_id IS NULL THEN 1
+            ELSE 2
+          END,
           j.created_at ASC
         FOR UPDATE OF j SKIP LOCKED
         LIMIT 1
@@ -3190,6 +3256,9 @@ async function claimWorkerJob(
           status = 'running',
           running = true,
           paused = false,
+          pause_requested = false,
+          completed = false,
+          error = NULL,
           assigned_worker_id = $2,
           worker_id = $2,
           worker_heartbeat_at = now(),
@@ -3310,24 +3379,11 @@ async function claimWorkerTargets(
     return { paused: true, completed: false, targets: [] as WorkerCrawlTarget[] };
   }
 
-  if (job.completed || job.nextIndex >= job.total) {
-    stopCrawlRunTimer(job);
-
-    job.completed = true;
-    job.running = false;
-    job.paused = false;
-    job.currentCompany = null;
-    job.currentWebsiteUrl = null;
-
-    await persistCrawlJobState(job);
-    await updateJobWorkerColumns(client, job.jobId, {
-      status: "completed",
-      workerId,
-      message: "完了",
-    });
-
+  if (job.completed) {
     return { paused: false, completed: true, targets: [] as WorkerCrawlTarget[] };
   }
+
+  await resetCrawlProcessingTargetsForClaim(client, job.jobId);
 
   const rows = await fetchCrawlTargetsByRange(
     client,
@@ -3337,12 +3393,24 @@ async function claimWorkerTargets(
   );
 
   if (rows.length === 0) {
-    job.failed += 1;
-    job.processed += 1;
-    job.nextIndex += 1;
-    await persistCrawlJobState(job);
+    stopCrawlRunTimer(job);
 
-    return { paused: false, completed: false, targets: [] as WorkerCrawlTarget[] };
+    job.completed = true;
+    job.running = false;
+    job.paused = false;
+    job.pauseRequested = false;
+    job.currentCompany = null;
+    job.currentWebsiteUrl = null;
+    job.nextIndex = job.total;
+
+    await persistCrawlJobState(job);
+    await updateJobWorkerColumns(client, job.jobId, {
+      status: "completed",
+      workerId,
+      message: "完了",
+    });
+
+    return { paused: false, completed: true, targets: [] as WorkerCrawlTarget[] };
   }
 
   const targets: WorkerCrawlTarget[] = rows.map((row) => ({
@@ -3358,6 +3426,9 @@ async function claimWorkerTargets(
 
   job.running = true;
   job.paused = false;
+  job.pauseRequested = false;
+  job.error = null;
+  job.nextIndex = firstTarget.targetIndex;
   job.currentCompany = firstTarget.company;
   job.currentWebsiteUrl = firstTarget.websiteUrl;
   startCrawlRunTimer(job);
