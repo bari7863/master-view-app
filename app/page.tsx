@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { List, type RowComponentProps } from "react-window";
 import { createPortal } from "react-dom";
 
@@ -1691,7 +1691,7 @@ function Cell({
     <div
       title={title}
       onDoubleClick={onDoubleClick}
-      className={`px-4 py-3 text-sm text-slate-100 truncate ${className}`}
+      className={`app-table-cell px-4 py-3 text-sm text-slate-100 ${className}`}
     >
       {children}
     </div>
@@ -1857,6 +1857,183 @@ function SelectionOptionCard({
   );
 }
 
+function LoadingSpinner({ className = "h-10 w-10" }: { className?: string }) {
+  const spinnerSize = className.includes("h-4")
+    ? "1rem"
+    : className.includes("h-5")
+    ? "1.25rem"
+    : className.includes("h-6")
+    ? "1.5rem"
+    : className.includes("h-8")
+    ? "2rem"
+    : "2.5rem";
+
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className={`block shrink-0 animate-spin ${className}`}
+      style={{
+        width: spinnerSize,
+        height: spinnerSize,
+        minWidth: spinnerSize,
+        minHeight: spinnerSize,
+        maxWidth: spinnerSize,
+        maxHeight: spinnerSize,
+      }}
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        className="text-white/15"
+      />
+      <path
+        d="M12 3a9 9 0 0 1 9 9"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        className="text-[#c59b5a]"
+      />
+    </svg>
+  );
+}
+
+function LoadingText({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center justify-center gap-2">
+      <span>{label}</span>
+      <LoadingSpinner className="h-4 w-4" />
+    </span>
+  );
+}
+
+function MasterDataLoadingPanel({
+  title = "読み込み中",
+  message = "画面を準備しています",
+}: {
+  title?: string;
+  message?: string;
+}) {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center bg-[#05070d] px-6">
+      <div className="flex min-h-[310px] w-full max-w-[460px] flex-col items-center justify-center rounded-[28px] border border-white/10 bg-white/[0.04] px-8 py-10 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+        <MasterDataBrandLogo className="h-auto w-[220px] shrink-0" />
+
+        <LoadingSpinner />
+
+        <div className="mt-5 text-sm font-semibold tracking-[0.22em] text-[#d9b56f]">
+          {title}
+        </div>
+
+        <div className="mt-2 text-xs text-slate-400">
+          {message}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BlockingLoadingOverlay({
+  title,
+  message,
+}: {
+  title: string;
+  message: string;
+}) {
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="app-modal-root fixed inset-0 z-[10050]">
+      <MasterDataLoadingPanel title={title} message={message} />
+    </div>,
+    document.body
+  );
+}
+
+function PageSelectDropdown({
+  page,
+  totalPages,
+  disabled,
+  open,
+  onToggle,
+  onClose,
+  onSelect,
+  className = "h-9 min-w-[100px] text-xs",
+}: {
+  page: number;
+  totalPages: number;
+  disabled: boolean;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onSelect: (pageNumber: number) => void;
+  className?: string;
+}) {
+  const pageOptions = useMemo(
+    () =>
+      Array.from(
+        { length: Math.max(totalPages, 1) },
+        (_, index) => index + 1
+      ),
+    [totalPages]
+  );
+
+  return (
+    <div
+      className="relative mt-1"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          onClose();
+        }
+      }}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={disabled}
+        className={`group/page relative flex items-center justify-between gap-2 rounded-xl border border-indigo-300/30 bg-gradient-to-br from-indigo-400/15 via-[#0f172a] to-[#07111f] px-3 font-black text-slate-100 shadow-inner outline-none transition hover:border-indigo-300/50 hover:bg-indigo-500/15 focus:border-indigo-300/60 focus:ring-2 focus:ring-indigo-300/20 disabled:opacity-40 ${className}`}
+      >
+        <span className="font-black" style={{ fontWeight: 900 }}>
+          {page}
+        </span>
+        <span className="text-[10px] font-black text-indigo-100 transition group-hover/page:translate-y-0.5">
+          ▾
+        </span>
+      </button>
+
+      {open && !disabled && (
+        <div className="app-scrollbar absolute left-1/2 top-[calc(100%+8px)] z-[120] max-h-[280px] w-[118px] -translate-x-1/2 overflow-y-auto rounded-2xl border border-indigo-300/25 bg-[#07111f]/98 p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+          {pageOptions.map((pageNumber) => {
+            const active = page === pageNumber;
+
+            return (
+              <button
+                key={pageNumber}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onSelect(pageNumber)}
+                className={`flex h-9 w-full items-center justify-center rounded-xl text-sm font-black transition ${
+                  active
+                    ? "bg-gradient-to-r from-indigo-400 to-cyan-400 text-[#03131f] shadow-[0_0_18px_rgba(45,212,191,0.24)]"
+                    : "text-slate-100 hover:bg-indigo-400/12 hover:text-indigo-100"
+                }`}
+                style={{ fontWeight: 900 }}
+              >
+                {pageNumber}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HeaderCell({
   label,
   filterKey,
@@ -2002,6 +2179,12 @@ const selectedValueSet = useMemo(
             className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-2"
             onClick={() => onToggleOpen(filterKey)}
           >
+            {filterState.valueLoading && (
+              <BlockingLoadingOverlay
+                title="フィルタ候補読み込み中"
+                message="フィルタ候補を読み込んでいます"
+              />
+            )}
             <div className="flex min-h-full items-center justify-center">
               <div
                 className="flex h-[calc(100dvh-32px)] w-full max-w-[420px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
@@ -2201,7 +2384,7 @@ const selectedValueSet = useMemo(
                     <div ref={filterValueListBoxRef} className="rounded-xl border border-white/10 bg-[#0f172a] p-2">
                       {visibleValues.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-slate-500">
-                          {filterState.valueLoading ? "読み込み中です..." : "候補がありません"}
+                          {filterState.valueLoading ? <LoadingText label="読み込み中です" /> : "候補がありません"}
                         </div>
                       ) : (
                         <List
@@ -2353,6 +2536,10 @@ export default function Home() {
     "main" | "permission" | null
   >(null);
 
+  const [openPageDropdown, setOpenPageDropdown] = useState<
+    "mainHeader" | "permissionHeader" | null
+  >(null);
+
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -2369,6 +2556,10 @@ export default function Home() {
   const [openAdvancedFilterKey, setOpenAdvancedFilterKey] =
     useState<AdvancedFilterModalKey | null>(null);
   const [advancedLoading, setAdvancedLoading] = useState(false);
+
+  const [advancedFilterReturnTarget, setAdvancedFilterReturnTarget] = useState<
+    "sidebarSearch" | "permissionSearch" | null
+  >(null);
 
   const [expandedPrefectures, setExpandedPrefectures] = useState<
     Record<string, boolean>
@@ -2680,14 +2871,28 @@ export default function Home() {
 
   const [singleFilterClearConfirm, setSingleFilterClearConfirm] =
     useState<FilterClearConfirmTarget | null>(null);
+
   const [allFiltersClearConfirmOpen, setAllFiltersClearConfirmOpen] = useState(false);
+
+  const [allFiltersClearConfirmTarget, setAllFiltersClearConfirmTarget] =
+    useState<"main" | "permission" | null>(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [openSidebarPanel, setOpenSidebarPanel] =
     useState<SidebarPanelKey | null>(null);
 
   const [themeMode, setThemeMode] = useState<"system" | "dark" | "light">("system");
-  const [systemThemeMode, setSystemThemeMode] = useState<"dark" | "light">("dark");
+
+  const [systemThemeMode, setSystemThemeMode] = useState<"dark" | "light">(() => {
+    if (typeof window === "undefined") {
+      return "dark";
+    }
+
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  });
+
   const effectiveThemeMode = themeMode === "system" ? systemThemeMode : themeMode;
 
   const [settingsTab, setSettingsTab] = useState<
@@ -2770,6 +2975,12 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [loginUser, setLoginUser] = useState<MasterDataLoginUser | null>(null);
   const [screenReady, setScreenReady] = useState(false);
+
+  const isMasterDataLoginKeepAliveModalOpen =
+    crawlProgressOpen ||
+    itemInspectionProgressOpen ||
+    itemInspectionPreviewConfirmOpen ||
+    crawlPreviewOpen;
 
   const visibleCrawlConfirmFieldOptions = CRAWL_CONFIRM_FIELD_OPTIONS.filter(
     (field) =>
@@ -3845,24 +4056,37 @@ export default function Home() {
     void fetchCurrentUserPermissions(loginUser);
   }, [loginStatus, loginUser?.id, loginUser?.role, loginUser?.organization]);
 
-    useEffect(() => {
-      if (loginStatus !== "logged_in") return;
+  useEffect(() => {
+    if (loginStatus !== "logged_in") return;
 
-      const timer = window.setInterval(() => {
-        const savedLoginExpiresAt = getMasterDataLoginExpiresAt();
+    const timer = window.setInterval(() => {
+      const savedLoginSession = window.sessionStorage.getItem(
+        MASTER_DATA_LOGIN_SESSION_KEY
+      );
 
-        if (
-          !Number.isFinite(savedLoginExpiresAt) ||
-          savedLoginExpiresAt <= Date.now()
-        ) {
-          void handleLogout();
-        }
-      }, 30 * 1000);
+      const savedLoginExpiresAt = getMasterDataLoginExpiresAt();
 
-      return () => {
-        window.clearInterval(timer);
-      };
-    }, [loginStatus]);
+      if (
+        isMasterDataLoginKeepAliveModalOpen &&
+        savedLoginSession === "1"
+      ) {
+        refreshMasterDataLoginExpiresAt();
+        return;
+      }
+
+      if (
+        savedLoginSession !== "1" ||
+        !Number.isFinite(savedLoginExpiresAt) ||
+        savedLoginExpiresAt <= Date.now()
+      ) {
+        void handleLogout();
+      }
+    }, 30 * 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [loginStatus, isMasterDataLoginKeepAliveModalOpen]);
 
   useEffect(() => {
     if (loginStatus !== "logged_in") return;
@@ -3874,10 +4098,16 @@ export default function Home() {
 
       const savedLoginExpiresAt = getMasterDataLoginExpiresAt();
 
-      if (
-        savedLoginSession !== "1" ||
-        !Number.isFinite(savedLoginExpiresAt)
-      ) {
+      if (savedLoginSession !== "1") {
+        return;
+      }
+
+      if (isMasterDataLoginKeepAliveModalOpen) {
+        refreshMasterDataLoginExpiresAt();
+        return;
+      }
+
+      if (!Number.isFinite(savedLoginExpiresAt)) {
         return;
       }
 
@@ -3907,7 +4137,7 @@ export default function Home() {
         window.removeEventListener(eventName, refreshLoginSessionByActivity);
       });
     };
-  }, [loginStatus]);
+  }, [loginStatus, isMasterDataLoginKeepAliveModalOpen]);
 
   const checkLocalCrawlWorker = async () => {
     if (isLocalAppRuntime()) {
@@ -3981,7 +4211,7 @@ export default function Home() {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (typeof document === "undefined") return;
 
     document.body.setAttribute("data-app-theme", effectiveThemeMode);
@@ -4187,14 +4417,37 @@ export default function Home() {
     });
 
     setPage(1);
-    setOpenFilterKey(null);
-  };
+      setOpenFilterKey(null);
+    };
+
+    const closeAdvancedFilterModal = (returnToSearch = true) => {
+      setOpenAdvancedFilterKey(null);
+
+      if (!returnToSearch) {
+        setAdvancedFilterReturnTarget(null);
+        return;
+      }
+
+      if (advancedFilterReturnTarget === "permissionSearch") {
+        setPermissionListScopeSearchOpen(true);
+      }
+
+      if (advancedFilterReturnTarget === "sidebarSearch") {
+        setOpenSidebarPanel("search");
+      }
+
+      setAdvancedFilterReturnTarget(null);
+    };
 
     const handleOpenAdvancedFilter = async (key: AdvancedFilterModalKey) => {
       if (openAdvancedFilterKey === key) {
-        setOpenAdvancedFilterKey(null);
+        closeAdvancedFilterModal();
         return;
       }
+
+      setAdvancedFilterReturnTarget(
+        permissionListScopeOpen ? "permissionSearch" : "sidebarSearch"
+      );
 
       if (!permissionListScopeOpen) {
         setOpenSidebarPanel(null);
@@ -4299,13 +4552,13 @@ export default function Home() {
       });
 
       setPage(1);
-      setOpenAdvancedFilterKey(null);
+      closeAdvancedFilterModal();
     };
 
     const applyAdvancedFilter = () => {
       setAppliedAdvancedFilters(cloneAdvancedFiltersState(draftAdvancedFilters));
       setPage(1);
-      setOpenAdvancedFilterKey(null);
+      closeAdvancedFilterModal();
     };
 
     const clearAllFilters = () => {
@@ -4332,8 +4585,24 @@ export default function Home() {
     };
 
     const handleConfirmAllFiltersClear = () => {
+      if (allFiltersClearConfirmTarget === "permission") {
+        setDraftColumnStates((prev) => createClearedColumnStates(prev));
+        setAppliedColumnStates((prev) => createClearedColumnStates(prev));
+        setDraftAdvancedFilters(createInitialAdvancedFiltersState());
+        setAppliedAdvancedFilters(createInitialAdvancedFiltersState());
+        setPage(1);
+        setOpenFilterKey(null);
+        setOpenAdvancedFilterKey(null);
+        setPermissionListScopeSearchOpen(false);
+        setAdvancedFilterReturnTarget(null);
+        setAllFiltersClearConfirmOpen(false);
+        setAllFiltersClearConfirmTarget(null);
+        return;
+      }
+
       clearAllFilters();
       setAllFiltersClearConfirmOpen(false);
+      setAllFiltersClearConfirmTarget(null);
     };
 
   const renderAdvancedFilterContent = () => {
@@ -5291,7 +5560,7 @@ export default function Home() {
                   ＋
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {mynaviLoading ? "取得中..." : "リスト追加"}
+                  {mynaviLoading ? <LoadingText label="取得中" /> : "リスト追加"}
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   新しい企業リストを取り込み、管理対象に追加します
@@ -5357,7 +5626,7 @@ export default function Home() {
                   ⧉
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {deduplicating ? "重複削除中..." : "重複削除"}
+                  {deduplicating ? <LoadingText label="重複削除中" /> : "重複削除"}
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   重複している企業データを整理します
@@ -5547,7 +5816,7 @@ export default function Home() {
                   </svg>
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {importing ? "投入中..." : "CSV投入"}
+                  {importing ? <LoadingText label="投入中" /> : "CSV投入"}
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   選択したCSVをデータベースに取り込みます
@@ -5640,7 +5909,7 @@ export default function Home() {
                   🤖
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {crawling ? "クローリング中..." : "クローリング"}
+                  {crawling ? <LoadingText label="クローリング中" /> : "クローリング"}
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   企業サイトを確認し、選択した項目の候補を取得します
@@ -5676,7 +5945,7 @@ export default function Home() {
                   ✓
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {itemInspecting ? "項目精査中..." : "項目精査"}
+                  {itemInspecting ? <LoadingText label="項目精査中" /> : "項目精査"}
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   登録済みデータを確認し、不要な値や修正候補を精査します
@@ -5995,6 +6264,26 @@ export default function Home() {
                             </span>
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPermissionListScopeSearchOpen(false);
+                              setOpenFilterKey(null);
+                              setOpenAdvancedFilterKey(null);
+                              setAdvancedFilterReturnTarget(null);
+                              setAllFiltersClearConfirmTarget("permission");
+                              setAllFiltersClearConfirmOpen(true);
+                            }}
+                            className="group inline-flex min-h-[72px] min-w-[170px] flex-col items-center justify-center gap-1 rounded-2xl border border-sky-300/30 bg-gradient-to-br from-sky-500/24 via-white/8 to-indigo-500/10 px-4 py-2 text-sm font-black text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)] transition hover:border-sky-300/50 hover:bg-sky-500/20"
+                          >
+                            <span className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-sky-300/25 bg-sky-400/10">
+                              ↺
+                            </span>
+                            <span className="font-black" style={{ fontWeight: 900 }}>
+                              フィルタ解除
+                            </span>
+                          </button>
+
                           <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-sky-300/15 bg-gradient-to-br from-sky-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
                             <span className="text-[11px] font-semibold text-slate-400">総件数</span>
                             <span className="mt-0.5 text-sm font-bold text-white">
@@ -6002,13 +6291,27 @@ export default function Home() {
                             </span>
                           </div>
 
-                          <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-indigo-300/15 bg-gradient-to-br from-indigo-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
+                          <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center overflow-visible rounded-2xl border border-indigo-300/15 bg-gradient-to-br from-indigo-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
                             <span className="text-[11px] font-semibold text-slate-400">
                               現在ページ
                             </span>
-                            <span className="mt-0.5 text-sm font-bold text-white">
-                              {page}
-                            </span>
+
+                            <PageSelectDropdown
+                              page={page}
+                              totalPages={totalPages}
+                              disabled={limit === "all"}
+                              open={openPageDropdown === "permissionHeader"}
+                              onToggle={() =>
+                                setOpenPageDropdown((current) =>
+                                  current === "permissionHeader" ? null : "permissionHeader"
+                                )
+                              }
+                              onClose={() => setOpenPageDropdown(null)}
+                              onSelect={(pageNumber) => {
+                                setPage(pageNumber);
+                                setOpenPageDropdown(null);
+                              }}
+                            />
                           </div>
 
                           <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-cyan-300/15 bg-gradient-to-br from-cyan-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
@@ -6146,7 +6449,7 @@ export default function Home() {
                                     <div
                                       key={`permission-scope-cell-${rowIndex}-${column.key}`}
                                       title={value || ""}
-                                      className="truncate px-4 py-3 text-sm text-slate-100"
+                                      className="app-table-cell px-4 py-3 text-sm text-slate-100"
                                     >
                                       {value && value.trim() !== "" ? (
                                         value
@@ -6192,11 +6495,11 @@ export default function Home() {
                             type="button"
                             onClick={() => setPage(n)}
                             disabled={limit === "all"}
-                            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                            className={`rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:opacity-40 ${
                               page === n
-                                ? "border border-sky-300/40 bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-[0_0_22px_rgba(56,189,248,0.24)]"
-                                : "border border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100"
-                            } ${limit === "all" ? "opacity-40" : ""}`}
+                                ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
+                                : "border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100"
+                            }`}
                           >
                             {n}
                           </button>
@@ -6420,7 +6723,7 @@ export default function Home() {
 
                   {permissionLoading ? (
                     <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
-                      読み込み中です...
+                      <LoadingText label="読み込み中です" />
                     </div>
                   ) : permissionEmployees.length === 0 ? (
                     <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
@@ -6502,7 +6805,7 @@ export default function Home() {
                             disabled={permissionSaving}
                             className="inline-flex h-10 w-fit items-center justify-center rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:opacity-50"
                           >
-                            {permissionSaving ? "保存中..." : "保存"}
+                            {permissionSaving ? <LoadingText label="保存中" /> : "保存"}
                           </button>
 
                           <div className="flex min-w-[180px] shrink-0 items-center justify-end gap-2 self-end">
@@ -7491,6 +7794,15 @@ const handlePreviewCsvExport = async () => {
         throw new Error("クローリングジョブが見つかりません");
       }
 
+      const crawlCsvFileName = createPreviewCsvFileName(
+        "crawl",
+        previewCsvMode
+      );
+
+      const crawlCsvFileHandle = await openPreviewCsvSaveFile(
+        crawlCsvFileName
+      );
+
       const candidateRows = await fetchAllCrawlPreviewRowsForCsv(
         crawlJobId,
         "candidate"
@@ -7525,7 +7837,8 @@ const handlePreviewCsvExport = async () => {
 
       await savePreviewCsvText(
         csvText,
-        createPreviewCsvFileName("crawl", previewCsvMode)
+        crawlCsvFileName,
+        crawlCsvFileHandle
       );
 
       setPreviewCsvSource(null);
@@ -7540,6 +7853,15 @@ const handlePreviewCsvExport = async () => {
     if (!itemInspectionJobId) {
       throw new Error("項目精査ジョブが見つかりません");
     }
+
+    const itemInspectionCsvFileName = createPreviewCsvFileName(
+      "item_inspection",
+      previewCsvMode
+    );
+
+    const itemInspectionCsvFileHandle = await openPreviewCsvSaveFile(
+      itemInspectionCsvFileName
+    );
 
     const candidateRows = await fetchAllItemInspectionPreviewRowsForCsv(
       itemInspectionJobId,
@@ -7583,7 +7905,8 @@ const handlePreviewCsvExport = async () => {
 
     await savePreviewCsvText(
       csvText,
-      createPreviewCsvFileName("item_inspection", previewCsvMode)
+      itemInspectionCsvFileName,
+      itemInspectionCsvFileHandle
     );
 
     setPreviewCsvSource(null);
@@ -7593,6 +7916,10 @@ const handlePreviewCsvExport = async () => {
         : "候補のみリストをCSV保存しました"
     );
   } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      return;
+    }
+
     const message = e instanceof Error ? e.message : "CSV抽出に失敗しました";
 
     if (previewCsvSource === "crawl") {
@@ -7677,12 +8004,58 @@ const handlePreviewCsvExport = async () => {
     return `master_data_${source}_${mode}_${yyyy}${mm}${dd}_${hh}${mi}${ss}.csv`;
   };
 
-  const savePreviewCsvText = async (csvText: string, fileName: string) => {
+  const openPreviewCsvSaveFile = async (fileName: string) => {
+    const showSaveFilePicker = (
+      window as Window & {
+        showSaveFilePicker?: (options?: {
+          suggestedName?: string;
+          types?: Array<{
+            description?: string;
+            accept: Record<string, string[]>;
+          }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob | Uint8Array | string) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+        }>;
+      }
+    ).showSaveFilePicker;
+
+    if (!showSaveFilePicker) {
+      throw new Error("この環境では保存場所の選択に対応していません");
+    }
+
+    return await showSaveFilePicker({
+      suggestedName: fileName,
+      types: [
+        {
+          description: "CSVファイル",
+          accept: {
+            "text/csv": [".csv"],
+          },
+        },
+      ],
+    });
+  };
+
+  const savePreviewCsvText = async (
+    csvText: string,
+    fileName: string,
+    fileHandle?: Awaited<ReturnType<typeof openPreviewCsvSaveFile>> | null
+  ) => {
     const csvBlob = new Blob([csvText], {
       type: "text/csv;charset=utf-8;",
     });
 
-    downloadBlobByAnchor(csvBlob, fileName);
+    if (!fileHandle) {
+      downloadBlobByAnchor(csvBlob, fileName);
+      return;
+    }
+
+    const writable = await fileHandle.createWritable();
+    await writable.write(csvBlob);
+    await writable.close();
   };
 
   const buildPreviewCsvHeaders = (candidateKeys: Array<keyof Row>) => {
@@ -8403,7 +8776,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   setCrawlProgressOpen(true);
   setCrawlPreviewOpen(false);
   setCrawlResumeConfirmOpen(false);
-  setCrawlMessage("接続が切れました。復旧を確認しています...");
+  setCrawlMessage("接続が切れました。復旧を確認しています");
   setCrawlError("");
 
   const retryRestore = async () => {
@@ -8418,7 +8791,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
     setCrawling(true);
     setCrawlProgressOpen(true);
-    setCrawlMessage("接続が切れました。復旧を確認しています...");
+    setCrawlMessage("接続が切れました。復旧を確認しています");
     setCrawlError("");
 
     const nextDelayMs = Math.min(
@@ -8705,7 +9078,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     if (!crawlJobId) return;
 
     clearCrawlStatusPolling();
-    setCrawlMessage("クローリングを中断しています。保存候補を読み込みます...");
+    setCrawlMessage("クローリングを中断しています。保存候補を読み込みます");
     setCrawlError("");
 
     try {
@@ -9670,20 +10043,6 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     }
   };
 
-  const pageNumbers = useMemo(() => {
-    if (limit === "all") return [1];
-
-    const maxButtons = 7;
-    let start = Math.max(page - 3, 1);
-    let end = Math.min(start + maxButtons - 1, totalPages);
-
-    if (end - start < maxButtons - 1) {
-      start = Math.max(end - maxButtons + 1, 1);
-    }
-
-    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
-  }, [page, totalPages, limit]);
-
   const usingVirtual = true;
 
   const activeSidebarPanelTitle = openSidebarPanel
@@ -9719,6 +10078,33 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     activeAdvancedFilterKey === "prefecture" ||
     activeAdvancedFilterKey === "industry" ||
     activeAdvancedFilterKey === "tag";
+
+  const blockingLoadingState = loginLoading
+    ? {
+        title: "ログイン中",
+        message: "ログイン情報を確認しています",
+      }
+    : loading
+    ? {
+        title: "リスト読み込み中",
+        message: "リスト情報を読み込んでいます",
+      }
+    : advancedLoading
+    ? {
+        title: "検索条件読み込み中",
+        message: "検索候補を読み込んでいます",
+      }
+    : permissionLoading
+    ? {
+        title: "権限情報読み込み中",
+        message: "権限情報を読み込んでいます",
+      }
+    : crawlPreviewLoading
+    ? {
+        title: "クローリング結果読み込み中",
+        message: "クローリング結果確認を読み込んでいます",
+      }
+    : null;
 
   const selectedCrawlFields = visibleCrawlConfirmFieldOptions
     .filter((field) => crawlFieldSelections[field.key])
@@ -9772,6 +10158,20 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   const isRepresentativeNameOnlyInspection =
     selectedItemInspectionFields.length === 1 &&
     selectedItemInspectionFields[0] === "representative_name";
+
+    const pageNumbers = useMemo(() => {
+      if (limit === "all") return [1];
+
+      const maxButtons = 7;
+      let start = Math.max(page - 3, 1);
+      let end = Math.min(start + maxButtons - 1, totalPages);
+
+      if (end - start < maxButtons - 1) {
+        start = Math.max(end - maxButtons + 1, 1);
+      }
+
+      return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+    }, [page, totalPages, limit]);
 
   const renderedTableBody = useMemo(() => {
     if (rows.length === 0 && !loading) {
@@ -9847,22 +10247,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         sidebarOpen ? "app-sidebar-open" : "app-sidebar-closed"
       } h-[100dvh] overflow-hidden bg-transparent text-slate-100`}
     >
+      {blockingLoadingState && (
+        <BlockingLoadingOverlay
+          title={blockingLoadingState.title}
+          message={blockingLoadingState.message}
+        />
+      )}
       {!screenReady || loginStatus === "checking" ? (
-        <div className="flex h-full min-h-0 items-center justify-center bg-[#05070d] px-6">
-          <div className="flex w-full max-w-[420px] flex-col items-center rounded-[28px] border border-white/10 bg-white/[0.04] px-8 py-10 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-            <MasterDataBrandLogo className="h-auto w-[220px] shrink-0" />
-
-            <div className="mt-4 h-10 w-10 animate-spin rounded-full border-2 border-white/15 border-t-[#c59b5a]" />
-
-            <div className="mt-5 text-sm font-semibold tracking-[0.22em] text-[#d9b56f]">
-              読み込み中
-            </div>
-
-            <div className="mt-2 text-xs text-slate-400">
-              画面を準備しています
-            </div>
-          </div>
-        </div>
+        <BlockingLoadingOverlay
+          title="読み込み中"
+          message="画面を準備しています"
+        />
       ) : loginStatus !== "logged_in" ? (
         <div className="master-data-login-screen grid h-full min-h-0 grid-cols-1 overflow-hidden bg-white lg:grid-cols-2">
           <section className="flex min-h-[320px] flex-col items-center justify-center bg-[#05070d] px-8 py-10 text-center">
@@ -9964,7 +10359,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   disabled={loginLoading}
                   className="h-12 w-full rounded-2xl bg-[#0b1326] px-5 text-sm font-semibold text-white shadow-[0_16px_36px_rgba(15,23,42,0.22)] transition hover:bg-[#111d38] disabled:opacity-50"
                 >
-                {loginLoading ? "ログイン中..." : "ログイン"}
+                {loginLoading ? <LoadingText label="ログイン中" /> : "ログイン"}
                 </button>
               </div>
             </form>
@@ -10090,6 +10485,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                             setPermissionListScopeSearchOpen(false);
                             setOpenFilterKey(null);
                             setOpenAdvancedFilterKey(null);
+                            setAllFiltersClearConfirmTarget("main");
                             setAllFiltersClearConfirmOpen(true);
                           }}
                           className={`group flex w-full items-center gap-2 rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-semibold transition ${
@@ -10142,14 +10538,29 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   </div>
                 </div>
 
-                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-hidden rounded-2xl border border-indigo-300/20 bg-gradient-to-br from-indigo-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
+                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-visible rounded-2xl border border-indigo-300/20 bg-gradient-to-br from-indigo-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
                   <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(129,140,248,0.22),transparent_42%)] opacity-0 transition group-hover:opacity-100" />
                   <div className="relative text-xs font-semibold text-indigo-100/80">
                     現在ページ
                   </div>
-                  <div className="relative mt-1 text-lg font-bold text-white md:text-xl">
-                    {page}
-                  </div>
+
+                  <PageSelectDropdown
+                    page={page}
+                    totalPages={totalPages}
+                    disabled={limit === "all"}
+                    open={openPageDropdown === "mainHeader"}
+                    onToggle={() =>
+                      setOpenPageDropdown((current) =>
+                        current === "mainHeader" ? null : "mainHeader"
+                      )
+                    }
+                    onClose={() => setOpenPageDropdown(null)}
+                    onSelect={(pageNumber) => {
+                      setPage(pageNumber);
+                      setOpenPageDropdown(null);
+                    }}
+                    className="h-10 min-w-[104px] text-sm"
+                  />
                 </div>
 
                 <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-hidden rounded-2xl border border-cyan-300/20 bg-gradient-to-br from-cyan-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
@@ -10444,7 +10855,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={importing}
                       className="h-10 min-w-[96px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {importing ? "投入中..." : "はい"}
+                      {importing ? <LoadingText label="投入中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -10812,7 +11223,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           createPortal(
             <div
               className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
-              onClick={() => setOpenAdvancedFilterKey(null)}
+              onClick={() => closeAdvancedFilterModal()}
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
@@ -10845,7 +11256,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                       <button
                         type="button"
-                        onClick={() => setOpenAdvancedFilterKey(null)}
+                        onClick={() => closeAdvancedFilterModal()}
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
                       >
                         ×
@@ -10858,7 +11269,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     activeAdvancedFilterKey !== "capital" &&
                     activeAdvancedFilterKey !== "employeeCount" ? (
                       <div className="rounded-xl border border-white/10 bg-[#0f172a] px-4 py-10 text-center text-sm text-slate-400">
-                        読み込み中です...
+                        <LoadingText label="読み込み中です" />
                       </div>
                     ) : (
                       renderAdvancedFilterContent()
@@ -10904,12 +11315,6 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             </div>,
             document.body
           )}
-
-        {loading && (
-          <div className="mb-4 rounded-2xl border border-white/10 bg-[#0b1326]/90 px-4 py-3 text-sm text-slate-400">
-            読み込み中です...
-          </div>
-        )}
 
         {itemInspectionFieldOpen &&
           typeof document !== "undefined" &&
@@ -11147,7 +11552,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
-                      {itemInspecting ? "精査中..." : "はい"}
+                      {itemInspecting ? <LoadingText label="精査中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -11217,7 +11622,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         </div>
                       </div>
 
-                      <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10">
+                      <div className="app-progress-bar-frame mt-3 h-3 overflow-hidden rounded-full border border-white/20 bg-white/10">
                         <div
                           className="h-full rounded-full bg-cyan-500 transition-all"
                           style={{
@@ -11526,7 +11931,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={itemInspecting}
                       className="h-10 w-[120px] flex-none rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
                     >
-                      {itemInspecting ? "保存中..." : "保存"}
+                      {itemInspecting ? <LoadingText label="保存中" /> : "保存"}
                     </button>
 
                     <button
@@ -12017,7 +12422,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={itemDeleting}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {itemDeleting ? "削除中..." : "はい"}
+                      {itemDeleting ? <LoadingText label="削除中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -12133,7 +12538,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={listDeleting}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {listDeleting ? "削除中..." : "はい"}
+                      {listDeleting ? <LoadingText label="削除中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -12238,7 +12643,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         </div>
                       </div>
 
-                      <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10">
+                      <div className="app-progress-bar-frame mt-3 h-3 overflow-hidden rounded-full border border-white/20 bg-white/10">
                         <div
                           className="h-full rounded-full bg-amber-500 transition-all"
                           style={{
@@ -12403,7 +12808,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
-                      {crawling ? "実行中..." : "はい"}
+                      {crawling ? <LoadingText label="実行中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -12537,7 +12942,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                           <div className="text-xs text-slate-300">
                             {crawlPreviewPage} / {crawlPreviewTotalPages}
-                            {crawlPreviewLoading ? " 読込中..." : ""}
+                            {crawlPreviewLoading && <LoadingText label="読込中" />}
                           </div>
 
                           <button
@@ -12562,7 +12967,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     >
                       {crawlPreviewLoading ? (
                         <div className="px-4 py-12 text-center text-slate-400">
-                          クローリング結果確認を読み込み中です...
+                          <LoadingText label="クローリング結果確認を読み込み中です" />
                         </div>
                       ) : crawlPreviewRows.length === 0 ? (
                         <div className="px-4 py-12 text-center text-slate-500">
@@ -12751,16 +13156,16 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         type="button"
                         onClick={handleCrawlSave}
                         disabled={crawling}
-                        className="h-10 w-[120px] flex-none rounded-xl bg-emerald-600 px-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+                        className="crawl-preview-save-button h-10 w-[120px] flex-none rounded-xl bg-emerald-600 px-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
                       >
-                        {crawling ? "保存中..." : "保存"}
+                        {crawling ? <LoadingText label="保存中" /> : "保存"}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => openPreviewCsvScope("crawl")}
                         disabled={crawling}
-                        className="h-10 w-[120px] flex-none rounded-xl bg-indigo-500 px-3 text-sm font-medium text-white transition hover:bg-indigo-400 disabled:opacity-50"
+                        className="crawl-preview-csv-button h-10 w-[120px] flex-none rounded-xl bg-indigo-500 px-3 text-sm font-medium text-white transition hover:bg-indigo-400 disabled:opacity-50"
                       >
                         CSV抽出
                       </button>
@@ -12861,7 +13266,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={deduplicating}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {deduplicating ? "実行中..." : "はい"}
+                      {deduplicating ? <LoadingText label="実行中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -12975,7 +13380,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={importing}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {importing ? "投入中..." : "はい"}
+                      {importing ? <LoadingText label="投入中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -13020,7 +13425,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={importing}
                       className="h-10 flex-1 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
                     >
-                      {importing ? "投入中..." : "重複削除する"}
+                      {importing ? <LoadingText label="投入中" /> : "重複削除する"}
                     </button>
                   </div>
                 </div>
@@ -13332,7 +13737,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               createPortal(
                 <div
                   className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
-                  onClick={() => setAllFiltersClearConfirmOpen(false)}
+                  onClick={() => {
+                    setAllFiltersClearConfirmOpen(false);
+                    setAllFiltersClearConfirmTarget(null);
+                  }}
                 >
                   <div className="flex min-h-full items-center justify-center">
                     <div
@@ -13350,7 +13758,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       <div className="flex gap-2 border-t border-white/10 px-4 py-4">
                         <button
                           type="button"
-                          onClick={() => setAllFiltersClearConfirmOpen(false)}
+                          onClick={() => {
+                            setAllFiltersClearConfirmOpen(false);
+                            setAllFiltersClearConfirmTarget(null);
+                          }}
                           className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
                         >
                           いいえ
@@ -13438,21 +13849,29 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             前へ
           </button>
 
+          {pageNumbers[0] > 1 && (
+            <span className="px-2 text-sm text-slate-500">...</span>
+          )}
+
           {pageNumbers.map((n) => (
             <button
-              key={n}
+              key={`main-page-${n}`}
               type="button"
               onClick={() => setPage(n)}
               disabled={limit === "all"}
-              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              className={`rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:opacity-40 ${
                 page === n
-                  ? "border border-sky-300/40 bg-gradient-to-br from-sky-500 to-cyan-500 text-white shadow-[0_0_22px_rgba(56,189,248,0.24)]"
-                  : "border border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100"
-              } ${limit === "all" ? "opacity-40" : ""}`}
+                  ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
+                  : "border-white/10 bg-white/5 text-slate-200 hover:border-sky-300/30 hover:bg-sky-500/10 hover:text-sky-100"
+              }`}
             >
               {n}
             </button>
           ))}
+
+          {pageNumbers[pageNumbers.length - 1] < totalPages && (
+            <span className="px-2 text-sm text-slate-500">...</span>
+          )}
 
           <button
             type="button"
@@ -13641,6 +14060,18 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           overflow: visible !important;
           text-overflow: clip !important;
           line-height: 1.1 !important;
+        }
+
+        .app-table-cell,
+        .app-modal-root .app-table-cell {
+          display: block !important;
+          min-width: 0 !important;
+          max-width: 100% !important;
+          overflow: hidden !important;
+          text-overflow: ellipsis !important;
+          white-space: nowrap !important;
+          overflow-wrap: normal !important;
+          word-break: normal !important;
         }
 
         .app-modal-root .flex {
@@ -14127,6 +14558,54 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           border-color: rgba(20, 184, 166, 0.45) !important;
         }
 
+        /* ライトモード専用：現在ページ・表示件数ドロップダウンの選択中ボタン */
+        main[data-theme="light"] button[class*="from-emerald-400"][class*="to-cyan-400"],
+        body[data-app-theme="light"] button[class*="from-emerald-400"][class*="to-cyan-400"],
+        main[data-theme="light"] button[class*="from-indigo-400"][class*="to-cyan-400"],
+        body[data-app-theme="light"] button[class*="from-indigo-400"][class*="to-cyan-400"] {
+          background-color: #99f6e4 !important;
+          background-image: linear-gradient(90deg, #a7f3d0, #a5f3fc) !important;
+          color: #064e3b !important;
+          border-color: rgba(20, 184, 166, 0.22) !important;
+          box-shadow: 0 0 14px rgba(45, 212, 191, 0.14) !important;
+        }
+
+        /* ライトモード専用：現在ページドロップダウンを表示件数ドロップダウンと同じ色にする */
+        main[data-theme="light"] button[class*="from-indigo-400"][class*="to-cyan-400"],
+        body[data-app-theme="light"] button[class*="from-indigo-400"][class*="to-cyan-400"] {
+          background-color: #14b8a6 !important;
+          background-image: linear-gradient(90deg, #34d399, #22d3ee) !important;
+          color: #03131f !important;
+          border-color: rgba(20, 184, 166, 0.45) !important;
+          box-shadow: 0 0 18px rgba(45, 212, 191, 0.24) !important;
+        }
+
+        /* ライトモード専用：現在ページドロップダウンを表示件数ドロップダウンと同じ薄い色にする */
+        main[data-theme="light"] button[class*="from-indigo-400"][class*="to-cyan-400"],
+        body[data-app-theme="light"] button[class*="from-indigo-400"][class*="to-cyan-400"] {
+          background-color: #99f6e4 !important;
+          background-image: linear-gradient(90deg, #a7f3d0, #a5f3fc) !important;
+          color: #064e3b !important;
+          border-color: rgba(20, 184, 166, 0.22) !important;
+          box-shadow: 0 0 14px rgba(45, 212, 191, 0.14) !important;
+        }
+
+        main[data-theme="light"] button[class*="hover:text-indigo-100"],
+        body[data-app-theme="light"] button[class*="hover:text-indigo-100"] {
+          color: #047857 !important;
+        }
+
+        main[data-theme="light"] button[class*="hover:bg-indigo-400/12"]:hover,
+        body[data-app-theme="light"] button[class*="hover:bg-indigo-400/12"]:hover {
+          background-color: rgba(52, 211, 153, 0.12) !important;
+          color: #047857 !important;
+        }
+
+        main[data-theme="light"] [class*="border-indigo-300/25"][class*="bg-[#07111f]/98"],
+        body[data-app-theme="light"] [class*="border-indigo-300/25"][class*="bg-[#07111f]/98"] {
+          border-color: rgba(20, 184, 166, 0.25) !important;
+        }
+
         /* ライトモード専用：表示件数ドロップダウン本体 */
         main[data-theme="light"] [class*="bg-[#07111f]/98"],
         body[data-app-theme="light"] [class*="bg-[#07111f]/98"] {
@@ -14204,6 +14683,13 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           color: #0f172a !important;
         }
 
+        /* ライトモード専用：進捗バーの外枠を見えるようにする */
+        main[data-theme="light"] .app-progress-bar-frame,
+        body[data-app-theme="light"] .app-progress-bar-frame {
+          border-color: rgba(15, 23, 42, 0.45) !important;
+          background: rgba(15, 23, 42, 0.08) !important;
+        }
+
         /* ライトモード専用：フィルタ解除の文字・マークを黒くする */
         main[data-theme="light"] button[class*="from-rose-500/14"],
         body[data-app-theme="light"] button[class*="from-rose-500/14"],
@@ -14227,6 +14713,18 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         body[data-app-theme="light"] button[class~="bg-sky-500"],
         main[data-theme="light"] button[class~="bg-sky-500"] *,
         body[data-app-theme="light"] button[class~="bg-sky-500"] * {
+          color: #ffffff !important;
+        }
+
+      /* ライトモード専用：クローリング結果確認の「保存」「CSV抽出」ボタン文字だけ白にする */
+        main[data-theme="light"] .crawl-preview-save-button,
+        body[data-app-theme="light"] .crawl-preview-save-button,
+        main[data-theme="light"] .crawl-preview-save-button span,
+        body[data-app-theme="light"] .crawl-preview-save-button span,
+        main[data-theme="light"] .crawl-preview-csv-button,
+        body[data-app-theme="light"] .crawl-preview-csv-button,
+        main[data-theme="light"] .crawl-preview-csv-button span,
+        body[data-app-theme="light"] .crawl-preview-csv-button span {
           color: #ffffff !important;
         }
 
