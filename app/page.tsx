@@ -1149,6 +1149,12 @@ type FilterClearConfirmTarget =
   | { type: "column"; key: FilterKey }
   | { type: "advanced"; key: AdvancedFilterModalKey };
 
+type InspectionCancelConfirmTarget =
+  | "crawlProgress"
+  | "crawlPreview"
+  | "itemInspectionProgress"
+  | "itemInspectionPreview";
+
 const SIDEBAR_PANEL_TITLES: Record<SidebarPanelKey, string> = {
   search: "絞り込み",
   list: "リスト",
@@ -2975,6 +2981,9 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [loginUser, setLoginUser] = useState<MasterDataLoginUser | null>(null);
   const [screenReady, setScreenReady] = useState(false);
+
+  const [inspectionCancelConfirmTarget, setInspectionCancelConfirmTarget] =
+    useState<InspectionCancelConfirmTarget | null>(null);
 
   const isMasterDataLoginKeepAliveModalOpen =
     crawlProgressOpen ||
@@ -9074,6 +9083,21 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     }
   };
 
+  const handleCancelCrawlPreview = () => {
+    const dismissedJobId = crawlJobId ?? loadActiveCrawlJobId();
+
+    setCrawlPreviewOpen(false);
+    setCrawlResumeConfirmOpen(false);
+    setCrawlPreviewRows([]);
+    setCrawlPreviewTotalCount(0);
+    setCrawlPreviewPage(1);
+    setCrawlSelectedChanges({});
+    setCrawlJobId(null);
+    saveActiveCrawlJobId(null);
+    deleteCrawlElapsedMs(dismissedJobId);
+    setCrawlJobStatus("idle");
+  };
+
   const handlePauseCrawl = async () => {
     if (!crawlJobId) return;
 
@@ -9761,6 +9785,31 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       setItemInspectionError(
         e instanceof Error ? e.message : "中止処理でエラーが発生しました"
       );
+    }
+  };
+
+  const handleConfirmInspectionCancel = async () => {
+    const target = inspectionCancelConfirmTarget;
+
+    if (!target) return;
+
+    setInspectionCancelConfirmTarget(null);
+
+    if (target === "crawlProgress") {
+      await handleCancelCrawl();
+      return;
+    }
+
+    if (target === "crawlPreview") {
+      handleCancelCrawlPreview();
+      return;
+    }
+
+    if (
+      target === "itemInspectionProgress" ||
+      target === "itemInspectionPreview"
+    ) {
+      await handleCancelItemInspection();
     }
   };
 
@@ -11666,7 +11715,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
-                      onClick={handleCancelItemInspection}
+                      onClick={() => setInspectionCancelConfirmTarget("itemInspectionProgress")}
                       disabled={!itemInspecting}
                       className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
@@ -11905,7 +11954,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
-                      onClick={handleCancelItemInspection}
+                      onClick={() => setInspectionCancelConfirmTarget("itemInspectionPreview")}
                       disabled={itemInspecting}
                       className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
@@ -12691,7 +12740,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
-                      onClick={handleCancelCrawl}
+                      onClick={() => setInspectionCancelConfirmTarget("crawlProgress")}
                       disabled={!crawlJobId || crawling === false}
                       className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
@@ -13121,20 +13170,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     <div className="flex justify-center gap-3 border-t border-white/10 px-4 py-4">
                       <button
                         type="button"
-                        onClick={() => {
-                          const dismissedJobId = crawlJobId ?? loadActiveCrawlJobId();
-
-                          setCrawlPreviewOpen(false);
-                          setCrawlResumeConfirmOpen(false);
-                          setCrawlPreviewRows([]);
-                          setCrawlPreviewTotalCount(0);
-                          setCrawlPreviewPage(1);
-                          setCrawlSelectedChanges({});
-                          setCrawlJobId(null);
-                          saveActiveCrawlJobId(null);
-                          deleteCrawlElapsedMs(dismissedJobId);
-                          setCrawlJobStatus("idle");
-                        }}
+                        onClick={() => setInspectionCancelConfirmTarget("crawlPreview")}
                         disabled={crawling}
                         className="h-10 w-[120px] flex-none rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                       >
@@ -13175,6 +13211,53 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               </div>,
               document.body
             )}
+
+            {inspectionCancelConfirmTarget &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <div
+                  className="app-modal-root fixed inset-0 z-[10020] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+                  onClick={() => setInspectionCancelConfirmTarget(null)}
+                >
+                  <div className="flex min-h-full items-center justify-center">
+                    <div
+                      className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                        中止確認
+                      </div>
+
+                      <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                        本当に中止しますか？
+                        <br />
+                        <span className="text-xs text-slate-400">
+                          間違って中止しないよう、確認しています。
+                        </span>
+                      </div>
+
+                      <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                        <button
+                          type="button"
+                          onClick={() => setInspectionCancelConfirmTarget(null)}
+                          className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
+                        >
+                          いいえ
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleConfirmInspectionCancel}
+                          className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
+                        >
+                          はい
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>,
+                document.body
+              )}
 
         {crawlResumeConfirmOpen &&
           typeof document !== "undefined" &&
