@@ -566,6 +566,16 @@ type MynaviJobMode = "count_pages" | "scrape";
 
 type MasterDataLoginStatus = "checking" | "logged_in" | "logged_out";
 
+type MasterDataNoticeTone = "working" | "success" | "error";
+
+type MasterDataNoticeItem = {
+  key: string;
+  tone: MasterDataNoticeTone;
+  title: string;
+  message?: ReactNode;
+  loading?: boolean;
+};
+
 const MYNAVI_FIELD_LABELS: Record<string, string> = {
   count_open: "一覧ページを開いています",
   count_parse: "ページ数を解析しています",
@@ -1920,6 +1930,197 @@ function LoadingText({ label }: { label: string }) {
   );
 }
 
+function MasterDataTopLeftNotices({
+  items,
+}: {
+  items: MasterDataNoticeItem[];
+}) {
+  const [hiddenNoticeKeys, setHiddenNoticeKeys] = useState<
+    Record<string, boolean>
+  >({});
+
+  const [exitingNoticeKeys, setExitingNoticeKeys] = useState<
+    Record<string, boolean>
+  >({});
+
+  const hideTimersRef = useRef<Record<string, number>>({});
+  const removeTimersRef = useRef<Record<string, number>>({});
+
+  const getNoticeKey = (item: MasterDataNoticeItem) =>
+    [
+      item.key,
+      item.tone,
+      item.title,
+      item.loading ? "loading" : "static",
+      typeof item.message === "string" ? item.message : "",
+    ].join("::");
+
+  const noticeSignature = items.map(getNoticeKey).join("||");
+
+  const clearNoticeTimers = (key: string) => {
+    const hideTimer = hideTimersRef.current[key];
+    const removeTimer = removeTimersRef.current[key];
+
+    if (hideTimer) {
+      window.clearTimeout(hideTimer);
+    }
+
+    if (removeTimer) {
+      window.clearTimeout(removeTimer);
+    }
+
+    delete hideTimersRef.current[key];
+    delete removeTimersRef.current[key];
+  };
+
+  useEffect(() => {
+    const currentNoticeKeySet = new Set(items.map(getNoticeKey));
+
+    Object.keys(hideTimersRef.current).forEach((key) => {
+      if (!currentNoticeKeySet.has(key)) {
+        clearNoticeTimers(key);
+      }
+    });
+
+    Object.keys(removeTimersRef.current).forEach((key) => {
+      if (!currentNoticeKeySet.has(key)) {
+        clearNoticeTimers(key);
+      }
+    });
+
+    setHiddenNoticeKeys((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      Object.keys(next).forEach((key) => {
+        if (!currentNoticeKeySet.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+
+    setExitingNoticeKeys((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      Object.keys(next).forEach((key) => {
+        if (!currentNoticeKeySet.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+
+    items.forEach((item) => {
+      const noticeKey = getNoticeKey(item);
+
+      if (
+        hiddenNoticeKeys[noticeKey] ||
+        exitingNoticeKeys[noticeKey] ||
+        hideTimersRef.current[noticeKey] ||
+        removeTimersRef.current[noticeKey]
+      ) {
+        return;
+      }
+
+      if (item.loading) {
+        return;
+      }
+
+      hideTimersRef.current[noticeKey] = window.setTimeout(() => {
+        setExitingNoticeKeys((prev) => ({
+          ...prev,
+          [noticeKey]: true,
+        }));
+
+        removeTimersRef.current[noticeKey] = window.setTimeout(() => {
+          setHiddenNoticeKeys((prev) => ({
+            ...prev,
+            [noticeKey]: true,
+          }));
+
+          setExitingNoticeKeys((prev) => {
+            const next = { ...prev };
+            delete next[noticeKey];
+            return next;
+          });
+
+          clearNoticeTimers(noticeKey);
+        }, 460);
+      }, 5000);
+    });
+  }, [noticeSignature, hiddenNoticeKeys, exitingNoticeKeys]);
+
+  useEffect(() => {
+    return () => {
+      Object.keys(hideTimersRef.current).forEach(clearNoticeTimers);
+      Object.keys(removeTimersRef.current).forEach(clearNoticeTimers);
+    };
+  }, []);
+
+  const visibleItems = items.filter(
+    (item) => !hiddenNoticeKeys[getNoticeKey(item)]
+  );
+
+  if (visibleItems.length === 0) {
+    return null;
+  }
+
+  const getNoticeIcon = (item: MasterDataNoticeItem) => {
+    if (item.loading) {
+      return <span className="master-data-notice-spinner" aria-hidden="true" />;
+    }
+
+    if (item.tone === "success") {
+      return "✓";
+    }
+
+    if (item.tone === "error") {
+      return "!";
+    }
+
+    return "●";
+  };
+
+  return (
+    <div className="master-data-top-left-notices">
+      {visibleItems.map((item) => {
+        const noticeKey = getNoticeKey(item);
+
+        return (
+          <div
+            key={noticeKey}
+            className={`master-data-notice master-data-notice--${item.tone} ${
+              exitingNoticeKeys[noticeKey] ? "master-data-notice--exiting" : ""
+            }`}
+          >
+            <div className="master-data-notice-icon">
+              {getNoticeIcon(item)}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <div className="master-data-notice-title">
+                {item.title}
+              </div>
+
+              {item.message && (
+                <div className="master-data-notice-message">
+                  {item.message}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function MasterDataLoadingPanel({
   title = "読み込み中",
   message = "画面を準備しています",
@@ -2392,7 +2593,7 @@ const selectedValueSet = useMemo(
                     <div ref={filterValueListBoxRef} className="rounded-xl border border-white/10 bg-[#0f172a] p-2">
                       {visibleValues.length === 0 ? (
                         <div className="px-2 py-6 text-center text-xs text-slate-500">
-                          {filterState.valueLoading ? <LoadingText label="読み込み中です" /> : "候補がありません"}
+                          {filterState.valueLoading ? null : "候補がありません"}
                         </div>
                       ) : (
                         <List
@@ -2877,6 +3078,9 @@ export default function Home() {
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [exportDuplicateConfirmOpen, setExportDuplicateConfirmOpen] = useState(false);
   const [exportMode, setExportMode] = useState<"all" | "filtered">("filtered");
+  const [exporting, setExporting] = useState(false);
+  const [csvTemplateSaving, setCsvTemplateSaving] = useState(false);
+  const [previewCsvExporting, setPreviewCsvExporting] = useState(false);
 
   const [previewCsvScopeOpen, setPreviewCsvScopeOpen] = useState(false);
   const [previewCsvConfirmOpen, setPreviewCsvConfirmOpen] = useState(false);
@@ -5581,7 +5785,7 @@ export default function Home() {
                   ＋
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {mynaviLoading ? <LoadingText label="取得中" /> : "リスト追加"}
+                  リスト追加
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   新しい企業リストを取り込み、管理対象に追加します
@@ -5651,7 +5855,7 @@ export default function Home() {
                   ⧉
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {deduplicating ? <LoadingText label="重複削除中" /> : "重複削除"}
+                  重複削除
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   重複している企業データを整理します
@@ -5659,77 +5863,6 @@ export default function Home() {
               </button>
             )}
           </div>
-
-          {mynaviMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {mynaviMessage}
-            </div>
-          )}
-
-          {mynaviError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {mynaviError}
-            </div>
-          )}
-
-          {listDeleteMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {listDeleteMessage}
-            </div>
-          )}
-
-          {listDeleteError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {listDeleteError}
-            </div>
-          )}
-
-          {itemDeleteMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {itemDeleteMessage}
-            </div>
-          )}
-
-          {itemDeleteError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {itemDeleteError}
-            </div>
-          )}
-
-          {dedupeMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {dedupeMessage}
-            </div>
-          )}
-
-          {dedupeError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {dedupeError}
-            </div>
-          )}
-
-          {mynaviJobStatus === "running" && (
-            <div className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-200">
-              {mynaviPhase === "collect_urls" && (
-                <div>
-                  URL取得中：
-                  {mynaviCurrentPageNumber > 0
-                    ? ` ${mynaviCurrentPageNumber}ページ目`
-                    : ""}
-                </div>
-              )}
-
-              {mynaviPhase === "scrape_details" && (
-                <div>
-                  全項目取得中：{mynaviProcessedCount.toLocaleString()} / {mynaviTotalUrls.toLocaleString()}
-                </div>
-              )}
-
-              <div className="mt-1 text-xs text-sky-100/80">
-                成功 {mynaviSuccessCount.toLocaleString()} 件 / 失敗 {mynaviFailedCount.toLocaleString()} 件
-              </div>
-            </div>
-          )}
         </div>
       );
     }
@@ -5841,7 +5974,7 @@ export default function Home() {
                   </svg>
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {importing ? <LoadingText label="投入中" /> : "CSV投入"}
+                  CSV投入
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   選択したCSVをデータベースに取り込みます
@@ -5893,18 +6026,6 @@ export default function Home() {
               </button>
             )}
           </div>
-
-          {importMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {importMessage}
-            </div>
-          )}
-
-          {importError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {importError}
-            </div>
-          )}
         </div>
       );
     }
@@ -5934,7 +6055,7 @@ export default function Home() {
                   🤖
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {crawling ? <LoadingText label="クローリング中" /> : "クローリング"}
+                  クローリング
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   企業サイトを確認し、選択した項目の候補を取得します
@@ -5970,7 +6091,7 @@ export default function Home() {
                   ✓
                 </div>
                 <div className="text-sm font-semibold text-slate-100">
-                  {itemInspecting ? <LoadingText label="項目精査中" /> : "項目精査"}
+                  項目精査
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-400">
                   登録済みデータを確認し、不要な値や修正候補を精査します
@@ -5978,30 +6099,6 @@ export default function Home() {
               </button>
             )}
           </div>
-
-          {crawlMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {crawlMessage}
-            </div>
-          )}
-
-          {crawlError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {crawlError}
-            </div>
-          )}
-
-          {itemInspectionMessage && (
-            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-              {itemInspectionMessage}
-            </div>
-          )}
-
-          {itemInspectionError && (
-            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-              {itemInspectionError}
-            </div>
-          )}
         </div>
       );
     }
@@ -6746,11 +6843,7 @@ export default function Home() {
                     </button>
                   </div>
 
-                  {permissionLoading ? (
-                    <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
-                      <LoadingText label="読み込み中です" />
-                    </div>
-                  ) : permissionEmployees.length === 0 ? (
+                  {permissionLoading ? null : permissionEmployees.length === 0 ? (
                     <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
                       表示できる従業員アカウントがありません
                     </div>
@@ -6792,18 +6885,6 @@ export default function Home() {
                       })}
                     </div>
                   )}
-
-                  {permissionError && (
-                    <div className="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                      {permissionError}
-                    </div>
-                  )}
-
-                  {permissionMessage && (
-                    <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                      {permissionMessage}
-                    </div>
-                  )}
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
@@ -6830,7 +6911,7 @@ export default function Home() {
                             disabled={permissionSaving}
                             className="inline-flex h-10 w-fit items-center justify-center rounded-xl bg-sky-500 px-4 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:opacity-50"
                           >
-                            {permissionSaving ? <LoadingText label="保存中" /> : "保存"}
+                            保存
                           </button>
 
                           <div className="flex min-w-[180px] shrink-0 items-center justify-end gap-2 self-end">
@@ -7696,6 +7777,7 @@ const handleExport = async (shouldDeduplicate: boolean) => {
   setImportMessage("");
   setExportConfirmOpen(false);
   setExportDuplicateConfirmOpen(false);
+  setExporting(true);
 
   try {
     const showSaveFilePicker = (
@@ -7794,12 +7876,15 @@ const handleExport = async (shouldDeduplicate: boolean) => {
     setImportError(
       e instanceof Error ? e.message : "CSV抽出に失敗しました"
     );
+  } finally {
+    setExporting(false);
   }
 };
 
 const handleDownloadTemplate = async () => {
   setImportError("");
   setImportMessage("");
+  setCsvTemplateSaving(true);
 
   try {
     const headerLine = CSV_TEMPLATE_HEADERS.map((value) =>
@@ -7855,6 +7940,8 @@ const handleDownloadTemplate = async () => {
     setImportError(
       e instanceof Error ? e.message : "CSVテンプレート保存に失敗しました"
     );
+  } finally {
+    setCsvTemplateSaving(false);
   }
 };
 
@@ -7871,6 +7958,7 @@ const handlePreviewCsvExport = async () => {
   }
 
   setPreviewCsvConfirmOpen(false);
+  setPreviewCsvExporting(true);
 
   try {
     if (previewCsvSource === "crawl") {
@@ -8011,6 +8099,8 @@ const handlePreviewCsvExport = async () => {
     } else {
       setItemInspectionError(message);
     }
+  } finally {
+    setPreviewCsvExporting(false);
   }
 };
 
@@ -10232,6 +10322,217 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       }
     : null;
 
+  const topLeftNoticeItems: MasterDataNoticeItem[] = [];
+
+  const addTopLeftTextNotice = (
+    key: string,
+    tone: MasterDataNoticeTone,
+    title: string,
+    message: string
+  ) => {
+    if (message.trim() === "") {
+      return;
+    }
+
+    topLeftNoticeItems.push({
+      key,
+      tone,
+      title,
+      message,
+      loading: false,
+    });
+  };
+
+  const activeFilterLoading =
+    openFilterKey !== null && draftColumnStates[openFilterKey]?.valueLoading;
+
+  if (activeFilterLoading) {
+    topLeftNoticeItems.push({
+      key: "filter-values-loading",
+      tone: "working",
+      title: "フィルタ候補 読み込み中",
+      message: "候補データを読み込んでいます",
+      loading: true,
+    });
+  }
+
+  if (advancedLoading) {
+    topLeftNoticeItems.push({
+      key: "advanced-filter-loading",
+      tone: "working",
+      title: "検索条件 読み込み中",
+      message: "検索候補を読み込んでいます",
+      loading: true,
+    });
+  }
+
+  if (permissionLoading) {
+    topLeftNoticeItems.push({
+      key: "permission-loading",
+      tone: "working",
+      title: "権限情報 読み込み中",
+      message: "従業員アカウントを読み込んでいます",
+      loading: true,
+    });
+  }
+
+  if (permissionSaving) {
+    topLeftNoticeItems.push({
+      key: "permission-saving",
+      tone: "working",
+      title: "権限 保存中",
+      message: "権限設定を保存しています",
+      loading: true,
+    });
+  }
+
+  if (mynaviJobStatus === "running") {
+    const mynaviRunningMessage =
+      mynaviPhase === "collect_urls"
+        ? `URL取得中${
+            mynaviCurrentPageNumber > 0
+              ? `：${mynaviCurrentPageNumber}ページ目`
+              : ""
+          }`
+        : mynaviPhase === "scrape_details"
+        ? `全項目取得中：${mynaviProcessedCount.toLocaleString()} / ${mynaviTotalUrls.toLocaleString()}`
+        : "マイナビ新卒を処理しています";
+
+    topLeftNoticeItems.push({
+      key: "mynavi-running",
+      tone: "working",
+      title: `マイナビ新卒 ${getMynaviPhaseLabel(mynaviJobMode, mynaviPhase)}`,
+      message: `${mynaviRunningMessage} / 成功 ${mynaviSuccessCount.toLocaleString()} 件 / 失敗 ${mynaviFailedCount.toLocaleString()} 件`,
+      loading: true,
+    });
+  } else if (mynaviLoading) {
+    topLeftNoticeItems.push({
+      key: "mynavi-loading",
+      tone: "working",
+      title: "マイナビ新卒 確認中",
+      message: "取得に必要な情報を確認しています",
+      loading: true,
+    });
+  }
+
+  if (importing) {
+    topLeftNoticeItems.push({
+      key: "csv-importing",
+      tone: "working",
+      title: "CSV投入中",
+      message: "CSVを取り込んでいます",
+      loading: true,
+    });
+  }
+
+  if (exporting) {
+    topLeftNoticeItems.push({
+      key: "csv-exporting",
+      tone: "working",
+      title: "CSV抽出中",
+      message: "CSVを保存しています",
+      loading: true,
+    });
+  }
+
+  if (csvTemplateSaving) {
+    topLeftNoticeItems.push({
+      key: "csv-template-saving",
+      tone: "working",
+      title: "CSVテンプレート保存中",
+      message: "CSVテンプレートを保存しています",
+      loading: true,
+    });
+  }
+
+  if (previewCsvExporting) {
+    topLeftNoticeItems.push({
+      key: "preview-csv-exporting",
+      tone: "working",
+      title: "CSV抽出中",
+      message: "結果確認画面のCSVを保存しています",
+      loading: true,
+    });
+  }
+
+  if (listDeleting) {
+    topLeftNoticeItems.push({
+      key: "list-deleting",
+      tone: "working",
+      title: "リスト削除中",
+      message: "対象リストを削除しています",
+      loading: true,
+    });
+  }
+
+  if (itemDeleting) {
+    topLeftNoticeItems.push({
+      key: "item-deleting",
+      tone: "working",
+      title: "項目削除中",
+      message: "選択した項目を削除しています",
+      loading: true,
+    });
+  }
+
+  if (deduplicating) {
+    topLeftNoticeItems.push({
+      key: "deduplicating",
+      tone: "working",
+      title: "重複削除中",
+      message: "重複しているリストを整理しています",
+      loading: true,
+    });
+  }
+
+  if (crawling) {
+    topLeftNoticeItems.push({
+      key: "crawling",
+      tone: "working",
+      title: "クローリング処理中",
+      message: "クローリング関連の処理を実行しています",
+      loading: true,
+    });
+  }
+
+  if (crawlPreviewLoading) {
+    topLeftNoticeItems.push({
+      key: "crawl-preview-loading",
+      tone: "working",
+      title: "クローリング結果 読み込み中",
+      message: "クローリング結果確認を読み込んでいます",
+      loading: true,
+    });
+  }
+
+  if (itemInspecting) {
+    topLeftNoticeItems.push({
+      key: "item-inspecting",
+      tone: "working",
+      title: "項目精査中",
+      message: "登録済みデータを精査しています",
+      loading: true,
+    });
+  }
+
+  addTopLeftTextNotice("mynavi-error", "error", "マイナビ新卒 エラー", mynaviError);
+  addTopLeftTextNotice("import-error", "error", "CSV エラー", importError);
+  addTopLeftTextNotice("list-delete-error", "error", "リスト削除 エラー", listDeleteError);
+  addTopLeftTextNotice("item-delete-error", "error", "項目削除 エラー", itemDeleteError);
+  addTopLeftTextNotice("dedupe-error", "error", "重複削除 エラー", dedupeError);
+  addTopLeftTextNotice("crawl-error", "error", "クローリング エラー", crawlError);
+  addTopLeftTextNotice("item-inspection-error", "error", "項目精査 エラー", itemInspectionError);
+  addTopLeftTextNotice("permission-error", "error", "権限管理 エラー", permissionError);
+
+  addTopLeftTextNotice("mynavi-message", "success", "マイナビ新卒", mynaviMessage);
+  addTopLeftTextNotice("import-message", "success", "CSV", importMessage);
+  addTopLeftTextNotice("list-delete-message", "success", "リスト削除", listDeleteMessage);
+  addTopLeftTextNotice("item-delete-message", "success", "項目削除", itemDeleteMessage);
+  addTopLeftTextNotice("dedupe-message", "success", "重複削除", dedupeMessage);
+  addTopLeftTextNotice("crawl-message", "success", "クローリング", crawlMessage);
+  addTopLeftTextNotice("item-inspection-message", "success", "項目精査", itemInspectionMessage);
+  addTopLeftTextNotice("permission-message", "success", "権限管理", permissionMessage);
+
   const selectedCrawlFields = visibleCrawlConfirmFieldOptions
     .filter((field) => crawlFieldSelections[field.key])
     .map((field) => field.key);
@@ -10379,6 +10680,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         sidebarOpen ? "app-sidebar-open" : "app-sidebar-closed"
       } h-[100dvh] overflow-hidden bg-transparent text-slate-100`}
     >
+
+      <MasterDataTopLeftNotices items={topLeftNoticeItems} />
+
       {blockingLoadingState && (
         <BlockingLoadingOverlay
           title={blockingLoadingState.title}
@@ -10984,7 +11288,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={mynaviLoading}
                       className="h-10 min-w-[96px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {mynaviLoading ? <LoadingText label="確認中" /> : "はい"}
+                      はい
                     </button>
                   </div>
                 </div>
@@ -11396,13 +11700,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   <div className="flex-1 overflow-y-auto px-4 py-4">
                     {advancedLoading &&
                     activeAdvancedFilterKey !== "capital" &&
-                    activeAdvancedFilterKey !== "employeeCount" ? (
-                      <div className="rounded-xl border border-white/10 bg-[#0f172a] px-4 py-10 text-center text-sm text-slate-400">
-                        <LoadingText label="読み込み中です" />
-                      </div>
-                    ) : (
-                      renderAdvancedFilterContent()
-                    )}
+                    activeAdvancedFilterKey !== "employeeCount"
+                      ? null
+                      : renderAdvancedFilterContent()}
                   </div>
 
                   <div
@@ -11681,7 +11981,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
-                      {itemInspecting ? <LoadingText label="精査中" /> : "はい"}
+                      はい
                     </button>
                   </div>
                 </div>
@@ -12684,7 +12984,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={itemDeleting}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {itemDeleting ? <LoadingText label="削除中" /> : "はい"}
+                      はい
                     </button>
                   </div>
                 </div>
@@ -12800,7 +13100,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={listDeleting}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {listDeleting ? <LoadingText label="削除中" /> : "はい"}
+                      はい
                     </button>
                   </div>
                 </div>
@@ -13070,7 +13370,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           : "bg-sky-500 hover:bg-sky-400"
                       }`}
                     >
-                      {crawling ? <LoadingText label="実行中" /> : "はい"}
+                      はい
                     </button>
                   </div>
                 </div>
@@ -13204,7 +13504,6 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                           <div className="text-xs text-slate-300">
                             {crawlPreviewPage} / {crawlPreviewTotalPages}
-                            {crawlPreviewLoading && <LoadingText label="読込中" />}
                           </div>
 
                           <button
@@ -13227,11 +13526,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       ref={crawlPreviewScrollRef}
                       className="max-h-[70vh] overflow-auto px-4 py-4 space-y-4"
                     >
-                      {crawlPreviewLoading ? (
-                        <div className="px-4 py-12 text-center text-slate-400">
-                          <LoadingText label="クローリング結果確認を読み込み中です" />
-                        </div>
-                      ) : crawlPreviewRows.length === 0 ? (
+                      {crawlPreviewLoading ? null : crawlPreviewRows.length === 0 ? (
                         <div className="px-4 py-12 text-center text-slate-500">
                           {crawlPreviewTab === "candidate"
                             ? "保存候補はありません"
@@ -13407,7 +13702,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         disabled={crawling}
                         className="crawl-preview-save-button h-10 w-[120px] flex-none rounded-xl bg-emerald-600 px-3 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
                       >
-                        {crawling ? <LoadingText label="保存中" /> : "保存"}
+                        保存
                       </button>
 
                       <button
@@ -13563,7 +13858,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={deduplicating}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {deduplicating ? <LoadingText label="実行中" /> : "はい"}
+                      はい
                     </button>
                   </div>
                 </div>
@@ -13677,7 +13972,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={importing}
                       className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {importing ? <LoadingText label="投入中" /> : "はい"}
+                      はい
                     </button>
                   </div>
                 </div>
@@ -13722,7 +14017,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       disabled={importing}
                       className="h-10 flex-1 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
                     >
-                      {importing ? <LoadingText label="投入中" /> : "重複削除する"}
+                      重複削除する
                     </button>
                   </div>
                 </div>
@@ -15087,6 +15382,197 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           text-shadow:
             0 14px 32px rgba(0, 0, 0, 0.30),
             0 2px 10px rgba(247, 227, 191, 0.12) !important;
+        }
+
+        .master-data-top-left-notices {
+          position: fixed;
+          top: 20px;
+          left: 20px;
+          z-index: 10080;
+          display: flex;
+          width: min(420px, calc(100vw - 40px));
+          max-height: calc(100dvh - 40px);
+          flex-direction: column;
+          gap: 12px;
+          overflow-y: auto;
+          pointer-events: none;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+
+        .master-data-top-left-notices::-webkit-scrollbar {
+          display: none;
+        }
+
+        .master-data-notice {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          border-radius: 18px;
+          padding: 14px 16px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background:
+            linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.82)),
+            radial-gradient(circle at top left, rgba(197, 155, 90, 0.22), transparent 42%);
+          box-shadow:
+            0 18px 46px rgba(0, 0, 0, 0.38),
+            inset 0 1px 0 rgba(255, 255, 255, 0.08);
+          color: #f8fafc;
+          backdrop-filter: blur(18px);
+          transform-origin: top left;
+          animation: master-data-notice-in 0.42s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+        }
+
+        .master-data-notice-icon {
+          display: inline-flex;
+          width: 34px;
+          height: 34px;
+          flex: 0 0 auto;
+          align-items: center;
+          justify-content: center;
+          border-radius: 14px;
+          font-size: 15px;
+          font-weight: 900;
+          color: #f8fafc;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .master-data-notice-title {
+          color: #f8fafc;
+          font-size: 13px;
+          font-weight: 900;
+          letter-spacing: 0.04em;
+          line-height: 1.45;
+        }
+
+        .master-data-notice-message {
+          margin-top: 4px;
+          color: rgba(226, 232, 240, 0.88);
+          font-size: 12px;
+          font-weight: 600;
+          line-height: 1.6;
+          word-break: break-word;
+        }
+
+        .master-data-notice--exiting {
+          pointer-events: none;
+          animation: master-data-notice-out 0.42s cubic-bezier(0.4, 0, 1, 1) forwards;
+        }
+
+        @keyframes master-data-notice-in {
+          0% {
+            opacity: 0;
+            transform: translateX(-18px) translateY(-6px) scale(0.96);
+            filter: blur(8px);
+          }
+
+          70% {
+            opacity: 1;
+            transform: translateX(3px) translateY(0) scale(1.01);
+            filter: blur(0);
+          }
+
+          100% {
+            opacity: 1;
+            transform: translateX(0) translateY(0) scale(1);
+            filter: blur(0);
+          }
+        }
+
+        @keyframes master-data-notice-out {
+          0% {
+            opacity: 1;
+            transform: translateX(0) translateY(0) scale(1);
+            filter: blur(0);
+          }
+
+          100% {
+            opacity: 0;
+            transform: translateX(-24px) translateY(-8px) scale(0.94);
+            filter: blur(8px);
+          }
+        }
+
+        .master-data-notice--working {
+          border-color: rgba(197, 155, 90, 0.32);
+        }
+
+        .master-data-notice--success {
+          border-color: rgba(52, 211, 153, 0.32);
+        }
+
+        .master-data-notice--success .master-data-notice-icon {
+          color: #bbf7d0;
+          background: rgba(16, 185, 129, 0.16);
+          border-color: rgba(52, 211, 153, 0.28);
+        }
+
+        .master-data-notice--error {
+          border-color: rgba(251, 113, 133, 0.36);
+        }
+
+        .master-data-notice--error .master-data-notice-icon {
+          color: #fecdd3;
+          background: rgba(244, 63, 94, 0.16);
+          border-color: rgba(251, 113, 133, 0.30);
+        }
+
+        .master-data-notice-spinner {
+          width: 16px;
+          height: 16px;
+          border-radius: 999px;
+          border: 2px solid rgba(248, 250, 252, 0.24);
+          border-top-color: #c59b5a;
+          animation: master-data-notice-spin 0.78s linear infinite;
+        }
+
+        @keyframes master-data-notice-spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        body[data-app-theme="light"] .master-data-notice {
+          border-color: rgba(15, 23, 42, 0.12);
+          background:
+            linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92)),
+            radial-gradient(circle at top left, rgba(197, 155, 90, 0.18), transparent 44%);
+          box-shadow:
+            0 18px 46px rgba(15, 23, 42, 0.18),
+            inset 0 1px 0 rgba(255, 255, 255, 0.86);
+          color: #0f172a;
+        }
+
+        body[data-app-theme="light"] .master-data-notice-title {
+          color: #0f172a;
+        }
+
+        body[data-app-theme="light"] .master-data-notice-message {
+          color: #475569;
+        }
+
+        body[data-app-theme="light"] .master-data-notice-icon {
+          color: #0f172a;
+          background: rgba(15, 23, 42, 0.05);
+          border-color: rgba(15, 23, 42, 0.10);
+        }
+
+        body[data-app-theme="light"] .master-data-notice--success .master-data-notice-icon {
+          color: #047857;
+          background: rgba(16, 185, 129, 0.12);
+          border-color: rgba(16, 185, 129, 0.22);
+        }
+
+        body[data-app-theme="light"] .master-data-notice--error .master-data-notice-icon {
+          color: #be123c;
+          background: rgba(244, 63, 94, 0.10);
+          border-color: rgba(244, 63, 94, 0.20);
+        }
+
+        body[data-app-theme="light"] .master-data-notice-spinner {
+          border-color: rgba(15, 23, 42, 0.16);
+          border-top-color: #b98542;
         }
 
         /* ライトモード専用：通知メッセージの文字を見やすくする */
