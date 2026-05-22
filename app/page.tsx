@@ -1928,8 +1928,8 @@ function MasterDataLoadingPanel({
   message?: string;
 }) {
   return (
-    <div className="flex h-full min-h-0 items-center justify-center bg-[#05070d] px-6">
-      <div className="flex min-h-[310px] w-full max-w-[460px] flex-col items-center justify-center rounded-[28px] border border-white/10 bg-white/[0.04] px-8 py-10 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+    <div className="master-data-loading-panel flex h-full min-h-0 items-center justify-center px-6">
+      <div className="master-data-loading-card flex min-h-[310px] w-full max-w-[460px] flex-col items-center justify-center rounded-[28px] border border-white/10 bg-white/[0.04] px-8 py-10 text-center shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
         <MasterDataBrandLogo className="h-auto w-[220px] shrink-0" />
 
         <LoadingSpinner />
@@ -1956,7 +1956,7 @@ function BlockingLoadingOverlay({
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div className="app-modal-root fixed inset-0 z-[10050]">
+    <div className="app-modal-root master-data-loading-overlay fixed inset-0 z-[10050] bg-slate-950/55 backdrop-blur-md">
       <MasterDataLoadingPanel title={title} message={message} />
     </div>,
     document.body
@@ -15032,6 +15032,17 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           background-image: none !important;
           border-color: rgba(15, 23, 42, 0.14) !important;
           color: #0f172a !important;
+        }
+
+      /* ライトモード専用：読み込み中の背景を明るいぼかし表示にする */
+        body[data-app-theme="light"] .master-data-loading-overlay {
+          background: rgba(248, 250, 252, 0.58) !important;
+        }
+
+        body[data-app-theme="light"] .master-data-loading-card {
+          border-color: rgba(15, 23, 42, 0.12) !important;
+          background: rgba(255, 255, 255, 0.72) !important;
+          box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22) !important;
         }
 
         /* ライトモード専用：ログイン画面だけはダークモードと同じ背景を維持する */
