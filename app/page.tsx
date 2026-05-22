@@ -1833,6 +1833,7 @@ function SelectionOptionCard({
   description,
   badge,
   onClick,
+  className = "",
 }: {
   tone: SelectionOptionTone;
   icon: ReactNode;
@@ -1840,6 +1841,7 @@ function SelectionOptionCard({
   description: string;
   badge?: string;
   onClick: () => void;
+  className?: string;
 }) {
   const toneClass = SELECTION_OPTION_TONE_CLASSES[tone];
 
@@ -1847,28 +1849,28 @@ function SelectionOptionCard({
     <button
       type="button"
       onClick={onClick}
-      className={`group min-h-[150px] rounded-2xl border p-5 text-left transition ${toneClass.card}`}
+      className={`group min-h-[150px] rounded-2xl border p-5 text-left transition ${toneClass.card} ${className}`}
     >
       <div className="mb-4 flex items-center justify-between gap-3">
         <div
-          className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-lg font-bold ${toneClass.icon}`}
+          className={`master-data-selection-option-icon inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-lg font-bold ${toneClass.icon}`}
         >
           {icon}
         </div>
 
         {badge && (
           <span
-            className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-bold tracking-wide ${toneClass.badge}`}
+            className={`master-data-selection-option-badge shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-bold tracking-wide ${toneClass.badge}`}
           >
             {badge}
           </span>
         )}
       </div>
 
-      <div className="break-words text-base font-bold text-slate-100">
+      <div className="master-data-selection-option-title break-words text-base font-bold text-slate-100">
         {title}
       </div>
-      <div className="mt-2 break-words text-sm leading-6 text-slate-400">
+      <div className="master-data-selection-option-description mt-2 break-words text-sm leading-6 text-slate-400">
         {description}
       </div>
     </button>
@@ -5849,7 +5851,7 @@ export default function Home() {
                   setDedupeScopeOpen(true);
                 }}
                 disabled={deduplicating}
-                className="group min-h-[132px] rounded-2xl border border-violet-300/20 bg-gradient-to-br from-violet-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-violet-300/40 hover:bg-violet-500/10 disabled:opacity-50"
+                className="master-data-dedupe-menu-button group min-h-[132px] rounded-2xl border border-violet-300/20 bg-gradient-to-br from-violet-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-violet-300/40 hover:bg-violet-500/10 disabled:opacity-50"
               >
                 <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-violet-300/25 bg-violet-400/10 text-lg text-violet-100">
                   ⧉
@@ -6012,7 +6014,7 @@ export default function Home() {
             {canUsePermission("csv.template") && (
               <button
                 onClick={handleDownloadTemplate}
-                className="group min-h-[126px] rounded-2xl border border-indigo-300/20 bg-gradient-to-br from-indigo-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-indigo-300/40 hover:bg-indigo-500/10"
+                                className="master-data-csv-template-button group min-h-[126px] rounded-2xl border border-indigo-300/20 bg-gradient-to-br from-indigo-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-indigo-300/40 hover:bg-indigo-500/10"
               >
                 <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-indigo-300/25 bg-indigo-400/10 text-lg text-indigo-100">
                   ⬚
@@ -6049,7 +6051,7 @@ export default function Home() {
                   setCrawlScopeOpen(true);
                 }}
                 disabled={crawling}
-                className="group min-h-[138px] rounded-2xl border border-amber-300/20 bg-gradient-to-br from-amber-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-amber-300/40 hover:bg-amber-500/10 disabled:opacity-50"
+                className="master-data-crawl-menu-button group min-h-[138px] rounded-2xl border border-amber-300/20 bg-gradient-to-br from-amber-500/18 via-[#0f172a] to-[#0b1220] p-4 text-left transition hover:border-amber-300/40 hover:bg-amber-500/10 disabled:opacity-50"
               >
                 <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-amber-300/25 bg-amber-400/10 text-lg text-amber-100">
                   🤖
@@ -7125,26 +7127,72 @@ export default function Home() {
           {themeOptions.map((option) => {
             const active = themeMode === option.key;
 
+            const themeCardClass =
+              option.key === "light"
+                ? active
+                  ? "border-amber-400/70 bg-gradient-to-br from-amber-200 via-yellow-100 to-orange-200 text-[#78350f] shadow-[0_0_28px_rgba(245,158,11,0.22)] hover:border-amber-400/80 hover:from-amber-100 hover:to-orange-100"
+                  : "border-amber-300/40 bg-gradient-to-br from-amber-400/22 via-yellow-300/14 to-orange-300/12 text-[#92400e] hover:border-amber-300/70 hover:from-amber-400/30 hover:to-orange-300/20"
+                : option.key === "dark"
+                ? active
+                  ? "border-slate-400/60 bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-[#f8fafc] shadow-[0_0_28px_rgba(15,23,42,0.32)] hover:border-slate-300/70 hover:from-slate-900 hover:to-indigo-900"
+                  : "border-slate-500/40 bg-gradient-to-br from-slate-950/90 via-slate-900/85 to-indigo-950/70 text-[#f8fafc] hover:border-slate-300/60 hover:from-slate-900 hover:to-indigo-900"
+                : active
+                ? "border-sky-400/40 bg-gradient-to-br from-sky-500/20 via-[#0f172a] to-indigo-500/10 text-sky-100 shadow-[0_0_28px_rgba(56,189,248,0.16)] hover:bg-sky-500/25"
+                : "border-white/10 bg-gradient-to-br from-white/10 via-[#0f172a] to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10";
+
+            const themeIconClass =
+              option.key === "light"
+                ? active
+                  ? "border-amber-500/40 bg-amber-100/90 text-amber-700"
+                  : "border-amber-300/35 bg-amber-400/15 text-amber-100 group-hover:border-amber-300/55 group-hover:bg-amber-400/22"
+                : option.key === "dark"
+                ? active
+                  ? "border-slate-300/40 bg-slate-800 text-slate-100"
+                  : "border-slate-400/30 bg-slate-800/60 text-slate-100 group-hover:border-slate-300/50 group-hover:bg-slate-700/80"
+                : active
+                ? "border-sky-300/30 bg-sky-400/20 text-sky-100"
+                : "border-white/10 bg-white/5 text-slate-100 group-hover:border-sky-300/30 group-hover:bg-sky-400/10";
+
+            const themeLabelClass =
+              option.key === "light" || option.key === "dark"
+                ? "text-slate-100"
+                : "text-slate-100";
+
+            const themeDescriptionClass =
+              option.key === "light" || option.key === "dark"
+                ? "text-slate-100"
+                : "text-slate-400";
+
+            const themeBadgeClass =
+              option.key === "light"
+                ? "border-amber-600/30 bg-amber-100/80 text-amber-800"
+                : option.key === "dark"
+                ? "border-slate-300/35 bg-slate-700/80 text-slate-100"
+                : "border-sky-300/40 bg-sky-400/15 text-sky-100";
+
             return (
               <button
                 key={option.key}
                 type="button"
                 onClick={() => {
                   setThemeMode(option.key);
-                  setOpenSidebarPanel(null);
                 }}
-                className={`group rounded-2xl border p-4 text-left transition ${
-                  active
-                    ? "border-sky-400/40 bg-gradient-to-br from-sky-500/20 via-[#0f172a] to-indigo-500/10 text-sky-100 shadow-[0_0_28px_rgba(56,189,248,0.16)] hover:bg-sky-500/25"
-                    : "border-white/10 bg-gradient-to-br from-white/10 via-[#0f172a] to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
+                className={`group rounded-2xl border p-4 text-left transition ${themeCardClass} ${
+                  option.key === "light"
+                    ? "theme-light-mode-button"
+                    : option.key === "dark"
+                    ? "theme-dark-mode-button"
+                    : ""
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <div
-                    className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-xl ${
-                      active
-                        ? "border-sky-300/30 bg-sky-400/20 text-sky-100"
-                        : "border-white/10 bg-white/5 text-slate-100 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
+                    className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-xl ${themeIconClass} ${
+                      option.key === "light"
+                        ? "theme-light-mode-icon"
+                        : option.key === "dark"
+                        ? "theme-dark-mode-icon"
+                        : ""
                     }`}
                   >
                     {option.icon}
@@ -7152,18 +7200,18 @@ export default function Home() {
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-semibold text-slate-100">
+                      <div className={`text-sm font-semibold ${themeLabelClass}`}>
                         {option.label}
                       </div>
 
                       {active && (
-                        <span className="shrink-0 rounded-full border border-sky-300/40 bg-sky-400/15 px-4 py-1.5 text-xs font-bold text-sky-100">
+                        <span className={`shrink-0 rounded-full border px-4 py-1.5 text-xs font-bold ${themeBadgeClass}`}>
                           選択中
                         </span>
                       )}
                     </div>
 
-                    <div className="mt-1 text-xs leading-5 text-slate-400">
+                    <div className={`mt-1 text-xs leading-5 ${themeDescriptionClass}`}>
                       {option.description}
                     </div>
                   </div>
@@ -10892,14 +10940,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       <button
                         type="button"
                         onClick={() => handleOpenSidebarPanel(item.key)}
-                        className={`group relative flex w-full items-center gap-2 overflow-hidden rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-semibold transition ${
+                        className={`master-data-sidebar-menu-button group relative flex w-full items-center gap-2 overflow-hidden rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-semibold transition ${
                           isActive
                             ? "border-sky-400/40 bg-gradient-to-br from-sky-500/22 via-white/8 to-indigo-500/10 text-sky-100 shadow-[0_0_26px_rgba(56,189,248,0.16)]"
                             : "border-white/10 bg-gradient-to-br from-white/8 via-white/5 to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
                         } ${sidebarOpen ? "justify-start" : "justify-center"}`}
                       >
                         <span
-                          className={`inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl border transition ${
+                          className={`master-data-sidebar-menu-icon inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl border transition ${
                             isActive
                               ? "border-sky-300/30 bg-sky-400/15 text-sky-100"
                               : "border-white/10 bg-[#0f172a] text-slate-200 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
@@ -10924,14 +10972,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                             setAllFiltersClearConfirmTarget("main");
                             setAllFiltersClearConfirmOpen(true);
                           }}
-                          className={`group flex w-full items-center gap-2 rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-semibold transition ${
+                          className={`master-data-sidebar-filter-clear-button group flex w-full items-center gap-2 rounded-2xl border px-2 py-3 text-left text-[clamp(11px,0.85vw,14px)] font-semibold transition ${
                             allFiltersClearConfirmOpen
                               ? "border-sky-400/40 bg-gradient-to-br from-sky-500/20 via-white/8 to-indigo-500/10 text-sky-100 shadow-[0_0_24px_rgba(56,189,248,0.14)]"
                               : "border-white/10 bg-gradient-to-br from-white/8 via-white/5 to-[#0b1220] text-slate-200 hover:border-sky-300/30 hover:bg-white/10"
                           } ${sidebarOpen ? "justify-start" : "justify-center"}`}
                         >
                           <span
-                            className={`inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl border text-base ${
+                            className={`master-data-sidebar-filter-clear-icon inline-flex h-[var(--app-menu-icon-size)] w-[var(--app-menu-icon-size)] shrink-0 items-center justify-center rounded-xl border text-base ${
                               allFiltersClearConfirmOpen
                                 ? "border-sky-300/30 bg-sky-400/20 text-sky-100"
                                 : "border-white/10 bg-[#0f172a] text-slate-200 group-hover:border-sky-300/30 group-hover:bg-sky-400/10"
@@ -11757,7 +11805,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="master-data-item-inspection-field-modal flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -11810,7 +11858,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       {visibleItemInspectionColumnDefs.map((field) => (
                         <label
                           key={field.key}
-                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                          className="master-data-blue-selection-option flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200 transition hover:border-cyan-300/40 hover:bg-cyan-500/10 hover:text-cyan-100 [body[data-app-theme='light']_&]:text-black [body[data-app-theme='light']_&:hover]:text-blue-700"
                         >
                           <input
                             type="checkbox"
@@ -12423,6 +12471,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         title="全てのリスト"
                         description="登録されている全リストを対象にします"
                         badge="全件"
+                        className="master-data-crawl-scope-all-card"
                         onClick={() => {
                           setCrawlScopeOpen(false);
                           setCrawlTargetScope("all");
@@ -12567,6 +12616,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         title="全てのリスト"
                         description="登録されている全リストを対象にします"
                         badge="全件"
+                        className="master-data-dedupe-scope-all-card"
                         onClick={() => {
                           setDedupeScopeOpen(false);
                           setDedupeTargetScope("all");
@@ -12813,7 +12863,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="master-data-item-delete-field-modal flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -12862,7 +12912,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       {COLUMN_DEFS.map((field) => (
                         <label
                           key={field.key}
-                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                          className="master-data-blue-selection-option flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200 transition hover:border-cyan-300/40 hover:bg-cyan-500/10 hover:text-cyan-100 [body[data-app-theme='light']_&]:text-black [body[data-app-theme='light']_&:hover]:text-blue-700"
                         >
                           <input
                             type="checkbox"
@@ -13032,6 +13082,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         title="全てのリスト"
                         description="登録されている全リストを対象にします"
                         badge="全件"
+                        className="master-data-list-delete-scope-all-card"
                         onClick={() => {
                           setListDeleteScopeOpen(false);
                           setListDeleteConfirmTarget("all");
@@ -13284,7 +13335,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="master-data-crawl-field-modal flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -13331,7 +13382,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       {visibleCrawlConfirmFieldOptions.map((field) => (
                         <label
                           key={field.key}
-                          className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                          className="master-data-orange-selection-option flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200 transition hover:border-amber-300/40 hover:bg-amber-500/10 hover:text-amber-100 [body[data-app-theme='light']_&]:text-black [body[data-app-theme='light']_&:hover]:text-orange-700"
                         >
                           <input
                             type="checkbox"
@@ -15084,6 +15135,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           background: #ffffff !important;
         }
 
+        /* ライトモード専用：テーマの「ダーク」マークを見やすくする */
+        main[data-theme="light"] .theme-dark-mode-icon,
+        body[data-app-theme="light"] .theme-dark-mode-icon {
+          background: #0f172a !important;
+          border-color: rgba(15, 23, 42, 0.45) !important;
+          color: #ffffff !important;
+        }
+
         /* ライトモード専用：サイドメニュー・カード・ポップアップ内の色文字を濃くする */
         main[data-theme="light"] [class*="text-sky-100"],
         body[data-app-theme="light"] [class*="text-sky-100"] {
@@ -15275,6 +15334,28 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           color: #0f172a !important;
         }
 
+        /* ライトモード専用：左メニュー項目のホバーを見えるようにする */
+        main[data-theme="light"] .master-data-sidebar-menu-button[class*="hover:bg-white/10"]:hover,
+        body[data-app-theme="light"] .master-data-sidebar-menu-button[class*="hover:bg-white/10"]:hover {
+          background-color: #e0f2fe !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(224, 242, 254, 0.98),
+            rgba(219, 234, 254, 0.96),
+            rgba(186, 230, 253, 0.88)
+          ) !important;
+          border-color: rgba(2, 132, 199, 0.42) !important;
+          color: #075985 !important;
+          box-shadow: 0 10px 24px rgba(14, 165, 233, 0.16) !important;
+        }
+
+        main[data-theme="light"] .master-data-sidebar-menu-button[class*="hover:bg-white/10"]:hover .master-data-sidebar-menu-icon,
+        body[data-app-theme="light"] .master-data-sidebar-menu-button[class*="hover:bg-white/10"]:hover .master-data-sidebar-menu-icon {
+          background: rgba(14, 165, 233, 0.16) !important;
+          border-color: rgba(2, 132, 199, 0.42) !important;
+          color: #075985 !important;
+        }
+
         /* ライトモード専用：進捗バーの外枠を見えるようにする */
         main[data-theme="light"] .app-progress-bar-frame,
         body[data-app-theme="light"] .app-progress-bar-frame {
@@ -15327,6 +15408,309 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           background-image: none !important;
           border-color: rgba(15, 23, 42, 0.14) !important;
           color: #0f172a !important;
+        }
+
+        /* ライトモード専用：フィルタ解除・ログアウトのホバーを見えるようにする */
+        main[data-theme="light"] button[class*="from-rose-500/14"]:hover,
+        body[data-app-theme="light"] button[class*="from-rose-500/14"]:hover,
+        main[data-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"]:hover,
+        body[data-app-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"]:hover {
+          background-color: #ffe4e6 !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(255, 228, 230, 0.98),
+            rgba(254, 205, 211, 0.92),
+            rgba(251, 113, 133, 0.18)
+          ) !important;
+          border-color: rgba(225, 29, 72, 0.45) !important;
+          color: #881337 !important;
+          box-shadow: 0 10px 24px rgba(225, 29, 72, 0.16) !important;
+        }
+
+        main[data-theme="light"] button[class*="from-rose-500/14"]:hover *,
+        body[data-app-theme="light"] button[class*="from-rose-500/14"]:hover *,
+        main[data-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"]:hover *,
+        body[data-app-theme="light"] button[class*="from-rose-500/18"][class*="hover:bg-rose-500/10"]:hover * {
+          color: #881337 !important;
+          stroke: currentColor !important;
+        }
+
+        main[data-theme="light"] button[class*="from-rose-500/14"]:hover > span:first-child,
+        body[data-app-theme="light"] button[class*="from-rose-500/14"]:hover > span:first-child {
+          background: rgba(225, 29, 72, 0.14) !important;
+          border-color: rgba(225, 29, 72, 0.42) !important;
+          color: #881337 !important;
+        }
+
+        /* ライトモード専用：左側の「フィルタ解除」のホバーを見えるようにする */
+        main[data-theme="light"] .master-data-sidebar-filter-clear-button:hover,
+        body[data-app-theme="light"] .master-data-sidebar-filter-clear-button:hover {
+          background-color: #e0f2fe !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(224, 242, 254, 0.98),
+            rgba(219, 234, 254, 0.96),
+            rgba(186, 230, 253, 0.88)
+          ) !important;
+          border-color: rgba(2, 132, 199, 0.42) !important;
+          color: #075985 !important;
+          box-shadow: 0 10px 24px rgba(14, 165, 233, 0.16) !important;
+        }
+
+        main[data-theme="light"] .master-data-sidebar-filter-clear-button:hover .master-data-sidebar-filter-clear-icon,
+        body[data-app-theme="light"] .master-data-sidebar-filter-clear-button:hover .master-data-sidebar-filter-clear-icon {
+          background: rgba(14, 165, 233, 0.16) !important;
+          border-color: rgba(2, 132, 199, 0.42) !important;
+          color: #075985 !important;
+        }
+
+        /* ライトモード専用：ポップアップ内ボタンのホバーを漏れなく見えるようにする */
+        body[data-app-theme="light"] .app-modal-root button:not(:disabled):hover,
+        body[data-app-theme="light"] .app-modal-root label[class*="hover:bg-"]:hover {
+          background-color: #e0f2fe !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(224, 242, 254, 0.98),
+            rgba(219, 234, 254, 0.96),
+            rgba(186, 230, 253, 0.88)
+          ) !important;
+          border-color: rgba(2, 132, 199, 0.42) !important;
+          color: #075985 !important;
+          box-shadow: 0 10px 24px rgba(14, 165, 233, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root button:not(:disabled):hover *,
+        body[data-app-theme="light"] .app-modal-root label[class*="hover:bg-"]:hover * {
+          color: #075985 !important;
+          stroke: currentColor !important;
+        }
+
+        /* ライトモード専用：テーマの「ライト・ダーク」マークはホバーしても色を変えない */
+        main[data-theme="light"] .app-modal-root button:not(:disabled):hover .theme-light-mode-icon,
+        body[data-app-theme="light"] .app-modal-root button:not(:disabled):hover .theme-light-mode-icon {
+          background: rgba(251, 191, 36, 0.15) !important;
+          background-image: none !important;
+          border-color: rgba(252, 211, 77, 0.35) !important;
+          color: #92400e !important;
+          stroke: currentColor !important;
+          box-shadow: none !important;
+        }
+
+        main[data-theme="light"] .app-modal-root button:not(:disabled):hover .theme-dark-mode-icon,
+        body[data-app-theme="light"] .app-modal-root button:not(:disabled):hover .theme-dark-mode-icon {
+          background: #0f172a !important;
+          background-image: none !important;
+          border-color: rgba(15, 23, 42, 0.45) !important;
+          color: #ffffff !important;
+          stroke: currentColor !important;
+          box-shadow: none !important;
+        }
+
+        /* ライトモード専用：ポップアップ内の緑系ボタンは緑でホバーさせる */
+        body[data-app-theme="light"] .app-modal-root button[class*="emerald"]:not(:disabled):hover,
+        body[data-app-theme="light"] .app-modal-root label[class*="emerald"]:hover {
+          background-color: #d1fae5 !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(209, 250, 229, 0.98),
+            rgba(167, 243, 208, 0.92),
+            rgba(52, 211, 153, 0.22)
+          ) !important;
+          border-color: rgba(5, 150, 105, 0.42) !important;
+          color: #047857 !important;
+          box-shadow: 0 10px 24px rgba(16, 185, 129, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root button[class*="emerald"]:not(:disabled):hover *,
+        body[data-app-theme="light"] .app-modal-root label[class*="emerald"]:hover * {
+          color: #047857 !important;
+          stroke: currentColor !important;
+        }
+
+        /* ライトモード専用：ポップアップ内の赤系ボタンは赤でホバーさせる */
+        body[data-app-theme="light"] .app-modal-root button[class*="rose"]:not(:disabled):hover {
+          background-color: #ffe4e6 !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(255, 228, 230, 0.98),
+            rgba(254, 205, 211, 0.92),
+            rgba(251, 113, 133, 0.20)
+          ) !important;
+          border-color: rgba(225, 29, 72, 0.45) !important;
+          color: #881337 !important;
+          box-shadow: 0 10px 24px rgba(225, 29, 72, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root button[class*="rose"]:not(:disabled):hover * {
+          color: #881337 !important;
+          stroke: currentColor !important;
+        }
+
+        /* ライトモード専用：ポップアップ内の黄・水色・紫系ボタンもホバーを見えるようにする */
+        body[data-app-theme="light"] .app-modal-root button[class*="amber"]:not(:disabled):hover {
+          background-color: #fef3c7 !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(254, 243, 199, 0.98),
+            rgba(253, 230, 138, 0.92),
+            rgba(245, 158, 11, 0.20)
+          ) !important;
+          border-color: rgba(217, 119, 6, 0.42) !important;
+          color: #92400e !important;
+          box-shadow: 0 10px 24px rgba(245, 158, 11, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root button[class*="cyan"]:not(:disabled):hover {
+          background-color: #cffafe !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(207, 250, 254, 0.98),
+            rgba(165, 243, 252, 0.92),
+            rgba(34, 211, 238, 0.22)
+          ) !important;
+          border-color: rgba(8, 145, 178, 0.42) !important;
+          color: #0e7490 !important;
+          box-shadow: 0 10px 24px rgba(34, 211, 238, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root button[class*="violet"]:not(:disabled):hover {
+          background-color: #ede9fe !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(237, 233, 254, 0.98),
+            rgba(221, 214, 254, 0.92),
+            rgba(139, 92, 246, 0.20)
+          ) !important;
+          border-color: rgba(124, 58, 237, 0.42) !important;
+          color: #6d28d9 !important;
+          box-shadow: 0 10px 24px rgba(139, 92, 246, 0.16) !important;
+        }
+
+        /* ライトモード専用：「CSVテンプレート」とテーマの「ダーク」を重複削除と同じ紫色でホバーさせる */
+        body[data-app-theme="light"] .app-modal-root .master-data-csv-template-button:not(:disabled):hover,
+        body[data-app-theme="light"] .app-modal-root .theme-dark-mode-button:not(:disabled):hover {
+          background-color: #ede9fe !important;
+          background-image: linear-gradient(
+            135deg,
+            rgba(237, 233, 254, 0.98),
+            rgba(221, 214, 254, 0.92),
+            rgba(139, 92, 246, 0.20)
+          ) !important;
+          border-color: rgba(124, 58, 237, 0.42) !important;
+          color: #6d28d9 !important;
+          box-shadow: 0 10px 24px rgba(139, 92, 246, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-csv-template-button:not(:disabled):hover *,
+        body[data-app-theme="light"] .app-modal-root .theme-dark-mode-button:not(:disabled):hover * {
+          color: #6d28d9 !important;
+          stroke: currentColor !important;
+        }
+
+        /* ライトモード専用：指定ボタンのホバー時の文字色だけ個別指定 */
+        body[data-app-theme="light"] .app-modal-root .theme-light-mode-button:not(:disabled):hover > div > div:last-child,
+        body[data-app-theme="light"] .app-modal-root .theme-light-mode-button:not(:disabled):hover > div > div:last-child * {
+          color: #78350f !important;
+        }
+
+        /* ライトモード専用：項目削除・クローリング・項目精査の項目選択ポップアップは通常時の文字を黒に固定 */
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal *,
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal,
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal *,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal * {
+          color: #000000 !important;
+        }
+
+        /* ライトモード専用：項目選択ポップアップ下部の「いいえ / はい」だけ白文字に戻す */
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal button[class*="bg-rose-600"],
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal button[class*="bg-rose-600"] *,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal button[class*="bg-sky-500"],
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal button[class*="bg-sky-500"] *,
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal button[class*="bg-rose-600"],
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal button[class*="bg-rose-600"] *,
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal button[class*="bg-sky-500"],
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal button[class*="bg-sky-500"] *,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal button[class*="bg-rose-600"],
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal button[class*="bg-rose-600"] *,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal button[class*="bg-sky-500"],
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal button[class*="bg-sky-500"] * {
+          color: #ffffff !important;
+        }
+
+        /* ライトモード専用：項目削除 項目選択・項目精査 項目選択の選択項目ホバーを青にする */
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal label.master-data-blue-selection-option:hover,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal label.master-data-blue-selection-option:hover {
+          background-color: #dbeafe !important;
+          background-image: none !important;
+          border-color: #2563eb !important;
+          color: #1d4ed8 !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-item-delete-field-modal label.master-data-blue-selection-option:hover *,
+        body[data-app-theme="light"] .app-modal-root .master-data-item-inspection-field-modal label.master-data-blue-selection-option:hover * {
+          color: #1d4ed8 !important;
+        }
+
+        /* ライトモード専用：クローリング 項目選択の選択項目ホバーをオレンジにする */
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal label.master-data-orange-selection-option:hover,
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal label.master-data-orange-selection-option[class*="hover:bg-"]:hover {
+          background-color: #ffedd5 !important;
+          background-image: none !important;
+          border-color: #f97316 !important;
+          color: #c2410c !important;
+          box-shadow: 0 10px 24px rgba(249, 115, 22, 0.16) !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal label.master-data-orange-selection-option:hover *,
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-field-modal label.master-data-orange-selection-option[class*="hover:bg-"]:hover * {
+          color: #c2410c !important;
+          stroke: currentColor !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-menu-button:not(:disabled):hover > div:not(:first-child),
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-menu-button:not(:disabled):hover > div:not(:first-child) * {
+          color: #92400e !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-dedupe-menu-button:not(:disabled):hover > div:not(:first-child),
+        body[data-app-theme="light"] .app-modal-root .master-data-dedupe-menu-button:not(:disabled):hover > div:not(:first-child) * {
+          color: #6d28d9 !important;
+        }
+
+        /* ライトモード専用：リスト削除 対象選択のマーク・全件を通常時も赤色にする */
+        body[data-app-theme="light"] .app-modal-root .master-data-list-delete-scope-all-card .master-data-selection-option-icon,
+        body[data-app-theme="light"] .app-modal-root .master-data-list-delete-scope-all-card .master-data-selection-option-badge {
+          color: #be123c !important;
+          stroke: currentColor !important;
+        }
+
+        /* ライトモード専用：対象選択の「全てのリスト」だけホバー文字色を変更する */
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-scope-all-card:not(:disabled):hover .master-data-selection-option-title {
+          color: #92400e !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-dedupe-scope-all-card:not(:disabled):hover .master-data-selection-option-title {
+          color: #6d28d9 !important;
+        }
+
+        /* ライトモード専用：対象選択のマーク・全件・説明文はホバーしても今の色を維持する */
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-scope-all-card:not(:disabled):hover .master-data-selection-option-icon,
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-scope-all-card:not(:disabled):hover .master-data-selection-option-badge {
+          color: #92400e !important;
+          stroke: currentColor !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-dedupe-scope-all-card:not(:disabled):hover .master-data-selection-option-icon,
+        body[data-app-theme="light"] .app-modal-root .master-data-dedupe-scope-all-card:not(:disabled):hover .master-data-selection-option-badge {
+          color: #6d28d9 !important;
+          stroke: currentColor !important;
+        }
+
+        body[data-app-theme="light"] .app-modal-root .master-data-crawl-scope-all-card:not(:disabled):hover .master-data-selection-option-description,
+        body[data-app-theme="light"] .app-modal-root .master-data-dedupe-scope-all-card:not(:disabled):hover .master-data-selection-option-description {
+          color: #64748b !important;
         }
 
       /* ライトモード専用：読み込み中の背景を明るいぼかし表示にする */
