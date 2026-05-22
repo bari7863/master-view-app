@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 
-type MasterDataLoginRole = "管理者" | "従業員";
+type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
 type MasterDataLoginUser = {
   id: string;
@@ -33,7 +33,7 @@ type MasterDataLoginHistoryRow = {
 };
 
 function isMasterDataLoginRole(value: unknown): value is MasterDataLoginRole {
-  return value === "管理者" || value === "従業員";
+  return value === "スーパー管理者" || value === "管理者" || value === "従業員";
 }
 
 function parseMasterDataLoginUsersByRole(
@@ -64,6 +64,12 @@ function parseMasterDataLoginUsersByRole(
       const organization =
         typeof item.organization === "string" ? item.organization.trim() : "";
 
+      const rawRole = item.role;
+      const resolvedRole =
+        role === "管理者" && rawRole === "スーパー管理者"
+          ? "スーパー管理者"
+          : role;
+
       if (id === "" || password === "" || name === "") {
         return null;
       }
@@ -73,7 +79,7 @@ function parseMasterDataLoginUsersByRole(
         password,
         name,
         organization,
-        role,
+        role: resolvedRole,
       };
     })
     .filter((user): user is MasterDataLoginUser => user !== null);

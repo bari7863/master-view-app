@@ -247,7 +247,7 @@ function createEmptyItemInspectionMethodSelections(): Record<
   };
 }
 
-type MasterDataLoginRole = "管理者" | "従業員";
+type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
 type MasterDataLoginUser = {
   id: string;
@@ -718,6 +718,46 @@ function splitMasterDataLoginName(name: string | undefined) {
     lastName: trimmedName,
     firstName: "-",
   };
+}
+
+function isMasterDataManagerRole(role: MasterDataLoginRole | undefined) {
+  return role === "スーパー管理者" || role === "管理者";
+}
+
+function getMasterDataRoleBadgeClass(role: MasterDataLoginRole | undefined) {
+  if (role === "スーパー管理者") {
+    return "border-violet-300/30 bg-violet-400/10 text-violet-100";
+  }
+
+  if (role === "従業員") {
+    return "border-amber-300/30 bg-amber-400/10 text-amber-100";
+  }
+
+  return "border-sky-300/30 bg-sky-400/10 text-sky-100";
+}
+
+function getMasterDataAccountCardClass(role: MasterDataLoginRole | undefined) {
+  if (role === "スーパー管理者") {
+    return "border border-violet-300/20 bg-gradient-to-br from-violet-500/18 via-white/5 to-[#0b1220]";
+  }
+
+  if (role === "従業員") {
+    return "border border-amber-300/20 bg-gradient-to-br from-amber-500/18 via-white/5 to-[#0b1220]";
+  }
+
+  return "border border-sky-300/20 bg-gradient-to-br from-sky-500/18 via-white/5 to-[#0b1220]";
+}
+
+function getMasterDataAccountIconClass(role: MasterDataLoginRole | undefined) {
+  if (role === "スーパー管理者") {
+    return "border-violet-300/25 bg-violet-400/10 text-violet-100";
+  }
+
+  if (role === "従業員") {
+    return "border-amber-300/25 bg-amber-400/10 text-amber-100";
+  }
+
+  return "border-sky-300/25 bg-sky-400/10 text-sky-100";
 }
 
 function formatMasterDataLoginDate(value: string) {
@@ -3164,11 +3204,15 @@ export default function Home() {
   );
 
   const canUsePermission = (permissionKey: MasterDataPermissionKey) => {
-    if (loginUser?.role === "管理者") {
+    if (!loginUser) {
       return true;
     }
 
-    if (loginUser?.role === "従業員" && !currentUserPermissionLoaded) {
+    if (loginUser.role === "スーパー管理者") {
+      return true;
+    }
+
+    if (!currentUserPermissionLoaded) {
       return true;
     }
 
@@ -3275,7 +3319,7 @@ export default function Home() {
       return;
     }
 
-    if (targetUser.role === "管理者") {
+    if (targetUser.role === "スーパー管理者") {
       setCurrentUserPermissions({});
       setCurrentUserPermissionLoaded(true);
       return;
@@ -3302,7 +3346,7 @@ export default function Home() {
   };
 
   const fetchPermissionEmployees = async () => {
-    if (loginUser?.role !== "管理者") {
+    if (!isMasterDataManagerRole(loginUser?.role)) {
       setPermissionEmployees([]);
       setSelectedPermissionEmployeeId("");
       return;
@@ -4718,7 +4762,7 @@ export default function Home() {
           setLoginHistory(history);
         });
 
-        if (loginUser?.role !== "管理者") {
+        if (!isMasterDataManagerRole(loginUser?.role)) {
           setPermissionEmployees([]);
           setSelectedPermissionEmployeeId("");
           setPermissionError("");
@@ -6112,7 +6156,7 @@ export default function Home() {
         <div className="space-y-5">
           <div
             className={`sticky top-0 z-30 grid gap-2 rounded-2xl border border-sky-300/10 bg-gradient-to-br from-white/8 via-[#0f172a]/95 to-[#0b1220]/95 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl ${
-              loginUser?.role === "管理者" ? "grid-cols-3" : "grid-cols-2"
+              isMasterDataManagerRole(loginUser?.role) ? "grid-cols-3" : "grid-cols-2"
             }`}
           >
             <button
@@ -6132,7 +6176,7 @@ export default function Home() {
               </span>
             </button>
 
-            {loginUser?.role === "管理者" && (
+            {isMasterDataManagerRole(loginUser?.role) && (
               <button
                 type="button"
                 onClick={() => {
@@ -6317,11 +6361,9 @@ export default function Home() {
                       ロール
                     </div>
                     <div
-                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                        loginUser?.role === "従業員"
-                          ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
-                          : "border-sky-300/30 bg-sky-400/10 text-sky-100"
-                      }`}
+                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getMasterDataRoleBadgeClass(
+                        loginUser?.role
+                      )}`}
                     >
                       {loginUser?.role ?? "-"}
                     </div>
@@ -6350,7 +6392,7 @@ export default function Home() {
                           リストの絞り込み範囲
                         </div>
                         <div className="mt-1 text-xs text-slate-400">
-                          ここで表示されているリスト範囲を、この従業員に適用します
+                          ここで表示されているリスト範囲を、このアカウントに適用します
                         </div>
                       </div>
 
@@ -6370,7 +6412,7 @@ export default function Home() {
                             上部のリスト内フィルタや検索条件で絞り込んだ状態を確認してください。
                           </span>
                           <span className="mt-1 block">
-                            右下の「適用」を押すと、この従業員はその絞り込み範囲のリストだけを操作対象にできます。
+                            右下の「適用」を押すと、このアカウントはその絞り込み範囲のリストだけを操作対象にできます。
                           </span>
                         </div>
 
@@ -6511,7 +6553,7 @@ export default function Home() {
                       </div>
 
                       <div className="mb-2 text-xs text-slate-400">
-                        対象従業員：{selectedPermissionEmployee.name}
+                        対象アカウント：{selectedPermissionEmployee.name}
                       </div>
 
                       <div
@@ -6821,17 +6863,21 @@ export default function Home() {
             </div>
           )}
 
-          {loginUser?.role === "管理者" &&
+          {isMasterDataManagerRole(loginUser?.role) &&
             settingsTab === "permissionManagement" && (
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
                 <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-slate-100">
-                        従業員アカウント
+                        {loginUser?.role === "スーパー管理者"
+                          ? "管理者・従業員アカウント"
+                          : "従業員アカウント"}
                       </div>
                       <div className="mt-1 text-xs text-slate-400">
-                        同じ所属の従業員のみ表示します
+                        {loginUser?.role === "スーパー管理者"
+                          ? "全ての所属の管理者・従業員を表示します"
+                          : "同じ所属の従業員のみ表示します"}
                       </div>
                     </div>
 
@@ -6847,7 +6893,7 @@ export default function Home() {
 
                   {permissionLoading ? null : permissionEmployees.length === 0 ? (
                     <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400">
-                      表示できる従業員アカウントがありません
+                      表示できるアカウントがありません
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -6892,7 +6938,7 @@ export default function Home() {
                 <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
                   {!selectedPermissionEmployee ? (
                     <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-10 text-center text-sm text-slate-400">
-                      左側から従業員アカウントを選択してください
+                      左側からアカウントを選択してください
                     </div>
                   ) : (
                     <div className="space-y-5">
@@ -6902,7 +6948,7 @@ export default function Home() {
                             {selectedPermissionEmployee.name} の権限
                           </div>
                           <div className="mt-1 text-xs text-slate-400">
-                            チェックを外した項目は、この従業員では使えない設定にします
+                            チェックを外した項目は、このアカウントでは使えない設定にします
                           </div>
                         </div>
 
@@ -6953,7 +6999,7 @@ export default function Home() {
                               リストデータ
                             </div>
                             <div className="mt-1 text-xs text-slate-400">
-                              この従業員が操作できるリスト範囲を設定します
+                              このアカウントが操作できるリスト範囲を設定します
                             </div>
                           </div>
 
@@ -11120,19 +11166,15 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 </div>
 
                 <div
-                  className={`group relative flex min-h-[var(--app-stat-card-h)] items-center justify-center overflow-hidden rounded-2xl px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)] ${
-                    loginUser?.role === "従業員"
-                      ? "border border-amber-300/20 bg-gradient-to-br from-amber-500/18 via-white/5 to-[#0b1220]"
-                      : "border border-sky-300/20 bg-gradient-to-br from-sky-500/18 via-white/5 to-[#0b1220]"
-                  }`}
+                  className={`group relative flex min-h-[var(--app-stat-card-h)] items-center justify-center overflow-hidden rounded-2xl px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)] ${getMasterDataAccountCardClass(
+                    loginUser?.role
+                  )}`}
                 >
                   <div className="flex min-w-0 items-center justify-center gap-2">
                     <span
-                      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${
-                        loginUser?.role === "従業員"
-                          ? "border-amber-300/25 bg-amber-400/10 text-amber-100"
-                          : "border-sky-300/25 bg-sky-400/10 text-sky-100"
-                      }`}
+                      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${getMasterDataAccountIconClass(
+                        loginUser?.role
+                      )}`}
                     >
                       <svg
                         viewBox="0 0 24 24"
@@ -11155,11 +11197,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       </div>
 
                       <div
-                        className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                          loginUser?.role === "従業員"
-                            ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
-                            : "border-sky-300/30 bg-sky-400/10 text-sky-100"
-                        }`}
+                        className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getMasterDataRoleBadgeClass(
+                          loginUser?.role
+                        )}`}
                       >
                         {loginUser?.role ?? "-"}
                       </div>

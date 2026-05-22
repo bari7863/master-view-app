@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  if (user.role === "管理者") {
+  if (user.role === "スーパー管理者") {
     return NextResponse.json({
       ok: true,
       permissions: {},

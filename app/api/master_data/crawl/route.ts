@@ -842,7 +842,7 @@ function buildWhereClauseWithListScope(
 async function getListScopeFiltersForRequest(req: NextRequest) {
   const { user } = requireMasterDataUser(req);
 
-  if (!user || user.role === "管理者") {
+  if (!user || user.role === "スーパー管理者") {
     return null;
   }
 

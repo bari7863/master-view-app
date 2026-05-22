@@ -7,7 +7,7 @@ const MASTER_DATA_AUTH_USER_SIGNATURE_COOKIE_NAME =
   "master-data-auth-user-signature";
 const MASTER_DATA_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 30;
 
-export type MasterDataLoginRole = "管理者" | "従業員";
+export type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
 export type MasterDataAuthUser = {
   id: string;
@@ -88,7 +88,7 @@ function parseMasterDataAuthUserPayload(
     if (
       id === "" ||
       name === "" ||
-      (rawRole !== "管理者" && rawRole !== "従業員")
+      (rawRole !== "スーパー管理者" && rawRole !== "管理者" && rawRole !== "従業員")
     ) {
       return null;
     }
@@ -257,11 +257,11 @@ export function requireMasterDataAdmin(req: NextRequest): MasterDataAuthResult {
     return result;
   }
 
-  if (result.user.role !== "管理者") {
+  if (result.user.role !== "スーパー管理者" && result.user.role !== "管理者") {
     return {
       user: null,
       errorResponse: NextResponse.json(
-        { ok: false, error: "管理者のみ実行できます" },
+        { ok: false, error: "管理者またはスーパー管理者のみ実行できます" },
         { status: 403 }
       ),
     };

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 
-type MasterDataLoginRole = "管理者" | "従業員";
+type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
 type MasterDataLoginUser = {
   id: string;
@@ -20,7 +20,7 @@ type MasterDataLoginUser = {
 };
 
 function isMasterDataLoginRole(value: unknown): value is MasterDataLoginRole {
-  return value === "管理者" || value === "従業員";
+  return value === "スーパー管理者" || value === "管理者" || value === "従業員";
 }
 
 function parseMasterDataLoginUsersByRole(
@@ -53,6 +53,12 @@ function parseMasterDataLoginUsersByRole(
           ? item.organization.trim()
           : "";
 
+      const rawRole = item.role;
+      const resolvedRole =
+        role === "管理者" && rawRole === "スーパー管理者"
+          ? "スーパー管理者"
+          : role;
+
       if (
         id === "" ||
         password === "" ||
@@ -67,7 +73,7 @@ function parseMasterDataLoginUsersByRole(
         password,
         name,
         organization,
-        role,
+        role: resolvedRole,
       };
     })
     .filter((user): user is MasterDataLoginUser => user !== null);
@@ -115,6 +121,7 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
         typeof item.organization === "string"
           ? item.organization.trim()
           : "";
+
       const role = item.role;
 
       if (
@@ -138,16 +145,32 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
     .filter((user): user is MasterDataLoginUser => user !== null);
 }
 
-function findEditableEmployee(
-  adminOrganization: string,
+function findEditablePermissionUser(
+  currentUser: { role: MasterDataLoginRole; organization: string },
   targetUserId: string
 ) {
-  return getMasterDataLoginUsers().find(
-    (user) =>
-      user.id === targetUserId &&
-      user.role === "従業員" &&
-      user.organization === adminOrganization
+  const targetUser = getMasterDataLoginUsers().find(
+    (user) => user.id === targetUserId
   );
+
+  if (!targetUser) {
+    return undefined;
+  }
+
+  if (currentUser.role === "スーパー管理者") {
+    return targetUser.role === "管理者" || targetUser.role === "従業員"
+      ? targetUser
+      : undefined;
+  }
+
+  if (currentUser.role === "管理者") {
+    return targetUser.role === "従業員" &&
+      targetUser.organization === currentUser.organization
+      ? targetUser
+      : undefined;
+  }
+
+  return undefined;
 }
 
 export async function GET(req: NextRequest) {
@@ -165,11 +188,16 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const employees = getMasterDataLoginUsers().filter(
-      (user) =>
+    const employees = getMasterDataLoginUsers().filter((user) => {
+      if (adminUser.role === "スーパー管理者") {
+        return user.role === "管理者" || user.role === "従業員";
+      }
+
+      return (
         user.role === "従業員" &&
         user.organization === adminUser.organization
-    );
+      );
+    });
 
     const items = await Promise.all(
       employees.map(async (employee) => {
@@ -230,19 +258,16 @@ export async function PATCH(req: NextRequest) {
 
     if (userId === "") {
       return NextResponse.json(
-        { ok: false, error: "従業員IDが指定されていません" },
+        { ok: false, error: "アカウントIDが指定されていません" },
         { status: 400 }
       );
     }
 
-    const targetEmployee = findEditableEmployee(
-      adminUser.organization,
-      userId
-    );
+    const targetEmployee = findEditablePermissionUser(adminUser, userId);
 
     if (!targetEmployee) {
       return NextResponse.json(
-        { ok: false, error: "編集できる従業員が見つかりません" },
+        { ok: false, error: "編集できるアカウントが見つかりません" },
         { status: 404 }
       );
     }

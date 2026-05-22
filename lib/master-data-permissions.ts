@@ -270,7 +270,7 @@ export async function requireMasterDataPermission(
     };
   }
 
-  if (result.user.role === "管理者") {
+  if (result.user.role === "スーパー管理者") {
     return {
       user: result.user,
       settings: {
