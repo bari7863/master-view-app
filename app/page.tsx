@@ -48,6 +48,8 @@ type ConditionType =
   | "is_empty"
   | "is_not_empty";
 
+type DedupeMatchMethod = "exact";
+
 type ColumnFilterState = {
   sortDirection: SortDirection;
   conditionType: ConditionType;
@@ -2726,6 +2728,7 @@ export default function Home() {
   }, [mynaviTotalPages]);
 
   const mynaviStatusTimerRef = useRef<number | null>(null);
+  const mynaviUserCanceledRef = useRef(false);
 
   const [itemDeleteScopeOpen, setItemDeleteScopeOpen] = useState(false);
   const [itemDeleteFieldOpen, setItemDeleteFieldOpen] = useState(false);
@@ -2853,11 +2856,20 @@ export default function Home() {
   const [dedupeMessage, setDedupeMessage] = useState("");
   const [dedupeError, setDedupeError] = useState("");
   const [dedupeConfirmOpen, setDedupeConfirmOpen] = useState(false);
+  const [dedupeFieldOpen, setDedupeFieldOpen] = useState(false);
+  const [dedupeMethodOpen, setDedupeMethodOpen] = useState(false);
 
   const [dedupeScopeOpen, setDedupeScopeOpen] = useState(false);
+
   const [dedupeTargetScope, setDedupeTargetScope] = useState<
     "filtered" | "all" | null
   >(null);
+
+  const [dedupeSelectedField, setDedupeSelectedField] =
+    useState<FilterKey | null>(null);
+
+  const [dedupeMatchMethod, setDedupeMatchMethod] =
+    useState<DedupeMatchMethod | null>(null);
 
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [importDuplicateConfirmOpen, setImportDuplicateConfirmOpen] = useState(false);
@@ -5626,6 +5638,10 @@ export default function Home() {
                 type="button"
                 onClick={() => {
                   setDedupeTargetScope(null);
+                  setDedupeSelectedField(null);
+                  setDedupeMatchMethod(null);
+                  setDedupeFieldOpen(false);
+                  setDedupeMethodOpen(false);
                   setDedupeScopeOpen(true);
                 }}
                 disabled={deduplicating}
@@ -7119,6 +7135,7 @@ export default function Home() {
 
   const startMynaviStatusPolling = (jobId: string) => {
     clearMynaviStatusPolling();
+    mynaviUserCanceledRef.current = false;
 
     mynaviStatusTimerRef.current = window.setInterval(async () => {
       try {
@@ -7139,7 +7156,17 @@ export default function Home() {
           throw new Error(data.error || "マイナビ新卒の進捗取得に失敗しました");
         }
 
+        if (mynaviUserCanceledRef.current) {
+          clearMynaviStatusPolling();
+          return;
+        }
+
         applyMynaviStatus(data);
+
+        if (mynaviUserCanceledRef.current) {
+          clearMynaviStatusPolling();
+          return;
+        }
 
         if (data.jobStatus === "paused") {
           clearMynaviStatusPolling();
@@ -7203,6 +7230,8 @@ export default function Home() {
   };
 
   const handleConfirmMynaviGradYear = async () => {
+    mynaviUserCanceledRef.current = false;
+
     setMynaviLoading(true);
     setMynaviError("");
     setMynaviMessage("");
@@ -7241,6 +7270,23 @@ export default function Home() {
         throw new Error(data.error || "ページ数の取得開始に失敗しました");
       }
 
+      if (mynaviUserCanceledRef.current) {
+        if (data.jobId) {
+          void fetch("/api/master_data/mynavi", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: "cancel_job",
+              jobId: data.jobId,
+            }),
+          });
+        }
+
+        return;
+      }
+
       applyMynaviStatus(data);
       setMynaviYearOpen(false);
 
@@ -7258,6 +7304,8 @@ export default function Home() {
   };
 
   const handleStartMynaviJob = async () => {
+    mynaviUserCanceledRef.current = false;
+
     setMynaviLoading(true);
     setMynaviError("");
     setMynaviMessage("");
@@ -7297,6 +7345,23 @@ export default function Home() {
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || "マイナビ新卒の取得開始に失敗しました");
+      }
+
+      if (mynaviUserCanceledRef.current) {
+        if (data.jobId) {
+          void fetch("/api/master_data/mynavi", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: "cancel_job",
+              jobId: data.jobId,
+            }),
+          });
+        }
+
+        return;
       }
 
       applyMynaviStatus(data);
@@ -7385,7 +7450,27 @@ export default function Home() {
   };
 
   const handleCancelMynaviJob = async () => {
-    if (!mynaviJobId) return;
+    mynaviUserCanceledRef.current = true;
+
+    const targetJobId = mynaviJobId;
+
+    clearMynaviStatusPolling();
+    setMynaviLoading(false);
+    setMynaviProgressOpen(false);
+    setMynaviPageCountOpen(false);
+    setMynaviResultOpen(false);
+    setMynaviJobId(null);
+    setMynaviJobStatus("idle");
+    setMynaviPhase("idle");
+    setMynaviCurrentField(null);
+    setMynaviCurrentCompany(null);
+    setMynaviCurrentCompanyIndex(0);
+
+    if (!targetJobId) {
+      setMynaviMessage("マイナビ新卒を中止しました");
+      setMynaviError("");
+      return;
+    }
 
     try {
       const res = await fetch("/api/master_data/mynavi", {
@@ -7395,7 +7480,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           action: "cancel_job",
-          jobId: mynaviJobId,
+          jobId: targetJobId,
         }),
       });
 
@@ -7405,16 +7490,6 @@ export default function Home() {
         throw new Error(data.error || "中止に失敗しました");
       }
 
-      clearMynaviStatusPolling();
-      setMynaviLoading(false);
-      setMynaviProgressOpen(false);
-      setMynaviResultOpen(false);
-      setMynaviJobId(null);
-      setMynaviJobStatus("idle");
-      setMynaviPhase("idle");
-      setMynaviCurrentField(null);
-      setMynaviCurrentCompany(null);
-      setMynaviCurrentCompanyIndex(0);
       setMynaviMessage("マイナビ新卒を中止しました");
       setMynaviError("");
     } catch (e) {
@@ -10039,7 +10114,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   };
 
   const handleDeduplicate = async () => {
-    if (!dedupeTargetScope) return;
+    if (!dedupeTargetScope || !dedupeSelectedField || !dedupeMatchMethod) return;
 
     setDeduplicating(true);
     setDedupeMessage("");
@@ -10049,6 +10124,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       const params = new URLSearchParams();
       params.set("deleteMode", "dedupe");
       params.set("deleteScope", dedupeTargetScope);
+      params.set("dedupeField", dedupeSelectedField);
+      params.set("dedupeMatchMethod", dedupeMatchMethod);
 
       if (dedupeTargetScope === "filtered") {
         params.set(
@@ -10169,6 +10246,12 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   const selectedItemDeleteLabels = COLUMN_DEFS.filter(
     (column) => itemDeleteSelections[column.key]
   ).map((column) => column.label);
+
+  const selectedDedupeFieldLabel =
+    COLUMN_DEFS.find((column) => column.key === dedupeSelectedField)?.label ?? "";
+
+  const selectedDedupeMatchMethodLabel =
+    dedupeMatchMethod === "exact" ? "完全一致" : "";
 
   const selectedItemInspectionFields = visibleItemInspectionColumnDefs
     .filter((column) => itemInspectionSelections[column.key])
@@ -10888,8 +10971,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   <div className="flex justify-end gap-2 border-t border-white/10 px-4 py-4">
                     <button
                       type="button"
-                      onClick={() => setImportConfirmOpen(false)}
-                      disabled={importing}
+                      onClick={() => setMynaviYearOpen(false)}
+                      disabled={mynaviLoading}
                       className="h-10 min-w-[96px] rounded-xl bg-rose-600 px-5 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
                     >
                       いいえ
@@ -10897,14 +10980,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                     <button
                       type="button"
-                      onClick={() => {
-                        setImportConfirmOpen(false);
-                        setImportDuplicateConfirmOpen(true);
-                      }}
-                      disabled={importing}
+                      onClick={handleConfirmMynaviGradYear}
+                      disabled={mynaviLoading}
                       className="h-10 min-w-[96px] rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
                     >
-                      {importing ? <LoadingText label="投入中" /> : "はい"}
+                      {mynaviLoading ? <LoadingText label="確認中" /> : "はい"}
                     </button>
                   </div>
                 </div>
@@ -10998,7 +11078,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                     <button
                       type="button"
-                      onClick={() => setMynaviProgressOpen(false)}
+                      onClick={handleCancelMynaviJob}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
                     >
                       ×
@@ -11118,7 +11198,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     {mynaviJobMode === "count_pages" ? (
                       <button
                         type="button"
-                        onClick={() => setMynaviProgressOpen(false)}
+                        onClick={handleCancelMynaviJob}
                         className="h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"
                       >
                         閉じる
@@ -11382,7 +11462,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      項目精査 確認
+                      項目精査 項目選択
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -12190,7 +12270,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         onClick={() => {
                           setDedupeScopeOpen(false);
                           setDedupeTargetScope("all");
-                          setDedupeConfirmOpen(true);
+                          setDedupeSelectedField(null);
+                          setDedupeMatchMethod(null);
+                          setDedupeFieldOpen(true);
                         }}
                       />
 
@@ -12203,10 +12285,141 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         onClick={() => {
                           setDedupeScopeOpen(false);
                           setDedupeTargetScope("filtered");
-                          setDedupeConfirmOpen(true);
+                          setDedupeSelectedField(null);
+                          setDedupeMatchMethod(null);
+                          setDedupeFieldOpen(true);
                         }}
                       />
                     </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+                {dedupeFieldOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+              onClick={() => {
+                setDedupeFieldOpen(false);
+                setDedupeMethodOpen(false);
+                setDedupeTargetScope(null);
+                setDedupeSelectedField(null);
+                setDedupeMatchMethod(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        重複削除 項目選択
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        重複判定に使う項目を選択してください
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDedupeFieldOpen(false);
+                        setDedupeMethodOpen(false);
+                        setDedupeTargetScope(null);
+                        setDedupeSelectedField(null);
+                        setDedupeMatchMethod(null);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="space-y-5 px-4 py-5">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {COLUMN_DEFS.map((column) => (
+                        <button
+                          key={column.key}
+                          type="button"
+                          onClick={() => {
+                            setDedupeSelectedField(column.key);
+                            setDedupeMatchMethod(null);
+                            setDedupeFieldOpen(false);
+                            setDedupeMethodOpen(true);
+                          }}
+                          className="min-h-[58px] rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition hover:border-violet-300/30 hover:bg-violet-500/10"
+                        >
+                          {column.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+
+        {dedupeMethodOpen &&
+          dedupeSelectedField &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+              onClick={() => {
+                setDedupeMethodOpen(false);
+                setDedupeTargetScope(null);
+                setDedupeSelectedField(null);
+                setDedupeMatchMethod(null);
+              }}
+            >
+              <div className="flex min-h-full items-center justify-center">
+                <div
+                  className="flex w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-100">
+                        重複削除 方法確認
+                      </div>
+                      <div className="mt-1 text-xs text-slate-400">
+                        {selectedDedupeFieldLabel} の重複判定方法を選択してください
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDedupeMethodOpen(false);
+                        setDedupeTargetScope(null);
+                        setDedupeSelectedField(null);
+                        setDedupeMatchMethod(null);
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="px-4 py-5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDedupeMatchMethod("exact");
+                        setDedupeMethodOpen(false);
+                        setDedupeConfirmOpen(true);
+                      }}
+                      className="h-11 w-full rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
+                    >
+                      完全一致
+                    </button>
                   </div>
                 </div>
               </div>
@@ -12305,7 +12518,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      項目削除 確認
+                      項目削除 項目選択
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -12776,7 +12989,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
                     <div className="text-sm font-semibold text-slate-100">
-                      クローリング確認
+                      クローリング 項目選択
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -13317,11 +13530,12 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
-                    重複削除確認
+                    重複削除 確認
                   </div>
 
                   <div className="px-4 py-6 text-sm leading-7 text-slate-300">
-                    企業名の完全一致で重複データを削除します。
+                    {selectedDedupeFieldLabel || "選択した項目"}の
+                    {selectedDedupeMatchMethodLabel || "選択した条件"}で重複データを削除します。
                     <br />
                     本当に重複削除しますか？
                     <br />
@@ -13485,7 +13699,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
-                    CSV投入 重複削除確認
+                    CSV投入 重複削除 確認
                   </div>
 
                   <div className="px-4 py-6 text-sm leading-7 text-slate-300">
@@ -13779,7 +13993,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
-                      CSV抽出 重複削除確認
+                      CSV抽出 重複削除 確認
                     </div>
 
                     <div className="px-4 py-6 text-sm leading-7 text-slate-300">

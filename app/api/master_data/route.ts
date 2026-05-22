@@ -1237,7 +1237,7 @@ async function handleReadRequest(req: NextRequest, searchParams: URLSearchParams
         req,
         searchParams
       );
-      
+
       const tagWhereSql = whereSql
         ? `${whereSql} AND NULLIF(BTRIM(tag_value), '') IS NOT NULL`
         : `WHERE NULLIF(BTRIM(tag_value), '') IS NOT NULL`;
@@ -1957,14 +1957,48 @@ export async function DELETE(req: NextRequest) {
       });
     }
 
+  const deleteScope =
+      searchParams.get("deleteScope") === "all" ? "all" : "filtered";
+
+    const dedupeFieldParam = searchParams.get("dedupeField");
+    const dedupeMatchMethod = searchParams.get("dedupeMatchMethod");
+
+    if (
+      !dedupeFieldParam ||
+      !(dedupeFieldParam in FILTER_COLUMN_MAP)
+    ) {
+      await client.query("ROLLBACK");
+      return NextResponse.json(
+        { ok: false, error: "重複削除する項目が選択されていません" },
+        { status: 400 }
+      );
+    }
+
+    if (dedupeMatchMethod !== "exact") {
+      await client.query("ROLLBACK");
+      return NextResponse.json(
+        { ok: false, error: "対応していない重複削除方法です" },
+        { status: 400 }
+      );
+    }
+
+    const dedupeField = dedupeFieldParam as FilterKey;
+    const dedupeColumn = FILTER_COLUMN_MAP[dedupeField];
+    const dedupeValueSql = `NULLIF(BTRIM(COALESCE(${dedupeColumn}::text, '')), '')`;
+
     const {
       whereSql: dedupeScopeWhereSql,
       params: dedupeScopeParams,
-    } = await buildWhereClauseWithListScope(req, new URLSearchParams());
+    } =
+      deleteScope === "filtered"
+        ? await buildWhereClauseWithListScope(req, searchParams)
+        : await buildWhereClauseWithListScope(req, new URLSearchParams());
+
+    await ensureMasterDataIdColumn(client);
 
     const duplicateRowsWhereSql = dedupeScopeWhereSql
-      ? `${dedupeScopeWhereSql} AND "企業名" IS NOT NULL AND BTRIM("企業名"::text) <> ''`
-      : `WHERE "企業名" IS NOT NULL AND BTRIM("企業名"::text) <> ''`;
+      ? `${dedupeScopeWhereSql} AND ${dedupeValueSql} IS NOT NULL`
+      : `WHERE ${dedupeValueSql} IS NOT NULL`;
 
     const result = await client.query(
       `
@@ -1972,7 +2006,7 @@ export async function DELETE(req: NextRequest) {
         SELECT
           id,
           ROW_NUMBER() OVER (
-            PARTITION BY BTRIM("企業名"::text)
+            PARTITION BY ${dedupeValueSql}
             ORDER BY id
           ) AS rn
         FROM public.master_data
