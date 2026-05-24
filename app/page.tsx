@@ -10617,6 +10617,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   addTopLeftTextNotice("crawl-error", "error", "クローリング エラー", crawlError);
   addTopLeftTextNotice("item-inspection-error", "error", "項目精査 エラー", itemInspectionError);
   addTopLeftTextNotice("permission-error", "error", "権限管理 エラー", permissionError);
+  addTopLeftTextNotice("data-error", "error", "エラー", error);
 
   addTopLeftTextNotice("mynavi-message", "success", "マイナビ新卒", mynaviMessage);
   addTopLeftTextNotice("import-message", "success", "CSV", importMessage);
@@ -14463,12 +14464,6 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 </div>,
                 document.body
               )}
-
-        {error && (
-          <div className="mb-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-            エラー: {error}
-          </div>
-        )}
         </div>
 
         <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden border border-white/10 bg-[#0b1326]/90 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
