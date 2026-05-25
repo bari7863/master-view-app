@@ -15298,7 +15298,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         }
 
         .app-modal-root .master-data-permission-scope-actions {
-          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
           align-items: stretch !important;
         }
 
@@ -15322,18 +15322,37 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         }
 
         .app-modal-root .master-data-permission-scope-actions .relative.mt-1 {
+          display: flex !important;
           width: 100% !important;
+          justify-content: center !important;
+          align-items: center !important;
         }
 
         .app-modal-root .master-data-permission-scope-actions .relative.mt-1 > button {
-          width: 100% !important;
+          width: min(100px, calc(100% - 8px)) !important;
+          max-width: calc(100% - 8px) !important;
           min-width: 0 !important;
+          justify-content: center !important;
+          gap: 4px !important;
           padding-left: 6px !important;
           padding-right: 6px !important;
         }
 
-        @media (min-width: 1280px) {
+        @media (max-width: 1023px) {
           .app-modal-root .master-data-permission-scope-actions {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .app-modal-root .master-data-permission-scope-toolbar {
+            flex-wrap: nowrap !important;
+            align-items: center !important;
+          }
+
+          .app-modal-root .master-data-permission-scope-actions {
+            width: auto !important;
+            flex: 0 1 min(920px, 58vw) !important;
             grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
           }
         }
