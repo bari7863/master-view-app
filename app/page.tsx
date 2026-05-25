@@ -5959,6 +5959,9 @@ export default function Home() {
                 <span className="mt-1 block text-xs leading-5 text-slate-400">
                   CSVファイルを選択して、投入候補として追加します
                 </span>
+                <span className="mt-0.5 block text-xs font-semibold leading-5 text-emerald-200">
+                  ※複数選択可
+                </span>
               </span>
 
               <span className="shrink-0 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
@@ -11301,7 +11304,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className={`flex w-full ${sidebarPanelMaxWidthClass} flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl`}
+                  className={`flex max-h-[calc(100dvh-2rem)] min-h-0 w-full ${sidebarPanelMaxWidthClass} flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -11318,7 +11321,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </button>
                   </div>
 
-                  <div className="px-4 py-4">
+                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4">
                     {renderSidebarPanelContent()}
                   </div>
                 </div>
@@ -11902,7 +11905,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="master-data-item-inspection-field-modal flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="master-data-item-inspection-field-modal flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -11939,7 +11942,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
                   </div>
 
-                  <div className="px-4 py-6">
+                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
                     <div className="mb-4 text-sm leading-7 text-slate-300">
                       チェックした項目のみ精査します。
                       <br />
@@ -12760,7 +12763,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                  className="flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
@@ -12788,7 +12791,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </button>
                   </div>
 
-                  <div className="space-y-5 px-4 py-5">
+                  <div className="app-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {COLUMN_DEFS.map((column) => (
                         <button
@@ -12960,7 +12963,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="master-data-item-delete-field-modal flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="master-data-item-delete-field-modal flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -12993,7 +12996,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
                   </div>
 
-                  <div className="px-4 py-6">
+                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
                     <div className="mb-4 text-sm leading-7 text-slate-300">
                       チェックした項目のみ削除します。
                       <br />
@@ -13432,7 +13435,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
-                  className="master-data-crawl-field-modal flex w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                  className="master-data-crawl-field-modal flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
@@ -13461,7 +13464,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
                   </div>
 
-                  <div className="px-4 py-6">
+                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
                     <div className="mb-4 text-sm leading-7 text-slate-300">
                       チェックした項目のみクローリングします。
                       <br />
