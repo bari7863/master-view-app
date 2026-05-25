@@ -2791,6 +2791,7 @@ export default function Home() {
     "mainHeader" | "permissionHeader" | null
   >(null);
 
+  const [paginationButtonCount, setPaginationButtonCount] = useState(7);
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -4311,6 +4312,34 @@ export default function Home() {
     masterListScrollRef.current?.scrollTo({ top: 0 });
     permissionListScopeScrollRef.current?.scrollTo({ top: 0 });
   }, [page, limit]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const updatePaginationButtonCount = () => {
+      const width = window.innerWidth;
+
+      if (width <= 520) {
+        setPaginationButtonCount(3);
+        return;
+      }
+
+      if (width <= 900) {
+        setPaginationButtonCount(5);
+        return;
+      }
+
+      setPaginationButtonCount(7);
+    };
+
+    updatePaginationButtonCount();
+
+    window.addEventListener("resize", updatePaginationButtonCount);
+
+    return () => {
+      window.removeEventListener("resize", updatePaginationButtonCount);
+    };
+  }, []);
 
   useEffect(() => {
     if (!canShowListColumnFilters) {
@@ -6407,8 +6436,8 @@ export default function Home() {
                     </div>
 
                     <div className="flex flex-1 flex-col overflow-hidden px-4 py-3">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-300/20 bg-gradient-to-br from-sky-500/14 via-[#0f172a]/90 to-[#0b1220]/95 px-4 py-3 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
-                        <div className="min-w-[360px] flex-1 text-sm font-medium leading-6 text-sky-100">
+                      <div className="master-data-permission-scope-toolbar mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-300/20 bg-gradient-to-br from-sky-500/14 via-[#0f172a]/90 to-[#0b1220]/95 px-4 py-3 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+                        <div className="min-w-0 flex-1 text-sm font-medium leading-6 text-sky-100">
                           <span className="block">
                             上部のリスト内フィルタや検索条件で絞り込んだ状態を確認してください。
                           </span>
@@ -6417,7 +6446,7 @@ export default function Home() {
                           </span>
                         </div>
 
-                        <div className="flex flex-wrap items-center justify-end gap-2">
+                        <div className="master-data-permission-scope-actions grid w-full grid-cols-3 gap-2 xl:w-auto xl:grid-cols-6">
                           <button
                             type="button"
                             onClick={() => setPermissionListScopeSearchOpen(true)}
@@ -6633,7 +6662,7 @@ export default function Home() {
                       </div>
                     </div>
 
-                      <div className="mx-4 mt-2 mb-3 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-gradient-to-br from-white/8 via-[#0b1326]/85 to-[#08101d]/90 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
+                      <div className="master-data-pagination-bar mx-4 mt-2 mb-3 flex flex-nowrap items-center justify-center gap-2 overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/8 via-[#0b1326]/85 to-[#08101d]/90 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
                         <button
                           type="button"
                           onClick={() => setPage(1)}
@@ -10697,19 +10726,25 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     selectedItemInspectionFields.length === 1 &&
     selectedItemInspectionFields[0] === "representative_name";
 
-    const pageNumbers = useMemo(() => {
-      if (limit === "all") return [1];
+  const pageNumbers = useMemo(() => {
+    if (limit === "all") return [1];
 
-      const maxButtons = 7;
-      let start = Math.max(page - 3, 1);
-      let end = Math.min(start + maxButtons - 1, totalPages);
+    const safeTotalPages = Math.max(totalPages, 1);
+    const maxButtons = Math.max(
+      1,
+      Math.min(paginationButtonCount, safeTotalPages)
+    );
 
-      if (end - start < maxButtons - 1) {
-        start = Math.max(end - maxButtons + 1, 1);
-      }
+    const half = Math.floor(maxButtons / 2);
+    let start = Math.max(page - half, 1);
+    let end = Math.min(start + maxButtons - 1, safeTotalPages);
 
-      return Array.from({ length: end - start + 1 }, (_, i) => start + i);
-    }, [page, totalPages, limit]);
+    if (end - start + 1 < maxButtons) {
+      start = Math.max(end - maxButtons + 1, 1);
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  }, [page, totalPages, limit, paginationButtonCount]);
 
   const renderedTableBody = useMemo(() => {
     if (rows.length === 0 && !loading) {
@@ -14529,7 +14564,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           </div>
         </div>
 
-        <div className="mt-[var(--app-gap-lg)] shrink-0 flex flex-wrap items-center justify-center gap-[var(--app-gap-sm)] rounded-2xl border border-white/10 bg-gradient-to-br from-white/8 via-[#0b1326]/85 to-[#08101d]/90 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
+        <div className="master-data-pagination-bar mt-[var(--app-gap-lg)] shrink-0 flex flex-nowrap items-center justify-center gap-[var(--app-gap-sm)] overflow-x-auto overflow-y-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/8 via-[#0b1326]/85 to-[#08101d]/90 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
           <button
             type="button"
             onClick={() => setPage(1)}
@@ -15235,6 +15270,405 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             --app-content-left: 68px;
             --app-logo-width: 150px;
             --app-sidebar-menu-offset: 100px;
+          }
+        }
+
+        .app-responsive-root .master-data-pagination-bar,
+        .app-modal-root .master-data-pagination-bar {
+          flex-wrap: nowrap !important;
+          white-space: nowrap !important;
+          scrollbar-width: none;
+        }
+
+        .app-responsive-root .master-data-pagination-bar::-webkit-scrollbar,
+        .app-modal-root .master-data-pagination-bar::-webkit-scrollbar {
+          display: none;
+        }
+
+        .app-responsive-root .master-data-pagination-bar > button,
+        .app-responsive-root .master-data-pagination-bar > span,
+        .app-modal-root .master-data-pagination-bar > button,
+        .app-modal-root .master-data-pagination-bar > span {
+          flex: 0 0 auto !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-toolbar {
+          flex-wrap: wrap !important;
+          align-items: stretch !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-actions {
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          align-items: stretch !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-actions > * {
+          width: 100% !important;
+          min-width: 0 !important;
+          min-height: 54px !important;
+          padding: 6px !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-actions .h-7.w-7 {
+          width: 24px !important;
+          height: 24px !important;
+          min-width: 24px !important;
+          min-height: 24px !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-actions > * > span,
+        .app-modal-root .master-data-permission-scope-actions > * > div {
+          min-width: 0 !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-actions .relative.mt-1 {
+          width: 100% !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-actions .relative.mt-1 > button {
+          width: 100% !important;
+          min-width: 0 !important;
+          padding-left: 6px !important;
+          padding-right: 6px !important;
+        }
+
+        @media (min-width: 1280px) {
+          .app-modal-root .master-data-permission-scope-actions {
+            grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+          }
+        }
+
+        @media (max-width: 1279px) {
+          .app-responsive-root .master-data-header-layout {
+            grid-template-columns: repeat(4, minmax(0, 1fr)) 28px !important;
+            grid-template-areas:
+              "title account account logout toggle"
+              "total total page page ."
+              "totalpages totalpages pagesize pagesize ." !important;
+            align-items: stretch !important;
+          }
+
+          .app-responsive-root .master-data-header-layout.master-data-header-layout--collapsed {
+            grid-template-areas:
+              "title account account logout toggle" !important;
+          }
+
+          .app-responsive-root .master-data-header-title {
+            grid-area: title !important;
+          }
+
+          .app-responsive-root .master-data-header-summary {
+            display: contents !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(1) {
+            grid-area: total !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) {
+            grid-area: page !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(3) {
+            grid-area: totalpages !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(4) {
+            grid-area: pagesize !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            grid-area: account !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) {
+            grid-area: logout !important;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button {
+            grid-area: toggle !important;
+            display: flex !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(-n + 4) {
+            width: 100% !important;
+            min-height: var(--app-stat-card-h) !important;
+            height: var(--app-stat-card-h) !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5),
+          .app-responsive-root .master-data-header-summary > :nth-child(6),
+          .app-responsive-root .master-data-header-collapse-button {
+            min-height: 42px !important;
+            height: 42px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) .min-w-max {
+            min-width: 0 !important;
+            max-width: 100% !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div > button,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div > button {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+        }
+
+        @media (max-width: 760px) {
+          .app-responsive-root .master-data-pagination-bar,
+          .app-modal-root .master-data-pagination-bar {
+            gap: 4px !important;
+            padding: 6px !important;
+          }
+
+          .app-responsive-root .master-data-pagination-bar > button,
+          .app-modal-root .master-data-pagination-bar > button {
+            min-height: 32px !important;
+            padding: 6px 8px !important;
+            border-radius: 10px !important;
+            font-size: 10px !important;
+            line-height: 1 !important;
+          }
+
+          .app-responsive-root .master-data-pagination-bar > span,
+          .app-modal-root .master-data-pagination-bar > span {
+            padding-left: 1px !important;
+            padding-right: 1px !important;
+            font-size: 10px !important;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .app-responsive-root .master-data-header-layout {
+            grid-template-columns:
+              minmax(48px, 0.9fr)
+              minmax(42px, 0.8fr)
+              minmax(42px, 0.8fr)
+              minmax(46px, 0.8fr)
+              24px !important;
+            gap: 4px !important;
+          }
+
+          .app-responsive-root .master-data-header-title {
+            padding-left: 2px !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            font-size: clamp(14px, 4.2vw, 18px) !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(-n + 4) {
+            min-height: 44px !important;
+            height: 44px !important;
+            padding: 4px 5px !important;
+            border-radius: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5),
+          .app-responsive-root .master-data-header-summary > :nth-child(6),
+          .app-responsive-root .master-data-header-collapse-button {
+            min-height: 36px !important;
+            height: 36px !important;
+            border-radius: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            padding: 3px 4px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) .h-9.w-9 {
+            width: 24px !important;
+            height: 24px !important;
+            min-width: 24px !important;
+            min-height: 24px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) svg {
+            width: 13px !important;
+            height: 13px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) button {
+            height: 36px !important;
+            min-height: 36px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+            gap: 2px !important;
+            font-size: 9px !important;
+            border-radius: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) svg {
+            width: 11px !important;
+            height: 11px !important;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button {
+            font-size: 10px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div {
+            width: 100% !important;
+            margin-top: 2px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div > button,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div > button {
+            height: 24px !important;
+            min-height: 24px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+            font-size: 9px !important;
+            border-radius: 9px !important;
+          }
+
+          .app-responsive-root .master-data-pagination-bar,
+          .app-modal-root .master-data-pagination-bar {
+            gap: 3px !important;
+            padding: 5px !important;
+          }
+
+          .app-responsive-root .master-data-pagination-bar > button,
+          .app-modal-root .master-data-pagination-bar > button {
+            min-height: 30px !important;
+            padding: 5px 6px !important;
+            font-size: 9px !important;
+          }
+
+          .app-modal-root .master-data-permission-scope-actions > * {
+            min-height: 50px !important;
+            padding: 5px !important;
+            font-size: 10px !important;
+          }
+
+          .app-modal-root .master-data-permission-scope-actions .h-7.w-7 {
+            width: 22px !important;
+            height: 22px !important;
+            min-width: 22px !important;
+            min-height: 22px !important;
+          }
+        }
+
+        @media (max-width: 1279px) {
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div {
+            display: flex !important;
+            width: 100% !important;
+            justify-content: center !important;
+            align-items: center !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div > button,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div > button {
+            width: min(86px, calc(100% - 8px)) !important;
+            max-width: calc(100% - 8px) !important;
+            min-width: 0 !important;
+            justify-content: center !important;
+            gap: 4px !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .app-responsive-root .master-data-header-layout {
+            grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+            grid-template-areas:
+              "title title title title toggle"
+              "account account account logout logout"
+              "total total page page page"
+              "totalpages totalpages pagesize pagesize pagesize" !important;
+            align-items: stretch !important;
+          }
+
+          .app-responsive-root .master-data-header-layout.master-data-header-layout--collapsed {
+            grid-template-areas:
+              "title title title title toggle"
+              "account account account logout logout" !important;
+          }
+
+          .app-responsive-root .master-data-header-title {
+            min-width: 0 !important;
+            padding-left: 2px !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: clip !important;
+            font-size: clamp(14px, 4.2vw, 18px) !important;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button {
+            justify-self: stretch !important;
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            width: 100% !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) {
+            width: 100% !important;
+            min-width: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) .min-w-max {
+            min-width: 0 !important;
+            max-width: 100% !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) button {
+            width: 100% !important;
+            min-width: 0 !important;
+            justify-content: center !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div {
+            display: flex !important;
+            width: 100% !important;
+            justify-content: center !important;
+            align-items: center !important;
+            margin-top: 2px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div > button,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div > button {
+            width: min(74px, calc(100% - 6px)) !important;
+            max-width: calc(100% - 6px) !important;
+            min-width: 0 !important;
+            height: 24px !important;
+            min-height: 24px !important;
+            justify-content: center !important;
+            gap: 3px !important;
+            padding-left: 5px !important;
+            padding-right: 5px !important;
+            font-size: 9px !important;
+            border-radius: 9px !important;
+          }
+
+          .app-modal-root .master-data-permission-scope-actions .relative.mt-1 {
+            display: flex !important;
+            width: 100% !important;
+            justify-content: center !important;
+            align-items: center !important;
+          }
+
+          .app-modal-root .master-data-permission-scope-actions .relative.mt-1 > button {
+            width: min(78px, calc(100% - 8px)) !important;
+            max-width: calc(100% - 8px) !important;
+            min-width: 0 !important;
+            justify-content: center !important;
+            gap: 4px !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
           }
         }
 
