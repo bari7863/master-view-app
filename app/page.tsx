@@ -3142,6 +3142,7 @@ export default function Home() {
     useState<"main" | "permission" | null>(null);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [headerSummaryCollapsed, setHeaderSummaryCollapsed] = useState(false);
   const [openSidebarPanel, setOpenSidebarPanel] =
     useState<SidebarPanelKey | null>(null);
 
@@ -6913,13 +6914,22 @@ export default function Home() {
                               setOpenFilterKey(null);
                               setOpenAdvancedFilterKey(null);
                             }}
-                            className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                              className={`relative w-full rounded-xl border px-4 py-3 text-left transition ${
                               active
                                 ? "border-sky-400/40 bg-sky-500/20 text-sky-100"
                                 : "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10"
                             }`}
                           >
-                            <div className="truncate text-sm font-semibold">
+                            <span
+                              className={`absolute right-3 top-3 max-w-[118px] truncate rounded-full border px-2.5 py-1 text-[10px] font-bold leading-none ${getMasterDataRoleBadgeClass(
+                                employee.role
+                              )}`}
+                              title={employee.role}
+                            >
+                              {employee.role}
+                            </span>
+
+                            <div className="truncate pr-28 text-sm font-semibold">
                               {employee.name}
                             </div>
                             <div className="mt-1 truncate text-xs text-slate-400">
@@ -10790,22 +10800,22 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           message="画面を準備しています"
         />
       ) : loginStatus !== "logged_in" ? (
-        <div className="master-data-login-screen grid h-full min-h-0 grid-cols-1 overflow-hidden bg-white lg:grid-cols-2">
-          <section className="flex min-h-[320px] flex-col items-center justify-center bg-[#05070d] px-8 py-10 text-center">
-            <MasterDataBrandLogo className="h-auto w-[min(600px,82vw)] shrink-0 -translate-y-[40px]" />
+        <div className="master-data-login-screen grid h-full min-h-0 grid-cols-1 overflow-y-auto bg-white lg:grid-cols-2 lg:overflow-hidden">
+          <section className="master-data-login-hero flex min-h-[320px] flex-col items-center justify-center bg-[#05070d] px-8 py-10 text-center">
+            <MasterDataBrandLogo className="master-data-login-main-logo h-auto w-[min(600px,82vw)] shrink-0 -translate-y-[40px]" />
 
             <h1 className="master-data-brand-title mt-8 text-[52px] leading-none md:text-[72px]">
               マスタデータ
             </h1>
           </section>
 
-          <section className="flex min-h-[420px] items-center justify-center bg-white px-6 py-10 text-slate-900">
+          <section className="master-data-login-form-area flex min-h-[420px] items-center justify-center bg-white px-6 py-10 text-slate-900">
             <form
               onSubmit={handleLoginSubmit}
               className="w-full max-w-[440px]"
             >
               <div className="mb-8 flex justify-center">
-                <MasterDataLoginWordmark className="h-auto w-[340px] translate-y-[40px]" />
+                <MasterDataLoginWordmark className="master-data-login-wordmark h-auto w-[340px] translate-y-[40px]" />
               </div>
 
               <div className="space-y-5">
@@ -10914,18 +10924,18 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             />
           </div>
 
-          <div className="app-scrollbar max-h-[calc(100dvh-var(--app-sidebar-menu-offset))] overflow-y-auto rounded-[var(--app-radius-lg)] border border-sky-300/10 bg-gradient-to-b from-[#0b1326]/95 via-[#08101d]/92 to-[#050b14]/95 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
-            <div className="rounded-[var(--app-radius-md)] border border-white/10 bg-[#0b1326]/85 p-[var(--app-panel-pad)]">
+          <div className="flex h-[calc(100dvh-var(--app-sidebar-menu-offset))] min-h-0 flex-col overflow-hidden rounded-[var(--app-radius-lg)] border border-sky-300/10 bg-gradient-to-b from-[#0b1326]/95 via-[#08101d]/92 to-[#050b14]/95 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
+            <div className="flex h-full min-h-0 flex-col rounded-[var(--app-radius-md)] border border-white/10 bg-[#0b1326]/85 p-[var(--app-panel-pad)]">
 
               <div
-                className={`mb-3 flex items-center ${
+                className={`master-data-sidebar-header mb-3 flex shrink-0 items-center ${
                   sidebarOpen ? "justify-between" : "justify-center"
                 }`}
               >
                 {sidebarOpen && (
-                  <div className="min-w-0 px-1">
+                  <div className="master-data-navigation-word-wrap min-w-0 flex-1 px-0">
                     <div
-                      className="master-data-brand-logo__wordmark bg-gradient-to-r from-sky-100 via-white to-cyan-200 bg-clip-text text-[13px] font-black uppercase tracking-[0.32em] text-transparent drop-shadow-[0_0_16px_rgba(56,189,248,0.35)]"
+                      className="master-data-navigation-word master-data-brand-logo__wordmark bg-gradient-to-r from-sky-100 via-white to-cyan-200 bg-clip-text text-[13px] font-black uppercase tracking-[0.32em] text-transparent drop-shadow-[0_0_16px_rgba(56,189,248,0.35)]"
                       style={{
                         WebkitTextStroke: "0.28px rgba(255, 255, 255, 0.55)",
                         textShadow:
@@ -10940,14 +10950,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 <button
                   type="button"
                   onClick={() => setSidebarOpen((prev) => !prev)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-300/20 bg-[#0f172a]/90 text-sky-100 shadow-[0_0_20px_rgba(56,189,248,0.12)] transition hover:border-sky-300/40 hover:bg-sky-500/10"
+                  className="master-data-sidebar-toggle-button inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-xs font-black text-slate-100 transition hover:bg-white/10"
                   title={sidebarOpen ? "メニューを閉じる" : "メニューを開く"}
                 >
-                  {sidebarOpen ? "‹" : "›"}
+                  {sidebarOpen ? "◀" : "▶"}
                 </button>
               </div>
 
-              <div className="space-y-2">
+              <div className="app-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {SIDEBAR_MENU_ITEMS.filter((item) => {
                   if (item.key === "search") {
                     return canUseAnyPermission(
@@ -11053,14 +11063,14 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           className="sticky top-0 z-30 mb-[var(--app-gap-md)] rounded-[var(--app-radius-lg)] border border-white/10 bg-[#08101d]/80 p-[var(--app-panel-pad-xs)] shadow-[0_24px_60px_rgba(0,0,0,0.35)] backdrop-blur-2xl"
         >
           <div className="rounded-[var(--app-radius-md)] border border-white/10 bg-[#0b1326]/85 p-[var(--app-panel-pad-lg)]">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex justify-start pl-0 sm:pl-6 xl:flex-1 xl:pl-24">
-                <h1 className="master-data-brand-title text-left text-[30px] leading-none md:text-[42px]">
+            <div className={`master-data-header-layout ${headerSummaryCollapsed ? "master-data-header-layout--collapsed" : ""} grid grid-cols-1 gap-3 xl:grid-cols-[auto_minmax(0,1fr)] xl:items-center`}>
+              <div className="master-data-header-title flex shrink-0 justify-start pl-2 sm:pl-3 xl:pl-2">
+                <h1 className="master-data-brand-title whitespace-nowrap text-left text-[clamp(28px,3.1vw,42px)] leading-none">
                   マスタデータ
                 </h1>
               </div>
 
-              <div className="grid grid-cols-2 gap-[var(--app-gap-sm)] xl:grid-cols-6">
+              <div className={`master-data-header-summary ${headerSummaryCollapsed ? "master-data-header-summary--collapsed" : ""} grid min-w-0 grid-cols-2 gap-[var(--app-gap-sm)] xl:grid-cols-[minmax(92px,0.78fr)_minmax(98px,0.82fr)_minmax(92px,0.78fr)_minmax(108px,0.86fr)_minmax(168px,1.25fr)_minmax(108px,0.86fr)]`}>
                 <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-hidden rounded-2xl border border-sky-300/20 bg-gradient-to-br from-sky-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
                   <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.22),transparent_42%)] opacity-0 transition group-hover:opacity-100" />
                   <div className="relative text-xs font-semibold text-sky-100/80">総件数</div>
@@ -11104,7 +11114,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   </div>
                 </div>
 
-                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-visible rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)] xl:mr-8">
+                <div className="group relative flex min-h-[var(--app-stat-card-h)] flex-col items-center justify-center overflow-visible rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/15 via-white/5 to-[#0b1220] px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)]">
                   <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.22),transparent_42%)] opacity-0 transition group-hover:opacity-100" />
                   <div className="relative text-xs font-semibold text-emerald-100/80">
                     表示件数
@@ -11167,11 +11177,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                 </div>
 
                 <div
-                  className={`group relative flex min-h-[var(--app-stat-card-h)] items-center justify-center overflow-hidden rounded-2xl px-[var(--app-card-x)] py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)] ${getMasterDataAccountCardClass(
+                  className={`group relative flex min-h-[var(--app-stat-card-h)] min-w-0 items-center justify-center overflow-visible rounded-2xl px-2 py-[var(--app-card-y)] text-center shadow-[0_14px_34px_rgba(0,0,0,0.18)] ${getMasterDataAccountCardClass(
                     loginUser?.role
                   )}`}
                 >
-                  <div className="flex min-w-0 items-center justify-center gap-2">
+                  <div className="flex min-w-max items-center justify-center gap-2">
                     <span
                       className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border ${getMasterDataAccountIconClass(
                         loginUser?.role
@@ -11189,16 +11199,16 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       </svg>
                     </span>
 
-                    <div className="min-w-0 text-left leading-tight">
+                    <div className="min-w-max text-left leading-tight">
                       <div
-                        className="max-w-[120px] truncate text-sm font-bold text-white"
+                        className="master-data-header-nowrap text-[clamp(10px,0.72vw,13px)] font-bold text-white"
                         title={loginUser?.name ?? ""}
                       >
                         {loginUser?.name ?? "-"}
                       </div>
 
                       <div
-                        className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getMasterDataRoleBadgeClass(
+                        className={`master-data-header-nowrap mt-1 inline-flex rounded-full border px-2 py-0.5 text-[clamp(9px,0.68vw,11px)] font-semibold ${getMasterDataRoleBadgeClass(
                           loginUser?.role
                         )}`}
                       >
@@ -11208,11 +11218,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   </div>
                 </div>
 
-                <div className="flex min-h-[var(--app-stat-card-h)] items-center justify-center">
+                <div className="flex min-h-[var(--app-stat-card-h)] min-w-0 items-center justify-center">
                   <button
                     type="button"
                     onClick={handleLogout}
-                    className="group inline-flex h-11 items-center justify-center gap-2 rounded-2xl border border-rose-300/20 bg-gradient-to-br from-rose-500/18 via-white/5 to-[#0b1220] px-4 text-sm font-semibold text-rose-100 shadow-[0_14px_34px_rgba(0,0,0,0.18)] transition hover:border-rose-300/40 hover:bg-rose-500/10"
+                    className="group inline-flex h-11 w-full min-w-0 items-center justify-center gap-1.5 rounded-2xl border border-rose-300/20 bg-gradient-to-br from-rose-500/18 via-white/5 to-[#0b1220] px-2 text-[clamp(9px,0.68vw,12px)] font-semibold text-rose-100 shadow-[0_14px_34px_rgba(0,0,0,0.18)] transition hover:border-rose-300/40 hover:bg-rose-500/10"
                   >
                     <svg
                       viewBox="0 0 24 24"
@@ -11221,17 +11231,28 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       strokeWidth="2.8"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      className="h-4 w-4"
+                      className="h-3.5 w-3.5 shrink-0"
                     >
                       <path d="M10 17l5-5-5-5" />
                       <path d="M15 12H3" />
                       <path d="M21 3v18" />
                     </svg>
-                    <span className="font-black" style={{ fontWeight: 900 }}>
+                    <span className="master-data-header-nowrap font-black" style={{ fontWeight: 900 }}>
                       ログアウト
                     </span>
                   </button>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setHeaderSummaryCollapsed((prev) => !prev)}
+                  className="master-data-header-collapse-button hidden h-full min-h-[var(--app-stat-card-h)] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-xs font-black text-slate-100 transition hover:bg-white/10"
+                  title={headerSummaryCollapsed ? "ヘッダーを開く" : "ヘッダーを折り畳む"}
+                  aria-label={headerSummaryCollapsed ? "ヘッダーを開く" : "ヘッダーを折り畳む"}
+                >
+                  {headerSummaryCollapsed ? "▼" : "▲"}
+                </button>
+
               </div>
             </div>
           </div>
@@ -14633,6 +14654,255 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           min-width: 0;
         }
 
+        .app-responsive-root .master-data-header-summary,
+        .app-responsive-root .master-data-header-summary * {
+          min-width: 0;
+        }
+
+        .app-responsive-root .master-data-header-summary .master-data-header-nowrap,
+        .app-responsive-root .master-data-header-summary [class*="text-xs"],
+        .app-responsive-root .master-data-header-summary [class*="text-sm"],
+        .app-responsive-root .master-data-header-summary [class*="text-lg"],
+        .app-responsive-root .master-data-header-summary [class*="text-xl"] {
+          white-space: nowrap;
+          overflow: visible;
+          text-overflow: clip;
+        }
+
+        .app-responsive-root .master-data-header-collapse-button {
+          display: none !important;
+        }
+
+        .app-responsive-root .master-data-sidebar-header {
+          gap: 0 !important;
+        }
+
+        .app-responsive-root .master-data-navigation-word-wrap {
+          padding-right: 0 !important;
+          overflow: hidden;
+        }
+
+        .app-responsive-root .master-data-navigation-word {
+          display: block;
+          width: 100%;
+          white-space: nowrap;
+          font-size: clamp(8px, 0.9vw, 12px) !important;
+          letter-spacing: clamp(0.12em, 0.42vw, 0.26em) !important;
+        }
+
+        .app-responsive-root .master-data-sidebar-toggle-button {
+          flex-shrink: 0;
+          border-color: rgba(255, 255, 255, 0.1) !important;
+          background: rgba(255, 255, 255, 0.05) !important;
+          color: #f1f5f9 !important;
+          box-shadow: none !important;
+        }
+
+        .app-responsive-root .master-data-sidebar-toggle-button:hover {
+          background: rgba(255, 255, 255, 0.1) !important;
+          border-color: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        @media (max-width: 1279px) {
+          .app-responsive-root .master-data-header-layout {
+            display: grid !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr)) 34px;
+            grid-template-areas:
+              "title account account logout toggle"
+              "total total page page ."
+              "totalpages totalpages pagesize pagesize .";
+            align-items: stretch;
+            gap: var(--app-gap-sm);
+          }
+
+          .app-responsive-root .master-data-header-layout.master-data-header-layout--collapsed {
+            grid-template-areas:
+              "title account account logout toggle";
+          }
+
+          .app-responsive-root .master-data-header-title {
+            grid-area: title;
+            align-self: center;
+            padding-left: 6px !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            font-size: clamp(18px, 3.6vw, 28px) !important;
+          }
+
+          .app-responsive-root .master-data-header-summary {
+            display: contents !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(1) {
+            grid-area: total;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) {
+            grid-area: page;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(3) {
+            grid-area: totalpages;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(4) {
+            grid-area: pagesize;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            grid-area: account;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) {
+            grid-area: logout;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button {
+            grid-area: toggle;
+            display: flex !important;
+          }
+
+          .app-responsive-root
+            .master-data-header-summary.master-data-header-summary--collapsed
+            > :nth-child(-n + 4) {
+            display: none !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(1),
+          .app-responsive-root .master-data-header-summary > :nth-child(2),
+          .app-responsive-root .master-data-header-summary > :nth-child(3),
+          .app-responsive-root .master-data-header-summary > :nth-child(4) {
+            width: 100% !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5),
+          .app-responsive-root .master-data-header-summary > :nth-child(6),
+          .app-responsive-root .master-data-header-collapse-button {
+            min-height: 44px !important;
+            height: 44px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            padding: 5px 8px !important;
+            overflow: visible !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) svg {
+            width: 15px !important;
+            height: 15px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) .h-9.w-9 {
+            width: 30px !important;
+            height: 30px !important;
+            min-width: 30px !important;
+            min-height: 30px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) button {
+            width: 100% !important;
+            min-width: 0 !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+            gap: 4px !important;
+            font-size: clamp(8px, 1vw, 11px) !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) svg {
+            width: 13px !important;
+            height: 13px !important;
+            flex-shrink: 0;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button {
+            padding: 0 !important;
+            font-size: 12px !important;
+          }
+        }
+
+        @media (max-width: 900px) {
+          .app-responsive-root .master-data-header-layout {
+            grid-template-columns: repeat(4, minmax(0, 1fr)) 30px;
+            gap: 5px;
+          }
+
+          .app-responsive-root .master-data-header-title {
+            padding-left: 4px !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            font-size: clamp(16px, 3.8vw, 24px) !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5),
+          .app-responsive-root .master-data-header-summary > :nth-child(6),
+          .app-responsive-root .master-data-header-collapse-button {
+            min-height: 42px !important;
+            height: 42px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            padding: 4px 6px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) .rounded-full {
+            display: inline-flex !important;
+          }
+
+          .app-responsive-root .master-data-navigation-word {
+            font-size: clamp(8px, 1.05vw, 11px) !important;
+            letter-spacing: clamp(0.1em, 0.38vw, 0.2em) !important;
+          }
+
+          .app-responsive-root .master-data-sidebar-toggle-button {
+            width: 32px !important;
+            height: 32px !important;
+            min-width: 32px !important;
+            min-height: 32px !important;
+            border-radius: 14px !important;
+          }
+        }
+
+        @media (max-width: 900px) {
+          .app-responsive-root .master-data-header-layout {
+            grid-template-columns:
+              minmax(86px, 0.85fr)
+              minmax(104px, 1fr)
+              minmax(74px, 0.72fr)
+              28px;
+            gap: 5px;
+          }
+
+          .app-responsive-root .master-data-header-title {
+            padding-left: 4px !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            font-size: clamp(16px, 3.8vw, 24px) !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5),
+          .app-responsive-root .master-data-header-summary > :nth-child(6),
+          .app-responsive-root .master-data-header-collapse-button {
+            min-height: 40px !important;
+            height: 40px !important;
+          }
+
+          .app-responsive-root .master-data-navigation-word {
+            font-size: clamp(7px, 1vw, 9px) !important;
+            letter-spacing: 0.12em !important;
+          }
+
+          .app-responsive-root .master-data-sidebar-toggle-button {
+            width: 32px !important;
+            height: 32px !important;
+            min-width: 32px !important;
+            min-height: 32px !important;
+            border-radius: 14px !important;
+          }
+        }
+
         .app-responsive-root [class*="text-sm"] {
           font-size: var(--app-fit-font);
         }
@@ -16125,6 +16395,69 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           text-shadow:
             0 10px 24px rgba(15, 23, 42, 0.12),
             0 1px 0 rgba(255, 255, 255, 0.70);
+        }
+
+        /* ログイン画面専用：縦表示でも見切れないようにする */
+        .app-responsive-root .master-data-login-screen {
+          overflow-y: auto !important;
+          overscroll-behavior: contain;
+        }
+
+        /* ログイン画面専用：既存のレスポンシブCSSで「マスタデータ」が小さくなりすぎるのを防ぐ */
+        .app-responsive-root .master-data-login-screen .master-data-brand-title {
+          font-size: clamp(44px, 12vw, 72px) !important;
+          line-height: 0.95 !important;
+        }
+
+        @media (max-width: 1023px) {
+          .app-responsive-root .master-data-login-screen {
+            align-content: start;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-hero {
+            min-height: clamp(240px, 42dvh, 320px) !important;
+            padding-top: clamp(24px, 4dvh, 40px) !important;
+            padding-bottom: clamp(20px, 3dvh, 34px) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-form-area {
+            min-height: auto !important;
+            padding-top: clamp(24px, 4dvh, 40px) !important;
+            padding-bottom: clamp(24px, 4dvh, 40px) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-main-logo {
+            width: min(520px, 74vw) !important;
+            transform: translateY(0) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-wordmark {
+            width: min(340px, 78vw) !important;
+            transform: translateY(0) !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .app-responsive-root .master-data-login-screen .master-data-brand-title {
+            font-size: clamp(42px, 12vw, 52px) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-hero {
+            min-height: clamp(230px, 40dvh, 300px) !important;
+            padding-left: 20px !important;
+            padding-right: 20px !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-form-area {
+            padding-left: 20px !important;
+            padding-right: 20px !important;
+          }
+        }
+
+        @media (min-width: 1024px) {
+          .app-responsive-root .master-data-login-screen {
+            overflow: hidden !important;
+          }
         }
       `}</style>
 
