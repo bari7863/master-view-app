@@ -11964,8 +11964,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
                   </div>
 
-                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
-                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                  <div className="border-b border-white/10 px-4 py-4">
+                    <div className="text-sm leading-7 text-slate-300">
                       チェックした項目のみ精査します。
                       <br />
                       <span className="text-xs text-slate-400">
@@ -11975,7 +11975,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           : "絞り込みリストのみ"}
                       </span>
                     </div>
+                  </div>
 
+                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                       {visibleItemInspectionColumnDefs.map((field) => (
                         <label
@@ -13018,8 +13020,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
                   </div>
 
-                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
-                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                  <div className="border-b border-white/10 px-4 py-4">
+                    <div className="text-sm leading-7 text-slate-300">
                       チェックした項目のみ削除します。
                       <br />
                       <span className="text-xs text-slate-400">
@@ -13029,7 +13031,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                           : "絞り込みリストのみ"}
                       </span>
                     </div>
+                  </div>
 
+                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                       {COLUMN_DEFS.map((field) => (
                         <label
@@ -13486,20 +13490,22 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
                   </div>
 
-                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
-                    <div className="mb-4 text-sm leading-7 text-slate-300">
+                  <div className="border-b border-white/10 px-4 py-4">
+                    <div className="text-sm leading-7 text-slate-300">
                       チェックした項目のみクローリングします。
                       <br />
                       保存前にクローリング結果を一覧で表示し、内容を確認してから保存できます。
                       <br />
                       <span className="text-xs text-slate-400">
-                      対象:
-                      {crawlTargetScope === "all"
-                        ? "全てのリスト"
-                        : "絞り込みリストのみ"}
-                    </span>
+                        対象:
+                        {crawlTargetScope === "all"
+                          ? "全てのリスト"
+                          : "絞り込みリストのみ"}
+                      </span>
                     </div>
+                  </div>
 
+                  <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-6">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                       {visibleCrawlConfirmFieldOptions.map((field) => (
                         <label
