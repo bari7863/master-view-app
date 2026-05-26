@@ -3182,6 +3182,9 @@ export default function Home() {
   const [permissionListScopeSearchOpen, setPermissionListScopeSearchOpen] =
     useState(false);
 
+  const [permissionScopeActionsCollapsed, setPermissionScopeActionsCollapsed] =
+    useState(false);
+
   const permissionListScopeBaseColumnStatesRef =
     useRef<Record<FilterKey, ColumnFilterState> | null>(null);
 
@@ -3753,12 +3756,14 @@ export default function Home() {
     setOpenAdvancedFilterKey(null);
     setOpenFilterKey(null);
     setPermissionListScopeSearchOpen(false);
+    setPermissionScopeActionsCollapsed(false);
     setPermissionListScopeOpen(true);
   };
 
   const closePermissionListScopeModal = () => {
     setPermissionListScopeOpen(false);
     setPermissionListScopeSearchOpen(false);
+    setPermissionScopeActionsCollapsed(false);
     setOpenFilterKey(null);
     setOpenAdvancedFilterKey(null);
 
@@ -5947,7 +5952,7 @@ export default function Home() {
       return (
         <div className="space-y-4">
           {canUsePermission("csv.import") && (
-            <label className="group flex min-h-[118px] cursor-pointer items-center gap-4 rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/18 via-[#0f172a] to-[#0b1220] p-4 transition hover:border-emerald-300/40 hover:bg-emerald-500/10">
+            <label className="master-data-csv-file-select-card group flex min-h-[118px] cursor-pointer items-center gap-4 rounded-2xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/18 via-[#0f172a] to-[#0b1220] p-4 transition hover:border-emerald-300/40 hover:bg-emerald-500/10">
               <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-400/10 text-lg text-emerald-100">
                 📁
               </span>
@@ -5964,7 +5969,7 @@ export default function Home() {
                 </span>
               </span>
 
-              <span className="shrink-0 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+              <span className="master-data-csv-file-select-badge shrink-0 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-100">
                 CSV
               </span>
 
@@ -6449,7 +6454,7 @@ export default function Home() {
                           </span>
                         </div>
 
-                        <div className="master-data-permission-scope-actions grid w-full grid-cols-3 gap-2 xl:w-auto xl:grid-cols-6">
+                        <div className={`master-data-permission-scope-actions ${permissionScopeActionsCollapsed ? "master-data-permission-scope-actions--collapsed" : ""} grid w-full grid-cols-3 gap-2 xl:w-auto xl:grid-cols-6`}>
                           <button
                             type="button"
                             onClick={() => setPermissionListScopeSearchOpen(true)}
@@ -6483,11 +6488,28 @@ export default function Home() {
                             </span>
                           </button>
 
-                          <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center rounded-2xl border border-sky-300/15 bg-gradient-to-br from-sky-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
-                            <span className="text-[11px] font-semibold text-slate-400">総件数</span>
-                            <span className="mt-0.5 text-sm font-bold text-white">
-                              {total.toLocaleString()}件
-                            </span>
+                          <div className="master-data-permission-scope-total-wrap relative min-h-[72px] min-w-[170px]">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPermissionScopeActionsCollapsed((current) => !current)
+                              }
+                              className="master-data-permission-scope-collapse-button"
+                              aria-label={
+                                permissionScopeActionsCollapsed
+                                  ? "リストの絞り込み範囲の操作を表示"
+                                  : "リストの絞り込み範囲の操作を折り畳む"
+                              }
+                            >
+                              {permissionScopeActionsCollapsed ? "▼" : "▲"}
+                            </button>
+
+                            <div className="master-data-permission-scope-total-card flex h-full min-h-[72px] w-full flex-col items-center justify-center rounded-2xl border border-sky-300/15 bg-gradient-to-br from-sky-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
+                              <span className="text-[11px] font-semibold text-slate-400">総件数</span>
+                              <span className="mt-0.5 text-sm font-bold text-white">
+                                {total.toLocaleString()}件
+                              </span>
+                            </div>
                           </div>
 
                           <div className="flex min-h-[72px] min-w-[170px] flex-col items-center justify-center overflow-visible rounded-2xl border border-indigo-300/15 bg-gradient-to-br from-indigo-500/12 via-white/5 to-[#0b1220] px-3 py-2 text-center">
@@ -15339,6 +15361,115 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           gap: 4px !important;
           padding-left: 6px !important;
           padding-right: 6px !important;
+        }
+
+        .app-modal-root .master-data-permission-scope-collapse-button {
+          display: none;
+        }
+
+        @media (max-width: 640px) {
+          .app-modal-root .master-data-csv-file-select-card {
+            display: grid !important;
+            grid-template-columns: 48px minmax(0, 1fr) auto !important;
+            align-items: start !important;
+            column-gap: 12px !important;
+            row-gap: 0 !important;
+          }
+
+          .app-modal-root .master-data-csv-file-select-card > span:first-child {
+            grid-column: 1 / 2 !important;
+            grid-row: 1 / 2 !important;
+          }
+
+          .app-modal-root .master-data-csv-file-select-card > span:nth-child(2) {
+            grid-column: 2 / 3 !important;
+            grid-row: 1 / 2 !important;
+          }
+
+          .app-modal-root .master-data-csv-file-select-badge {
+            grid-column: 3 / 4 !important;
+            grid-row: 1 / 2 !important;
+            align-self: start !important;
+            justify-self: end !important;
+            margin-top: 0 !important;
+          }
+        }
+
+        @media (max-width: 1023px) {
+          .app-modal-root .master-data-permission-scope-total-wrap {
+            position: relative !important;
+            overflow: visible !important;
+            padding: 0 !important;
+          }
+
+          .app-modal-root .master-data-permission-scope-total-card {
+            overflow: visible !important;
+          }
+
+          .app-modal-root .master-data-permission-scope-collapse-button {
+            position: absolute;
+            top: -12px;
+            right: -10px;
+            z-index: 3;
+            display: inline-flex !important;
+            height: 30px;
+            min-height: 30px;
+            width: 30px;
+            min-width: 30px;
+            align-items: center;
+            justify-content: center;
+            border-radius: 9999px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0;
+            font-size: 12px;
+            font-weight: 900;
+            line-height: 1;
+            color: #f1f5f9;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+            transition: background 0.2s ease, border-color 0.2s ease;
+          }
+
+          .app-modal-root .master-data-permission-scope-collapse-button:hover {
+            background: rgba(255, 255, 255, 0.1);
+          }
+
+          .app-modal-root
+            .master-data-permission-scope-actions.master-data-permission-scope-actions--collapsed {
+            display: flex !important;
+            justify-content: flex-end !important;
+          }
+
+          .app-modal-root
+            .master-data-permission-scope-actions.master-data-permission-scope-actions--collapsed
+            > :not(.master-data-permission-scope-total-wrap) {
+            display: none !important;
+          }
+
+          .app-modal-root
+            .master-data-permission-scope-actions.master-data-permission-scope-actions--collapsed
+            > .master-data-permission-scope-total-wrap {
+            width: auto !important;
+            min-width: 48px !important;
+            min-height: 32px !important;
+            padding: 0 !important;
+          }
+
+          .app-modal-root
+            .master-data-permission-scope-actions.master-data-permission-scope-actions--collapsed
+            .master-data-permission-scope-total-card {
+            display: none !important;
+          }
+
+          .app-modal-root
+            .master-data-permission-scope-actions.master-data-permission-scope-actions--collapsed
+            .master-data-permission-scope-collapse-button {
+            position: static !important;
+            height: 32px !important;
+            min-height: 32px !important;
+            width: 48px !important;
+            min-width: 48px !important;
+          }
         }
 
         @media (max-width: 1023px) {
