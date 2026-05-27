@@ -66,6 +66,7 @@ type ColumnFilterState = {
   valueOffset: number;
   valueLimit: number;
   valueLoading: boolean;
+  valueLoadingDisplay: boolean;
   hasMoreValues: boolean;
   valueSearch: string;
 };
@@ -1049,6 +1050,7 @@ function createEmptyColumnState(): ColumnFilterState {
     valueOffset: 0,
     valueLimit: 200,
     valueLoading: false,
+    valueLoadingDisplay: false,
     hasMoreValues: false,
     valueSearch: "",
   };
@@ -2430,7 +2432,7 @@ const selectedValueSet = useMemo(
             className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-2"
             onClick={() => onToggleOpen(filterKey)}
           >
-            {filterState.valueLoading && (
+            {filterState.valueLoading && filterState.valueLoadingDisplay && (
               <BlockingLoadingOverlay
                 title="フィルタ候補読み込み中"
                 message="フィルタ候補を読み込んでいます"
@@ -4034,6 +4036,7 @@ export default function Home() {
         searchText?: string;
         stateOverride?: ColumnFilterState;
         offset?: number;
+        showLoadingDisplay?: boolean;
       }
     ) => {
       const reset = options?.reset ?? true;
@@ -4046,6 +4049,7 @@ export default function Home() {
           ? 0
           : currentState.valueOffset;
       const currentLimit = currentState.valueLimit || 200;
+      const showLoadingDisplay = options?.showLoadingDisplay ?? true;
 
       const requestId = (filterValueRequestIdRef.current[key] ?? 0) + 1;
       filterValueRequestIdRef.current[key] = requestId;
@@ -4058,6 +4062,7 @@ export default function Home() {
           [key]: {
             ...current,
             valueLoading: true,
+            valueLoadingDisplay: showLoadingDisplay,
             ...(reset
               ? {
                   availableValues: [],
@@ -4123,6 +4128,7 @@ export default function Home() {
               valueLimit: data.valueLimit || currentLimit,
               hasMoreValues: data.hasMoreValues ?? false,
               valueLoading: false,
+              valueLoadingDisplay: false,
               selectedValues: currentState.valueFilterEnabled
                 ? current.selectedValues
                 : [],
@@ -4139,6 +4145,7 @@ export default function Home() {
           [key]: {
             ...prev[key],
             valueLoading: false,
+            valueLoadingDisplay: false,
           },
         }));
         console.error(e);
@@ -4617,6 +4624,7 @@ export default function Home() {
     void fetchFilterValues(key, {
       reset: true,
       searchText: value,
+      showLoadingDisplay: false,
     });
   };
 
