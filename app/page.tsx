@@ -5820,7 +5820,7 @@ export default function Home() {
                     </div>
 
                     {active && (
-                      <span className="rounded-full border border-sky-300/30 bg-sky-400/10 px-2 py-1 text-[10px] font-semibold text-sky-100">
+                      <span className="rounded-full border border-sky-300/30 bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-100">
                         適用中
                       </span>
                     )}
@@ -6841,7 +6841,7 @@ export default function Home() {
                                   </div>
 
                                   {active && (
-                                    <span className="rounded-full border border-sky-300/30 bg-sky-400/10 px-2 py-1 text-[10px] font-semibold text-sky-100">
+                                    <span className="rounded-full border border-sky-300/30 bg-sky-400/10 px-3 py-1 text-xs font-semibold text-sky-100">
                                       適用中
                                     </span>
                                   )}
@@ -6975,7 +6975,7 @@ export default function Home() {
                             }`}
                           >
                             <span
-                              className={`absolute right-3 top-3 max-w-[118px] truncate rounded-full border px-2.5 py-1 text-[10px] font-bold leading-none ${getMasterDataRoleBadgeClass(
+                              className={`absolute right-3 top-3 max-w-[118px] truncate rounded-full border px-3 py-1 text-xs font-bold ${getMasterDataRoleBadgeClass(
                                 employee.role
                               )}`}
                               title={employee.role}
