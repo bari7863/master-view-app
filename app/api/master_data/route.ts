@@ -202,6 +202,39 @@ const DB_INSERT_TO_CSV_HEADER: Record<
   "メモ": "メモ",
 };
 
+type CsvHeaderColumn = (typeof CSV_HEADER_COLUMNS)[number];
+
+const FILTER_KEY_TO_CSV_HEADER: Record<FilterKey, CsvHeaderColumn> = {
+  company: "企業名",
+  zipcode: "郵便番号",
+  address: "住所",
+  big_industry: "大業種",
+  small_industry: "小業種",
+  company_kana: "企業名（かな）",
+  summary: "企業概要",
+  website_url: "企業URL",
+  form_url: "お問い合わせフォームURL",
+  phone: "電話番号",
+  fax: "FAX番号",
+  email: "メールアドレス",
+  established_date: "設立年月",
+  representative_name: "代表者名",
+  representative_title: "代表者役職",
+  capital: "資本金",
+  employee_count: "従業員数",
+  employee_count_year: "従業員数年度",
+  previous_sales: "前年売上高",
+  latest_sales: "直近売上高",
+  closing_month: "決算月",
+  office_count: "事業所数",
+  tag: "タグ",
+  business_type: "業種",
+  business_content: "事業内容",
+  industry_category: "業界",
+  permit_number: "許可番号",
+  memo: "メモ",
+};
+
 async function ensureMasterDataIdColumn(
   client: { query: (sql: string) => Promise<unknown> }
 ) {
@@ -285,6 +318,10 @@ function parseCsv(text: string): string[][] {
 
 function normalizeHeader(value: string) {
   return value.replace(/^\uFEFF/, "").trim();
+}
+
+function normalizeCsvDedupeValue(value: string | null | undefined) {
+  return String(value ?? "").trim();
 }
 
 function parseFilterModels(searchParams: URLSearchParams) {
@@ -1635,6 +1672,20 @@ export async function POST(req: NextRequest) {
     const skipDuplicateCheck =
       formData.get("skipDuplicateCheck") === "1";
 
+    const dedupeFieldParam = String(formData.get("dedupeField") ?? "").trim();
+    const dedupeMatchMethod = String(
+      formData.get("dedupeMatchMethod") ?? ""
+    ).trim();
+
+    const dedupeField =
+      dedupeFieldParam && dedupeFieldParam in FILTER_COLUMN_MAP
+        ? (dedupeFieldParam as FilterKey)
+        : null;
+
+    const dedupeCsvHeader = dedupeField
+      ? FILTER_KEY_TO_CSV_HEADER[dedupeField]
+      : null;
+
     if (files.length === 0) {
       return NextResponse.json(
         { ok: false, error: "CSVファイルが選択されていません" },
@@ -1707,54 +1758,34 @@ export async function POST(req: NextRequest) {
     let skipped = 0;
 
     if (!skipDuplicateCheck) {
-      const csvCompanies = Array.from(
-        new Set(
-          records
-            .map((record) => record["企業名"]?.trim() ?? "")
-            .filter((company) => company !== "")
-        )
-      );
-
-      const existingCompanySet = new Set<string>();
-
-      if (csvCompanies.length > 0) {
-        const existingRes = await client.query(
-          `
-            SELECT "企業名"
-            FROM public.master_data
-            WHERE "企業名" = ANY($1::text[])
-          `,
-          [csvCompanies]
+      if (!dedupeField || !dedupeCsvHeader) {
+        return NextResponse.json(
+          { ok: false, error: "重複削除する項目が選択されていません" },
+          { status: 400 }
         );
-
-        existingRes.rows.forEach((row) => {
-          const company =
-            typeof row["企業名"] === "string" ? row["企業名"].trim() : "";
-
-          if (company !== "") {
-            existingCompanySet.add(company);
-          }
-        });
       }
 
-      const seenCsvCompanySet = new Set<string>();
+      if (dedupeMatchMethod !== "exact") {
+        return NextResponse.json(
+          { ok: false, error: "対応していない重複削除方法です" },
+          { status: 400 }
+        );
+      }
+
+      const seenCsvDedupeValueSet = new Set<string>();
 
       recordsToInsert = records.filter((record) => {
-        const company = record["企業名"]?.trim() ?? "";
+        const dedupeValue = normalizeCsvDedupeValue(record[dedupeCsvHeader]);
 
-        if (company === "") {
+        if (dedupeValue === "") {
           return true;
         }
 
-        if (existingCompanySet.has(company)) {
+        if (seenCsvDedupeValueSet.has(dedupeValue)) {
           return false;
         }
 
-        if (seenCsvCompanySet.has(company)) {
-          return false;
-        }
-
-        seenCsvCompanySet.add(company);
+        seenCsvDedupeValueSet.add(dedupeValue);
         return true;
       });
 

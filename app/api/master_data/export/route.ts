@@ -159,6 +159,39 @@ const CSV_COLUMNS = [
   "メモ",
 ] as const;
 
+type CsvColumn = (typeof CSV_COLUMNS)[number];
+
+const FILTER_KEY_TO_CSV_HEADER: Record<FilterKey, CsvColumn> = {
+  company: "企業名",
+  zipcode: "郵便番号",
+  address: "住所",
+  big_industry: "大業種",
+  small_industry: "小業種",
+  company_kana: "企業名（かな）",
+  summary: "企業概要",
+  website_url: "企業URL",
+  form_url: "お問い合わせフォームURL",
+  phone: "電話番号",
+  fax: "FAX番号",
+  email: "メールアドレス",
+  established_date: "設立年月",
+  representative_name: "代表者名",
+  representative_title: "代表者役職",
+  capital: "資本金",
+  employee_count: "従業員数",
+  employee_count_year: "従業員数年度",
+  previous_sales: "前年売上高",
+  latest_sales: "直近売上高",
+  closing_month: "決算月",
+  office_count: "事業所数",
+  tag: "タグ",
+  business_type: "業種",
+  business_content: "事業内容",
+  industry_category: "業界",
+  permit_number: "許可番号",
+  memo: "メモ",
+};
+
 function parseFilterModels(searchParams: URLSearchParams) {
   const raw = searchParams.get("filterModels");
   if (!raw) return {} as Partial<Record<FilterKey, FilterModel>>;
@@ -781,15 +814,15 @@ function escapeCsvValue(value: unknown) {
 function createCsvDownloadStream(options: {
   baseSql: string;
   baseParams: unknown[];
-  dedupeByCompany: boolean;
+  dedupeCsvHeader: CsvColumn | null;
 }) {
-  const { baseSql, baseParams, dedupeByCompany } = options;
+  const { baseSql, baseParams, dedupeCsvHeader } = options;
   const encoder = new TextEncoder();
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const client = await pool.connect();
-      const seenCompanies = new Set<string>();
+      const seenDedupeValueSet = new Set<string>();
       let offset = 0;
 
       try {
@@ -816,14 +849,15 @@ function createCsvDownloadStream(options: {
           }
 
           for (const row of rows) {
-            if (dedupeByCompany) {
-              const company = String(row["企業名"] ?? "").trim();
+            if (dedupeCsvHeader) {
+              const dedupeValue = String(row[dedupeCsvHeader] ?? "").trim();
 
-              if (company !== "") {
-                if (seenCompanies.has(company)) {
+              if (dedupeValue !== "") {
+                if (seenDedupeValueSet.has(dedupeValue)) {
                   continue;
                 }
-                seenCompanies.add(company);
+
+                seenDedupeValueSet.add(dedupeValue);
               }
             }
 
@@ -870,6 +904,17 @@ function buildSearchParamsFromExportPayload(payload: Record<string, unknown>) {
     searchParams.set("dedupeByCompany", "1");
   }
 
+  const dedupeField = String(payload.dedupeField ?? "").trim();
+  const dedupeMatchMethod = String(payload.dedupeMatchMethod ?? "").trim();
+
+  if (dedupeField !== "") {
+    searchParams.set("dedupeField", dedupeField);
+  }
+
+  if (dedupeMatchMethod !== "") {
+    searchParams.set("dedupeMatchMethod", dedupeMatchMethod);
+  }
+
   if ("filterModels" in payload) {
     searchParams.set(
       "filterModels",
@@ -893,6 +938,35 @@ async function handleExportRequest(req: NextRequest, searchParams: URLSearchPara
 
   const exportScope = searchParams.get("exportScope") || "filtered";
   const dedupeByCompany = searchParams.get("dedupeByCompany") === "1";
+  const dedupeFieldParam = searchParams.get("dedupeField");
+  const dedupeMatchMethod =
+    searchParams.get("dedupeMatchMethod") || (dedupeByCompany ? "exact" : "");
+
+  const dedupeField =
+    dedupeFieldParam && dedupeFieldParam in FILTER_COLUMN_MAP
+      ? (dedupeFieldParam as FilterKey)
+      : dedupeByCompany
+      ? "company"
+      : null;
+
+  if (dedupeByCompany && !dedupeField) {
+    return NextResponse.json(
+      { ok: false, error: "重複削除する項目が選択されていません" },
+      { status: 400 }
+    );
+  }
+
+  if (dedupeByCompany && dedupeMatchMethod !== "exact") {
+    return NextResponse.json(
+      { ok: false, error: "対応していない重複削除方法です" },
+      { status: 400 }
+    );
+  }
+
+  const dedupeCsvHeader =
+    dedupeByCompany && dedupeField
+      ? FILTER_KEY_TO_CSV_HEADER[dedupeField]
+      : null;
 
   const { whereSql, params } =
     exportScope === "all"
@@ -937,7 +1011,7 @@ async function handleExportRequest(req: NextRequest, searchParams: URLSearchPara
   const csvStream = createCsvDownloadStream({
     baseSql,
     baseParams: params,
-    dedupeByCompany,
+    dedupeCsvHeader,
   });
 
   const fileName = createFileName();

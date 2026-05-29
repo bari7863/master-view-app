@@ -49,6 +49,7 @@ type ConditionType =
   | "is_not_empty";
 
 type DedupeMatchMethod = "exact";
+type CsvDedupeTarget = "import" | "export";
 
 type ColumnFilterState = {
   sortDirection: SortDirection;
@@ -3122,6 +3123,31 @@ export default function Home() {
   const [exportScopeOpen, setExportScopeOpen] = useState(false);
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [exportDuplicateConfirmOpen, setExportDuplicateConfirmOpen] = useState(false);
+
+  const [csvDedupeTarget, setCsvDedupeTarget] =
+    useState<CsvDedupeTarget | null>(null);
+
+  const [csvDedupeFieldOpen, setCsvDedupeFieldOpen] = useState(false);
+  const [csvDedupeMethodOpen, setCsvDedupeMethodOpen] = useState(false);
+
+  const [csvDedupeFinalConfirmOpen, setCsvDedupeFinalConfirmOpen] =
+    useState(false);
+
+  const [csvDedupeSelectedField, setCsvDedupeSelectedField] =
+    useState<FilterKey | null>(null);
+
+  const [csvDedupeMatchMethod, setCsvDedupeMatchMethod] =
+    useState<DedupeMatchMethod | null>(null);
+
+  const resetCsvDedupeState = () => {
+    setCsvDedupeTarget(null);
+    setCsvDedupeFieldOpen(false);
+    setCsvDedupeMethodOpen(false);
+    setCsvDedupeFinalConfirmOpen(false);
+    setCsvDedupeSelectedField(null);
+    setCsvDedupeMatchMethod(null);
+  };
+
   const [exportMode, setExportMode] = useState<"all" | "filtered">("filtered");
   const [exporting, setExporting] = useState(false);
   const [csvTemplateSaving, setCsvTemplateSaving] = useState(false);
@@ -7789,6 +7815,7 @@ const handleExportClick = () => {
   setImportMessage("");
   setExportConfirmOpen(false);
   setExportDuplicateConfirmOpen(false);
+  resetCsvDedupeState();
   setExportScopeOpen(true);
 };
 
@@ -7800,6 +7827,7 @@ const handleImportClick = () => {
   }
 
   setImportDuplicateConfirmOpen(false);
+  resetCsvDedupeState();
   setImportConfirmOpen(true);
 };
 
@@ -7820,9 +7848,21 @@ const handleImport = async (shouldDeduplicate: boolean) => {
     return;
   }
 
+  const dedupeField = shouldDeduplicate ? csvDedupeSelectedField : null;
+  const dedupeMatchMethod = shouldDeduplicate ? csvDedupeMatchMethod : null;
+
+  if (shouldDeduplicate && (!dedupeField || !dedupeMatchMethod)) {
+    setImportError("重複削除の項目と方法を選択してください");
+    setImportMessage("");
+    return;
+  }
+
   setImporting(true);
   setImportConfirmOpen(false);
   setImportDuplicateConfirmOpen(false);
+  setCsvDedupeFieldOpen(false);
+  setCsvDedupeMethodOpen(false);
+  setCsvDedupeFinalConfirmOpen(false);
   setImportError("");
   setImportMessage("");
 
@@ -7834,6 +7874,8 @@ const handleImport = async (shouldDeduplicate: boolean) => {
     });
 
     formData.append("skipDuplicateCheck", shouldDeduplicate ? "0" : "1");
+    formData.append("dedupeField", dedupeField ?? "");
+    formData.append("dedupeMatchMethod", dedupeMatchMethod ?? "");
 
     const res = await fetch("/api/master_data", {
       method: "POST",
@@ -7849,6 +7891,7 @@ const handleImport = async (shouldDeduplicate: boolean) => {
     setImportMessage(data.message || "CSVを取り込みました");
     setSelectedFiles([]);
     setCheckedImportFiles({});
+    resetCsvDedupeState();
     setPage(1);
     await fetchData();
   } catch (e) {
@@ -7939,10 +7982,22 @@ const writeResponseBodyToFile = async (
 };
 
 const handleExport = async (shouldDeduplicate: boolean) => {
+  const dedupeField = shouldDeduplicate ? csvDedupeSelectedField : null;
+  const dedupeMatchMethod = shouldDeduplicate ? csvDedupeMatchMethod : null;
+
+  if (shouldDeduplicate && (!dedupeField || !dedupeMatchMethod)) {
+    setImportError("重複削除の項目と方法を選択してください");
+    setImportMessage("");
+    return;
+  }
+
   setImportError("");
   setImportMessage("");
   setExportConfirmOpen(false);
   setExportDuplicateConfirmOpen(false);
+  setCsvDedupeFieldOpen(false);
+  setCsvDedupeMethodOpen(false);
+  setCsvDedupeFinalConfirmOpen(false);
   setExporting(true);
 
   try {
@@ -7987,6 +8042,8 @@ const handleExport = async (shouldDeduplicate: boolean) => {
     const body: Record<string, unknown> = {
       exportScope: exportMode,
       dedupeByCompany: shouldDeduplicate ? "1" : "0",
+      dedupeField: dedupeField ?? "",
+      dedupeMatchMethod: dedupeMatchMethod ?? "",
     };
 
     if (exportMode === "filtered") {
@@ -8034,6 +8091,7 @@ const handleExport = async (shouldDeduplicate: boolean) => {
     }
 
     setImportMessage("CSVを保存しました");
+    resetCsvDedupeState();
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       return;
@@ -10720,6 +10778,18 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
   const selectedDedupeMatchMethodLabel =
     dedupeMatchMethod === "exact" ? "完全一致" : "";
+
+  const selectedCsvDedupeFieldLabel =
+    COLUMN_DEFS.find((column) => column.key === csvDedupeSelectedField)?.label ?? "";
+
+  const selectedCsvDedupeMatchMethodLabel =
+    csvDedupeMatchMethod === "exact" ? "完全一致" : "";
+
+  const csvDedupeTitlePrefix =
+    csvDedupeTarget === "export" ? "CSV抽出" : "CSV投入";
+
+  const csvDedupeTargetLabel =
+    csvDedupeTarget === "export" ? "抽出するCSV内" : "投入するCSV内";
 
   const selectedItemInspectionFields = visibleItemInspectionColumnDefs
     .filter((column) => itemInspectionSelections[column.key])
@@ -14185,7 +14255,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   </div>
 
                   <div className="px-4 py-6 text-sm leading-7 text-slate-300">
-                    投入するCSV内で、企業名の完全一致を重複削除しますか？
+                    投入するCSV内で重複削除しますか？
                   </div>
 
                   <div className="flex gap-2 border-t border-white/10 px-4 py-4">
@@ -14200,7 +14270,13 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                     <button
                       type="button"
-                      onClick={() => handleImport(true)}
+                      onClick={() => {
+                        setImportDuplicateConfirmOpen(false);
+                        setCsvDedupeTarget("import");
+                        setCsvDedupeSelectedField(null);
+                        setCsvDedupeMatchMethod(null);
+                        setCsvDedupeFieldOpen(true);
+                      }}
                       disabled={importing}
                       className="h-10 flex-1 rounded-xl bg-emerald-500 px-3 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:opacity-50"
                     >
@@ -14479,7 +14555,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                     </div>
 
                     <div className="px-4 py-6 text-sm leading-7 text-slate-300">
-                      抽出するCSV内で、企業名の完全一致を重複削除しますか？
+                      抽出するCSV内で重複削除しますか？
                       <br />
                       <span className="text-xs text-slate-400">
                         対象: {exportMode === "all"
@@ -14499,10 +14575,197 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                       <button
                         type="button"
-                        onClick={() => handleExport(true)}
+                        onClick={() => {
+                          setExportDuplicateConfirmOpen(false);
+                          setCsvDedupeTarget("export");
+                          setCsvDedupeSelectedField(null);
+                          setCsvDedupeMatchMethod(null);
+                          setCsvDedupeFieldOpen(true);
+                        }}
                         className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400"
                       >
                         重複削除する
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {csvDedupeFieldOpen &&
+            csvDedupeTarget &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+                onClick={resetCsvDedupeState}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex max-h-[calc(100dvh-2rem)] min-h-0 w-full max-w-[960px] flex-col overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">
+                          {csvDedupeTitlePrefix} 重複削除 項目選択
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          重複判定に使う項目を選択してください
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={resetCsvDedupeState}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="app-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {COLUMN_DEFS.map((column) => (
+                          <button
+                            key={column.key}
+                            type="button"
+                            onClick={() => {
+                              setCsvDedupeSelectedField(column.key);
+                              setCsvDedupeMatchMethod(null);
+                              setCsvDedupeFieldOpen(false);
+                              setCsvDedupeMethodOpen(true);
+                            }}
+                            className="min-h-[58px] rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-semibold text-slate-200 transition hover:border-violet-300/30 hover:bg-violet-500/10"
+                          >
+                            {column.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {csvDedupeMethodOpen &&
+            csvDedupeTarget &&
+            csvDedupeSelectedField &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+                onClick={resetCsvDedupeState}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[560px] flex-col overflow-hidden rounded-2xl border border-violet-300/15 bg-gradient-to-br from-[#0b1220]/98 via-[#0f172a]/95 to-[#07101f]/98 shadow-[0_24px_70px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-100">
+                          {csvDedupeTitlePrefix} 重複削除 方法確認
+                        </div>
+                        <div className="mt-1 text-xs text-slate-400">
+                          {selectedCsvDedupeFieldLabel} の重複判定方法を選択してください
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={resetCsvDedupeState}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="px-4 py-5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCsvDedupeMatchMethod("exact");
+                          setCsvDedupeMethodOpen(false);
+                          setCsvDedupeFinalConfirmOpen(true);
+                        }}
+                        className="h-11 w-full rounded-xl bg-sky-500 px-5 text-sm font-medium text-white transition hover:bg-sky-400"
+                      >
+                        完全一致
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+
+          {csvDedupeFinalConfirmOpen &&
+            csvDedupeTarget &&
+            csvDedupeSelectedField &&
+            csvDedupeMatchMethod &&
+            typeof document !== "undefined" &&
+            createPortal(
+              <div
+                className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
+                onClick={() => {
+                  if (csvDedupeTarget === "import" && importing) return;
+                  if (csvDedupeTarget === "export" && exporting) return;
+                  resetCsvDedupeState();
+                }}
+              >
+                <div className="flex min-h-full items-center justify-center">
+                  <div
+                    className="flex w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0b1220]/95 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-b border-white/10 px-4 py-4 text-sm font-semibold text-slate-100">
+                      {csvDedupeTitlePrefix} 重複削除 最終確認
+                    </div>
+
+                    <div className="px-4 py-6 text-sm leading-7 text-slate-300">
+                      {csvDedupeTargetLabel}で、{selectedCsvDedupeFieldLabel}の
+                      {selectedCsvDedupeMatchMethodLabel}を重複削除します。
+                      <br />
+                      本当に重複削除しますか？
+                      {csvDedupeTarget === "export" && (
+                        <>
+                          <br />
+                          <span className="text-xs text-slate-400">
+                            対象: {exportMode === "all"
+                              ? "全てのリスト"
+                              : "絞り込みリストのみ"}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 border-t border-white/10 px-4 py-4">
+                      <button
+                        type="button"
+                        onClick={resetCsvDedupeState}
+                        disabled={csvDedupeTarget === "import" ? importing : exporting}
+                        className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500 disabled:opacity-50"
+                      >
+                        いいえ
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (csvDedupeTarget === "import") {
+                            void handleImport(true);
+                            return;
+                          }
+
+                          void handleExport(true);
+                        }}
+                        disabled={csvDedupeTarget === "import" ? importing : exporting}
+                        className="h-10 flex-1 rounded-xl bg-sky-500 px-3 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+                      >
+                        はい
                       </button>
                     </div>
                   </div>
