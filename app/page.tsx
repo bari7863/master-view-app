@@ -1358,7 +1358,7 @@ function MasterDataBrandLogo({
   return (
     <svg
       viewBox="0 0 520 280"
-      preserveAspectRatio="xMidYMid slice"
+      preserveAspectRatio="xMidYMid meet"
       className={`master-data-brand-logo ${className}`}
       role="img"
       aria-label="MASTER DATA BARI SPECIAL"
@@ -3186,6 +3186,9 @@ export default function Home() {
   const [openSidebarPanel, setOpenSidebarPanel] =
     useState<SidebarPanelKey | null>(null);
 
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [returnToMobileNavigationAfterPanelClose, setReturnToMobileNavigationAfterPanelClose] = useState(false);
+
   const [themeMode, setThemeMode] = useState<"system" | "dark" | "light">("system");
 
   const [systemThemeMode, setSystemThemeMode] = useState<"dark" | "light">(() => {
@@ -4831,6 +4834,7 @@ export default function Home() {
     const handleOpenSidebarPanel = (key: SidebarPanelKey) => {
       setOpenFilterKey(null);
       setOpenAdvancedFilterKey(null);
+      setMobileNavigationOpen(false);
 
       const nextPanel = openSidebarPanel === key ? null : key;
       setOpenSidebarPanel(nextPanel);
@@ -4869,6 +4873,31 @@ export default function Home() {
         setItemDeleteFieldOpen(false);
         setItemDeleteConfirmOpen(false);
         setItemDeleteTarget(null);
+      }
+    };
+
+    const handleOpenMobileNavigationPanel = (key: SidebarPanelKey) => {
+      setReturnToMobileNavigationAfterPanelClose(true);
+      setMobileNavigationOpen(false);
+      handleOpenSidebarPanel(key);
+    };
+
+    const closeSidebarPanel = () => {
+      setOpenSidebarPanel(null);
+
+      if (returnToMobileNavigationAfterPanelClose) {
+        setMobileNavigationOpen(true);
+        setReturnToMobileNavigationAfterPanelClose(false);
+      }
+    };
+
+    const closeAllFiltersClearConfirm = () => {
+      setAllFiltersClearConfirmOpen(false);
+      setAllFiltersClearConfirmTarget(null);
+
+      if (returnToMobileNavigationAfterPanelClose) {
+        setMobileNavigationOpen(true);
+        setReturnToMobileNavigationAfterPanelClose(false);
       }
     };
 
@@ -4947,14 +4976,12 @@ export default function Home() {
         setOpenAdvancedFilterKey(null);
         setPermissionListScopeSearchOpen(false);
         setAdvancedFilterReturnTarget(null);
-        setAllFiltersClearConfirmOpen(false);
-        setAllFiltersClearConfirmTarget(null);
+        closeAllFiltersClearConfirm();
         return;
       }
 
       clearAllFilters();
-      setAllFiltersClearConfirmOpen(false);
-      setAllFiltersClearConfirmTarget(null);
+      closeAllFiltersClearConfirm();
     };
 
   const renderAdvancedFilterContent = () => {
@@ -10501,6 +10528,39 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     ? SIDEBAR_PANEL_TITLES[openSidebarPanel]
     : "";
 
+  const visibleSidebarMenuItems = SIDEBAR_MENU_ITEMS.filter((item) => {
+    if (item.key === "search") {
+      return canUseAnyPermission(
+        ADVANCED_FILTER_BUTTONS.map((button) =>
+          getAdvancedFilterPermissionKey(button.key)
+        )
+      );
+    }
+
+    if (item.key === "list") {
+      return canUseAnyPermission([
+        "list.add",
+        "list.delete",
+        "list.itemDelete",
+        "list.dedupe",
+      ]);
+    }
+
+    if (item.key === "csv") {
+      return canUseAnyPermission([
+        "csv.import",
+        "csv.export",
+        "csv.template",
+      ]);
+    }
+
+    if (item.key === "inspection") {
+      return canUseCrawlPanel || canUseItemInspectionPanel;
+    }
+
+    return true;
+  });
+
   const sidebarPanelMaxWidthClass =
     openSidebarPanel === "csv"
       ? "max-w-[920px]"
@@ -11062,7 +11122,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       >
 
         <aside
-          className="fixed bottom-[var(--app-sidebar-gap)] left-[var(--app-sidebar-left)] top-[var(--app-sidebar-gap)] z-40 w-[var(--app-sidebar-width)] overflow-visible transition-all duration-300"
+          className="master-data-desktop-sidebar fixed bottom-[var(--app-sidebar-gap)] left-[var(--app-sidebar-left)] top-[var(--app-sidebar-gap)] z-40 w-[var(--app-sidebar-width)] overflow-visible transition-all duration-300"
         >
           <div className="mb-2 flex h-[var(--app-logo-height)] w-full items-center justify-center overflow-hidden px-0">
             <MasterDataBrandLogo
@@ -11108,38 +11168,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               </div>
 
               <div className="app-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {SIDEBAR_MENU_ITEMS.filter((item) => {
-                  if (item.key === "search") {
-                    return canUseAnyPermission(
-                      ADVANCED_FILTER_BUTTONS.map((button) =>
-                        getAdvancedFilterPermissionKey(button.key)
-                      )
-                    );
-                  }
-
-                  if (item.key === "list") {
-                    return canUseAnyPermission([
-                      "list.add",
-                      "list.delete",
-                      "list.itemDelete",
-                      "list.dedupe",
-                    ]);
-                  }
-
-                  if (item.key === "csv") {
-                    return canUseAnyPermission([
-                      "csv.import",
-                      "csv.export",
-                      "csv.template",
-                    ]);
-                  }
-
-                  if (item.key === "inspection") {
-                    return canUseCrawlPanel || canUseItemInspectionPanel;
-                  }
-
-                  return true;
-                }).map((item) => {
+                {visibleSidebarMenuItems.map((item) => {
                   const isActive = openSidebarPanel === item.key;
 
                   return (
@@ -11403,16 +11432,150 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                   {headerSummaryCollapsed ? "▼" : "▲"}
                 </button>
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReturnToMobileNavigationAfterPanelClose(false);
+                    setMobileNavigationOpen(true);
+                  }}
+                  className="master-data-mobile-menu-button hidden h-full min-h-[var(--app-stat-card-h)] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-100 transition hover:bg-white/10"
+                  title="メニューを開く"
+                  aria-label="メニューを開く"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    className="h-4 w-4"
+                  >
+                    <path d="M4 7h16" />
+                    <path d="M4 12h16" />
+                    <path d="M4 17h16" />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMobileNavigationOpen(true)}
+                  className="master-data-mobile-menu-button hidden h-full min-h-[var(--app-stat-card-h)] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-100 transition hover:bg-white/10"
+                  title="メニューを開く"
+                  aria-label="メニューを開く"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    className="h-4 w-4"
+                  >
+                    <path d="M4 7h16" />
+                    <path d="M4 12h16" />
+                    <path d="M4 17h16" />
+                  </svg>
+                </button>
+
               </div>
             </div>
           </div>
+
+        {mobileNavigationOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <div
+              className="app-modal-root master-data-mobile-navigation-root fixed inset-0 z-[10000] overflow-y-auto bg-[#050b14]/95 p-0 backdrop-blur-xl"
+              onClick={() => {
+                setMobileNavigationOpen(false);
+                setReturnToMobileNavigationAfterPanelClose(false);
+              }}
+            >
+              <div className="flex min-h-full items-stretch">
+                <div
+                  className="master-data-mobile-navigation-panel w-full max-w-none rounded-none border border-sky-300/15 bg-[#0b1220]/95 p-4 shadow-[0_24px_70px_rgba(0,0,0,0.5)]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="relative mb-7 pr-12">
+                    <div className="flex w-full items-center gap-4 px-2 py-1">
+                      <MasterDataBrandLogo className="h-[96px] w-[170px] shrink-0" />
+
+                      <div className="master-data-mobile-navigation-word master-data-brand-logo__wordmark min-w-0 flex-1 text-[14px] font-black uppercase tracking-[0.24em] text-slate-100">
+                        NAVIGATION
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMobileNavigationOpen(false);
+                        setReturnToMobileNavigationAfterPanelClose(false);
+                      }}
+                      className="master-data-mobile-navigation-close absolute right-0 top-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-100 transition hover:bg-white/10"
+                      aria-label="メニューを閉じる"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {visibleSidebarMenuItems.some((item) => item.key === "search") && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMobileNavigationPanel("search")}
+                          className="master-data-mobile-navigation-button flex min-h-[92px] flex-col items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-4 text-slate-100 transition hover:border-sky-300/30 hover:bg-sky-400/10"
+                        >
+                          <SidebarMenuIcon menuKey="search" className="h-6 w-6" />
+                          <span className="text-sm font-black">検索</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReturnToMobileNavigationAfterPanelClose(true);
+                            setMobileNavigationOpen(false);
+                            setOpenSidebarPanel(null);
+                            setPermissionListScopeSearchOpen(false);
+                            setOpenFilterKey(null);
+                            setOpenAdvancedFilterKey(null);
+                            setAllFiltersClearConfirmTarget("main");
+                            setAllFiltersClearConfirmOpen(true);
+                          }}
+                          className="master-data-mobile-navigation-button flex min-h-[92px] flex-col items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-4 text-slate-100 transition hover:border-sky-300/30 hover:bg-sky-400/10"
+                        >
+                          <span className="text-2xl leading-none">↺</span>
+                          <span className="text-sm font-black">フィルタ解除</span>
+                        </button>
+                      </>
+                    )}
+
+                    {visibleSidebarMenuItems
+                      .filter((item) => item.key !== "search")
+                      .map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => handleOpenMobileNavigationPanel(item.key)}
+                          className="master-data-mobile-navigation-button flex min-h-[92px] flex-col items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-4 text-slate-100 transition hover:border-sky-300/30 hover:bg-sky-400/10"
+                        >
+                          <SidebarMenuIcon menuKey={item.key} className="h-6 w-6" />
+                          <span className="text-sm font-black">{item.label}</span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
 
         {openSidebarPanel &&
           typeof document !== "undefined" &&
           createPortal(
             <div
               className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
-              onClick={() => setOpenSidebarPanel(null)}
+              onClick={closeSidebarPanel}
             >
               <div className="flex min-h-full items-center justify-center">
                 <div
@@ -11426,7 +11589,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
                     <button
                       type="button"
-                      onClick={() => setOpenSidebarPanel(null)}
+                      onClick={closeSidebarPanel}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10"
                     >
                       ×
@@ -14791,10 +14954,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               createPortal(
                 <div
                   className="app-modal-root fixed inset-0 z-[9999] overflow-y-auto bg-slate-950/70 p-[var(--app-modal-page-pad)]"
-                  onClick={() => {
-                    setAllFiltersClearConfirmOpen(false);
-                    setAllFiltersClearConfirmTarget(null);
-                  }}
+                  onClick={closeAllFiltersClearConfirm}
                 >
                   <div className="flex min-h-full items-center justify-center">
                     <div
@@ -14812,10 +14972,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                       <div className="flex gap-2 border-t border-white/10 px-4 py-4">
                         <button
                           type="button"
-                          onClick={() => {
-                            setAllFiltersClearConfirmOpen(false);
-                            setAllFiltersClearConfirmTarget(null);
-                          }}
+                          onClick={closeAllFiltersClearConfirm}
                           className="h-10 flex-1 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white transition hover:bg-rose-500"
                         >
                           いいえ
@@ -15697,8 +15854,8 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
 
           .app-modal-root .master-data-permission-scope-collapse-button {
             position: absolute;
-            top: -12px;
-            right: -10px;
+            top: -35px;
+            right: 0px;
             z-index: 3;
             display: inline-flex !important;
             height: 30px;
@@ -16113,6 +16270,133 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
             padding-right: 6px !important;
           }
         }
+
+        @media (max-width: 760px) {
+          .app-responsive-root,
+          .app-responsive-root.app-sidebar-open,
+          .app-responsive-root.app-sidebar-closed {
+            --app-sidebar-left: 0px !important;
+            --app-sidebar-width: 0px !important;
+            --app-content-left: 0px !important;
+            --app-logo-width: 0px !important;
+            --app-sidebar-menu-offset: 0px !important;
+            --app-page-x: 4px !important;
+            --app-page-y: 6px !important;
+            --app-stat-card-h: 48px !important;
+          }
+
+          .app-responsive-root .master-data-desktop-sidebar {
+            display: none !important;
+          }
+
+          .app-responsive-root .master-data-header-layout {
+            grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
+            grid-template-areas:
+              "title title account account logout logout toggle mobilemenu"
+              "total total page page totalpages totalpages pagesize pagesize" !important;
+            align-items: stretch !important;
+            gap: 4px !important;
+          }
+
+          .app-responsive-root .master-data-header-layout.master-data-header-layout--collapsed {
+            grid-template-areas:
+              "title title account account logout logout toggle mobilemenu" !important;
+          }
+
+          .app-responsive-root .master-data-mobile-menu-button {
+            grid-area: mobilemenu !important;
+            display: flex !important;
+            min-height: 36px !important;
+            height: 36px !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            border-radius: 12px !important;
+            padding: 0 !important;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button {
+            min-height: 36px !important;
+            height: 36px !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            border-radius: 12px !important;
+            padding: 0 !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            font-size: clamp(13px, 3.7vw, 17px) !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(-n + 4) {
+            min-height: 44px !important;
+            height: 44px !important;
+            padding: 4px 5px !important;
+            border-radius: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5),
+          .app-responsive-root .master-data-header-summary > :nth-child(6) {
+            min-height: 36px !important;
+            height: 36px !important;
+            border-radius: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            padding: 3px 4px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) .h-9.w-9 {
+            width: 22px !important;
+            height: 22px !important;
+            min-width: 22px !important;
+            min-height: 22px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) svg {
+            width: 12px !important;
+            height: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) button {
+            height: 36px !important;
+            min-height: 36px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+            gap: 2px !important;
+            font-size: 9px !important;
+            border-radius: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) svg {
+            width: 11px !important;
+            height: 11px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div {
+            display: flex !important;
+            width: 100% !important;
+            justify-content: center !important;
+            align-items: center !important;
+            margin-top: 2px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) > div > button,
+          .app-responsive-root .master-data-header-summary > :nth-child(4) > div > button {
+            width: min(74px, calc(100% - 6px)) !important;
+            max-width: calc(100% - 6px) !important;
+            min-width: 0 !important;
+            height: 24px !important;
+            min-height: 24px !important;
+            justify-content: center !important;
+            gap: 3px !important;
+            padding-left: 5px !important;
+            padding-right: 5px !important;
+            font-size: 9px !important;
+            border-radius: 9px !important;
+          }
+        }
+
 
         .app-scrollbar,
         html,
@@ -17327,6 +17611,487 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           .app-responsive-root .master-data-login-screen .master-data-login-form-area {
             padding-left: 20px !important;
             padding-right: 20px !important;
+          }
+        }
+
+        .master-data-mobile-navigation-root {
+          padding: 0 !important;
+        }
+
+        .master-data-mobile-navigation-root > div {
+          min-height: 100dvh !important;
+          align-items: stretch !important;
+        }
+
+        .master-data-mobile-navigation-panel {
+          width: 100vw !important;
+          max-width: none !important;
+          min-height: 100dvh !important;
+          border-radius: 0 !important;
+          color: #f8fafc !important;
+        }
+
+        .master-data-mobile-navigation-head {
+          width: 100% !important;
+        }
+
+        .master-data-mobile-navigation-root .master-data-brand-logo {
+          --mdb-gold-1: #f8e7c5 !important;
+          --mdb-gold-2: #ddb879 !important;
+          --mdb-gold-3: #b98542 !important;
+          --mdb-gold-text: #f1d4a4 !important;
+          filter:
+            drop-shadow(0 10px 22px rgba(0, 0, 0, 0.32))
+            drop-shadow(0 2px 8px rgba(247, 227, 191, 0.22)) !important;
+        }
+
+        .master-data-mobile-navigation-root .master-data-mobile-navigation-button,
+        .master-data-mobile-navigation-root .master-data-mobile-navigation-button *,
+        .master-data-mobile-navigation-root .master-data-mobile-navigation-close {
+          color: #f8fafc !important;
+          stroke: currentColor !important;
+        }
+
+        .master-data-loading-card .master-data-brand-logo {
+          --mdb-gold-1: #f8e7c5 !important;
+          --mdb-gold-2: #ddb879 !important;
+          --mdb-gold-3: #b98542 !important;
+          --mdb-gold-text: #f1d4a4 !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root {
+          background: rgba(248, 250, 252, 0.96) !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-panel {
+          border-color: rgba(15, 23, 42, 0.12) !important;
+          background: rgba(255, 255, 255, 0.96) !important;
+          box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18) !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-head,
+        body[data-app-theme="light"] .master-data-mobile-navigation-button,
+        body[data-app-theme="light"] .master-data-mobile-navigation-close {
+          border-color: rgba(15, 23, 42, 0.12) !important;
+          background: rgba(248, 250, 252, 0.96) !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-navigation-word {
+          background: none !important;
+          -webkit-background-clip: initial !important;
+          background-clip: initial !important;
+          color: #0f172a !important;
+          -webkit-text-fill-color: #0f172a !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-mobile-navigation-button,
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-mobile-navigation-button *,
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-mobile-navigation-close {
+          color: #0f172a !important;
+          stroke: currentColor !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-brand-logo,
+        body[data-app-theme="light"] .master-data-loading-card .master-data-brand-logo {
+          --mdb-gold-1: #8f6327 !important;
+          --mdb-gold-2: #6f471b !important;
+          --mdb-gold-3: #4a2c12 !important;
+          --mdb-gold-text: #6f471b !important;
+          filter:
+            drop-shadow(0 8px 18px rgba(15, 23, 42, 0.16))
+            drop-shadow(0 1px 0 rgba(255, 255, 255, 0.75)) !important;
+        }
+
+        @media (max-width: 640px) {
+          .app-responsive-root .master-data-login-screen {
+            grid-template-rows: 180px minmax(0, 1fr) !important;
+            align-content: stretch !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-hero {
+            min-height: 180px !important;
+            height: 180px !important;
+            justify-content: center !important;
+            padding: 14px 18px !important;
+            overflow: visible !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-main-logo {
+            width: min(300px, 82vw) !important;
+            max-height: 160px !important;
+            transform: translateY(0) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-hero .master-data-brand-title {
+            display: none !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-form-area {
+            min-height: calc(100dvh - 180px) !important;
+            align-items: stretch !important;
+            justify-content: center !important;
+            padding: 22px 22px 34px !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-form-area form {
+            display: flex !important;
+            min-height: calc(100dvh - 236px) !important;
+            max-width: none !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-wordmark {
+            width: min(360px, 100%) !important;
+            transform: translateY(0) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-form-area form > div:first-child {
+            margin-bottom: 30px !important;
+          }
+
+          .app-responsive-root .master-data-login-screen label {
+            margin-bottom: 8px !important;
+            font-size: 13px !important;
+          }
+
+          .app-responsive-root .master-data-login-screen input {
+            height: 56px !important;
+            border-radius: 18px !important;
+            font-size: 14px !important;
+          }
+
+          .app-responsive-root .master-data-login-screen button[type="submit"] {
+            height: 58px !important;
+            border-radius: 18px !important;
+            font-size: 14px !important;
+          }
+        }
+
+        @media (max-width: 760px) {
+          .app-responsive-root,
+          .app-responsive-root.app-sidebar-open,
+          .app-responsive-root.app-sidebar-closed {
+            --app-sidebar-left: 0px !important;
+            --app-sidebar-width: 0px !important;
+            --app-content-left: 0px !important;
+            --app-logo-width: 0px !important;
+            --app-sidebar-menu-offset: 0px !important;
+            --app-page-x: 4px !important;
+            --app-page-y: 6px !important;
+            --app-stat-card-h: 56px !important;
+          }
+
+          .app-responsive-root .master-data-desktop-sidebar {
+            display: none !important;
+          }
+
+          .app-responsive-root .master-data-header-layout {
+            display: grid !important;
+            grid-template-columns:
+              minmax(68px, 0.75fr)
+              minmax(100px, 1.12fr)
+              minmax(74px, 0.82fr)
+              40px
+              40px !important;
+            grid-template-areas:
+              "title account logout toggle mobilemenu"
+              "total page totalpages pagesize pagesize" !important;
+            align-items: stretch !important;
+            gap: 6px !important;
+          }
+
+          .app-responsive-root .master-data-header-layout.master-data-header-layout--collapsed {
+            grid-template-areas:
+              "title account logout toggle mobilemenu" !important;
+          }
+
+          .app-responsive-root .master-data-header-title {
+            grid-area: title !important;
+            min-width: 0 !important;
+            align-self: stretch !important;
+            padding-left: 2px !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            max-width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: clip !important;
+            font-size: clamp(10px, 2.9vw, 13px) !important;
+            letter-spacing: 0.02em !important;
+            line-height: 1 !important;
+          }
+
+          .app-responsive-root .master-data-header-summary {
+            display: contents !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(1) {
+            grid-area: total !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(2) {
+            grid-area: page !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(3) {
+            grid-area: totalpages !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(4) {
+            grid-area: pagesize !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            grid-area: account !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) {
+            grid-area: logout !important;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button {
+            grid-area: toggle !important;
+            display: flex !important;
+          }
+
+          .app-responsive-root .master-data-mobile-menu-button {
+            grid-area: mobilemenu !important;
+            display: flex !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(-n + 4) {
+            min-height: 52px !important;
+            height: 52px !important;
+            padding: 6px 5px !important;
+            border-radius: 13px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5),
+          .app-responsive-root .master-data-header-summary > :nth-child(6),
+          .app-responsive-root .master-data-header-collapse-button,
+          .app-responsive-root .master-data-mobile-menu-button {
+            min-height: 42px !important;
+            height: 42px !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            border-radius: 13px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) {
+            padding: 4px 5px !important;
+            overflow: hidden !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) .h-9.w-9 {
+            width: 24px !important;
+            height: 24px !important;
+            min-width: 24px !important;
+            min-height: 24px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(5) svg {
+            width: 12px !important;
+            height: 12px !important;
+          }
+
+          .app-responsive-root .master-data-header-summary > :nth-child(6) button {
+            height: 42px !important;
+            min-height: 42px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+            gap: 2px !important;
+            font-size: 9px !important;
+            border-radius: 13px !important;
+          }
+
+          .app-responsive-root .master-data-header-collapse-button,
+          .app-responsive-root .master-data-mobile-menu-button {
+            padding: 0 !important;
+            font-size: 11px !important;
+          }
+
+          .app-responsive-root
+            .master-data-header-summary.master-data-header-summary--collapsed
+            > :nth-child(-n + 4) {
+            display: none !important;
+          }
+        }
+
+        .master-data-mobile-navigation-root {
+          padding: 0 !important;
+        }
+
+        .master-data-mobile-navigation-root > div {
+          min-height: 100dvh !important;
+          align-items: stretch !important;
+        }
+
+        .master-data-mobile-navigation-panel {
+          width: 100vw !important;
+          max-width: none !important;
+          min-height: 100dvh !important;
+          border-radius: 0 !important;
+          color: #f8fafc !important;
+        }
+
+        .master-data-mobile-navigation-head {
+          width: 100% !important;
+        }
+
+        .master-data-mobile-navigation-root .master-data-mobile-navigation-word {
+          color: #f8fafc !important;
+          -webkit-text-fill-color: #f8fafc !important;
+          background-image: none !important;
+          text-shadow:
+            0 0 1px rgba(255, 255, 255, 0.95),
+            0 0 14px rgba(56, 189, 248, 0.42) !important;
+        }
+
+        .master-data-mobile-navigation-root .master-data-mobile-navigation-button,
+        .master-data-mobile-navigation-root .master-data-mobile-navigation-button *,
+        .master-data-mobile-navigation-root .master-data-mobile-navigation-close {
+          color: #f8fafc !important;
+          stroke: currentColor !important;
+        }
+
+        .master-data-mobile-navigation-root .master-data-brand-logo__display,
+        .master-data-mobile-navigation-root .master-data-brand-logo__display-alt,
+        .master-data-loading-card .master-data-brand-logo__display,
+        .master-data-loading-card .master-data-brand-logo__display-alt {
+          fill: var(--mdb-gold-1) !important;
+          opacity: 1 !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root {
+          background: rgba(248, 250, 252, 0.96) !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-panel {
+          border-color: rgba(15, 23, 42, 0.12) !important;
+          background: rgba(255, 255, 255, 0.96) !important;
+          box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18) !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-head,
+        body[data-app-theme="light"] .master-data-mobile-navigation-button,
+        body[data-app-theme="light"] .master-data-mobile-navigation-close {
+          border-color: rgba(15, 23, 42, 0.12) !important;
+          background: rgba(248, 250, 252, 0.96) !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-mobile-navigation-word {
+          color: #0f172a !important;
+          -webkit-text-fill-color: #0f172a !important;
+          background-image: none !important;
+          -webkit-text-stroke: 0 !important;
+          text-shadow: none !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-mobile-navigation-button,
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-mobile-navigation-button *,
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-mobile-navigation-close {
+          color: #0f172a !important;
+          stroke: currentColor !important;
+        }
+
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-brand-logo__display,
+        body[data-app-theme="light"] .master-data-mobile-navigation-root .master-data-brand-logo__display-alt,
+        body[data-app-theme="light"] .master-data-loading-card .master-data-brand-logo__display,
+        body[data-app-theme="light"] .master-data-loading-card .master-data-brand-logo__display-alt {
+          fill: var(--mdb-gold-2) !important;
+          opacity: 1 !important;
+        }
+
+        @media (max-width: 760px) {
+          .app-responsive-root .master-data-header-title {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            align-self: stretch !important;
+            height: 100% !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+          }
+
+          .app-responsive-root .master-data-header-title .master-data-brand-title {
+            display: flex !important;
+            align-items: center !important;
+            height: 100% !important;
+            line-height: 1 !important;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .app-responsive-root .master-data-login-screen .master-data-login-hero {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-main-logo {
+            width: min(280px, 76vw) !important;
+            max-height: 150px !important;
+            transform: translateY(0) !important;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .app-responsive-root .master-data-login-screen {
+            /*
+              黒背景の高さを変えたい場合はここを変更
+              例：180px → 200px にすると黒背景が高くなる
+            */
+            --login-hero-height: 180px;
+
+            /*
+              黒背景内のロゴ位置を上下に動かしたい場合はここを変更
+              例：0px → 12px で下へ、0px → -12px で上へ
+            */
+            --login-logo-y: 40px;
+
+            /*
+              白背景内の「MASTER DATA / ID / パスワード / ログイン」を上下に動かしたい場合はここを変更
+              例：0px → 20px で下へ、0px → -20px で上へ
+            */
+            --login-form-y: -80px;
+
+            /*
+              ロゴの大きさを変えたい場合はここを変更
+              例：300px → 280px で小さく、300px → 320px で大きく
+            */
+            --login-logo-width: min(300px, 82vw);
+
+            grid-template-rows: var(--login-hero-height) minmax(0, 1fr) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-hero {
+            display: flex !important;
+            min-height: var(--login-hero-height) !important;
+            height: var(--login-hero-height) !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-main-logo {
+            width: var(--login-logo-width) !important;
+            max-height: calc(var(--login-hero-height) - 20px) !important;
+            transform: translateY(var(--login-logo-y)) !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-form-area {
+            min-height: calc(100dvh - var(--login-hero-height)) !important;
+            align-items: stretch !important;
+            justify-content: center !important;
+          }
+
+          .app-responsive-root .master-data-login-screen .master-data-login-form-area form {
+            transform: translateY(var(--login-form-y)) !important;
           }
         }
 
