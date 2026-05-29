@@ -663,6 +663,17 @@ function refreshMasterDataLoginExpiresAt() {
   );
 }
 
+async function refreshMasterDataAuthCookieByKeepAlive() {
+  try {
+    await fetch("/api/master_data/login?keepAlive=1", {
+      method: "GET",
+      cache: "no-store",
+    });
+  } catch {
+    // Cookie延長に失敗しても、画面側の処理は止めません
+  }
+}
+
 function clearMasterDataLoginSessionStorage() {
   if (typeof window === "undefined") return;
 
@@ -4410,6 +4421,7 @@ export default function Home() {
         savedLoginSession === "1"
       ) {
         refreshMasterDataLoginExpiresAt();
+        void refreshMasterDataAuthCookieByKeepAlive();
         return;
       }
 

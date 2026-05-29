@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   clearMasterDataAuthCookie,
+  refreshMasterDataAuthCookie,
   requireMasterDataAuth,
   setMasterDataAuthCookie,
 } from "@/lib/master-data-auth";
@@ -346,6 +347,14 @@ export async function GET(req: NextRequest) {
 
   if (authError) {
     return authError;
+  }
+
+  const keepAlive = new URL(req.url).searchParams.get("keepAlive") === "1";
+
+  if (keepAlive) {
+    const response = NextResponse.json({ ok: true });
+    refreshMasterDataAuthCookie(response, req);
+    return response;
   }
 
   try {
