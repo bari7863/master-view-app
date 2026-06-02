@@ -1341,15 +1341,30 @@ function buildCrawlPayloadBundles(
       ? `${officeCompanyBase} ${officeName}`
       : officeCompanyBase;
 
+  const emailCandidateValues = uniqueTextValues([
+    ...sortedOfficeSources.flatMap((office) => office.email_candidates),
+    normalizeNullableText(extracted.email),
+  ]);
+
+  const zipcodeCandidateValues = uniqueTextValues([
+    ...sortedOfficeSources.flatMap((office) => office.zipcode_candidates),
+    normalizeNullableText(extracted.zipcode),
+  ]);
+
+  const addressCandidateValues = uniqueTextValues([
+    ...sortedOfficeSources.flatMap((office) => office.address_candidates),
+    normalizeNullableText(extracted.address),
+  ]);
+
   const payload: CrawlPayload = {
     company: company && isLikelyCompanyName(company) ? company : fallbackCompany,
     website_url: normalizeNullableText(extracted.website_url),
     form_url: normalizeNullableText(extracted.form_url),
     phone: firstPhoneValue,
     fax: firstFaxValue,
-    email: normalizeNullableText(extracted.email),
-    zipcode: normalizeNullableText(extracted.zipcode),
-    address: normalizeNullableText(extracted.address),
+    email: emailCandidateValues[0] ?? normalizeNullableText(extracted.email),
+    zipcode: zipcodeCandidateValues[0] ?? normalizeNullableText(extracted.zipcode),
+    address: addressCandidateValues[0] ?? normalizeNullableText(extracted.address),
     established_date: normalizeNullableText(extracted.established_date),
     representative_name: normalizeNullableText(extracted.representative_name),
     representative_name_raw: normalizeNullableText(
@@ -1375,15 +1390,9 @@ function buildCrawlPayloadBundles(
         fax: faxCandidates.values.length > 0
           ? faxCandidates.values
           : fallbackFaxCandidates,
-        email: uniqueTextValues(
-          sortedOfficeSources.flatMap((office) => office.email_candidates)
-        ),
-        zipcode: uniqueTextValues(
-          sortedOfficeSources.flatMap((office) => office.zipcode_candidates)
-        ),
-        address: uniqueTextValues(
-          sortedOfficeSources.flatMap((office) => office.address_candidates)
-        ),
+        email: emailCandidateValues,
+        zipcode: zipcodeCandidateValues,
+        address: addressCandidateValues,
       },
       officeLabelMap: {
         phone: phoneCandidates.labelMap,

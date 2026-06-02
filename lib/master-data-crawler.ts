@@ -904,6 +904,44 @@ const ADDRESS_PREFIX_REGEX =
 const ADDRESS_TRAILING_LABEL_REGEX =
   /\s*(?:営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|連絡先|本社|本店|支店|営業所|工場|事業所)\s*$/i;
 
+const ADDRESS_NOISE_REGEX =
+  /(採用|求人|募集|応募|エントリー|リクルート|求人広告|事業に採択|アンバサダー|マーケティング|市場|対抗|サービス|ニュース|お知らせ|ブログ|コラム|実績|事例|プレスリリース|パートナー|株式会社|有限会社|合同会社|Copyright|All Rights Reserved)/i;
+
+const ADDRESS_DETAIL_REGEX =
+  /[0-9０-９]|丁目|番地?|号|[-－ー―]|大字|字|条|線|通|ビル|ビルディング|センター|階/i;
+
+const ADDRESS_PAGE_STRONG_KEYWORDS =
+  /(会社概要|会社案内|会社情報|企業情報|法人概要|企業概要|会社データ|会社基本情報|所在地|本社所在地|住所|アクセス|拠点|事業所|営業所|工場|outline|profile|company|corporate|about|gaiyou|overview|information|access|office)/i;
+
+const ADDRESS_PAGE_WEAK_KEYWORDS =
+  /(採用|求人|募集|応募|エントリー|リクルート|recruit|career|job|jobs|entry|news|blog|ブログ|column|コラム|topics|トピックス|works|実績|case|事例|press|プレス|広告|パートナー|service|サービス)/i;
+
+function isLikelyAddressCandidate(value: string) {
+  const normalized = normalizeDigits(normalizeSpace(value));
+  if (!normalized) return false;
+
+  if (normalized.length < 8 || normalized.length > 120) return false;
+  if (ADDRESS_NOISE_REGEX.test(normalized)) return false;
+  if (/@/.test(normalized)) return false;
+  if (/(TEL|Tel|tel|電話|FAX|Fax|fax|メール|E-mail|Mail)/i.test(normalized)) return false;
+  if (/[。！？!?]/.test(normalized)) return false;
+
+  const locationPattern = new RegExp(
+    `(?:${PREFECTURE_REGEX_SOURCE}\\s*)?${MUNICIPALITY_REGEX_SOURCE}`
+  );
+
+  const locationMatched = normalized.match(locationPattern);
+  if (!locationMatched) return false;
+
+  const afterLocation = normalized.slice(
+    (locationMatched.index ?? 0) + locationMatched[0].length
+  );
+
+  if (!ADDRESS_DETAIL_REGEX.test(afterLocation)) return false;
+
+  return true;
+}
+
 function normalizeDigits(value: string) {
   return value.replace(/[０-９]/g, (char) =>
     String.fromCharCode(char.charCodeAt(0) - 0xfee0)
@@ -1544,30 +1582,26 @@ function pickAddressCore(value: string) {
     .replace(/\s{2,}/g, " ")
     .trim();
 
+  const locationPattern = new RegExp(
+    `(?:${PREFECTURE_REGEX_SOURCE}\\s*)?${MUNICIPALITY_REGEX_SOURCE}`
+  );
+
+  const locationMatched = cleaned.match(locationPattern);
+  if (!locationMatched) return null;
+
+  const startIndex = locationMatched.index ?? 0;
+
   const stopSource =
-    `${ADDRESS_STOP_WORDS.source}|営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|本社|本店|支店|営業所|工場|事業所`;
+    `${ADDRESS_STOP_WORDS.source}|営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|代表者|代表取締役|資本金|従業員数|事業内容|設立|創業|沿革|本社電話番号|電話番号|TEL|FAX|メール`;
 
-  const prefectureMatch = cleaned.match(
-    new RegExp(
-      `((?:${PREFECTURE_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
-    )
-  );
+  const sliced = cleaned
+    .slice(startIndex)
+    .replace(new RegExp(`\\s*(?:${stopSource}).*$`, "i"), "")
+    .replace(ADDRESS_TRAILING_LABEL_REGEX, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 
-  if (prefectureMatch?.[1]) {
-    return prefectureMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
-  }
-
-  const municipalityMatch = cleaned.match(
-    new RegExp(
-      `((?:${MUNICIPALITY_REGEX_SOURCE}).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
-    )
-  );
-
-  if (municipalityMatch?.[1]) {
-    return municipalityMatch[1].replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim();
-  }
-
-  return cleaned.replace(ADDRESS_TRAILING_LABEL_REGEX, "").trim() || null;
+  return isLikelyAddressCandidate(sliced) ? sliced : null;
 }
 
 function normalizeAddress(value: string) {
@@ -1581,14 +1615,7 @@ function normalizeAddress(value: string) {
     .trim();
 
   if (!cleaned) return null;
-  if (/@/.test(cleaned)) return null;
-  if (/copyright|all rights reserved/i.test(cleaned)) return null;
-
-  const addressLikePattern = new RegExp(
-    `${PREFECTURE_REGEX_SOURCE}|${MUNICIPALITY_REGEX_SOURCE}`
-  );
-
-  if (!addressLikePattern.test(cleaned)) return null;
+  if (!isLikelyAddressCandidate(cleaned)) return null;
 
   return cleaned;
 }
@@ -1597,20 +1624,68 @@ function extractAddressFromText(value: string) {
   const normalized = normalizeDigits(normalizeSpace(value));
   if (!normalized) return null;
 
-  const withoutPrefix = normalized.replace(ADDRESS_PREFIX_REGEX, "").trim();
+  return normalizeAddress(normalized);
+}
 
-  const stopSource =
-    `${ADDRESS_STOP_WORDS.source}|営業部|総務部|生産部|管理部|品質管理部|技術部|開発部|工務部|経理部|人事部|企画部|購買部|物流部|業務部|本社|本店|支店|営業所|工場|事業所`;
+function collectAddressCandidatesFromText(text: string) {
+  const lines = text
+    .split("\n")
+    .map((line) => normalizeSpace(line))
+    .filter((line) => line !== "");
 
-  const matched = withoutPrefix.match(
-    new RegExp(
-      `((?:〒\\s*)?\\d{3}-?\\d{4}\\s*)?((?:(?:${PREFECTURE_REGEX_SOURCE})|(?:${MUNICIPALITY_REGEX_SOURCE})).{4,120}?)(?=(?:\\s*(?:${stopSource}))|$)`
-    )
-  );
+  const candidates: string[] = [];
 
-  if (!matched) return null;
+  const pushAddress = (value: string | null | undefined) => {
+    if (!value) return;
 
-  return normalizeAddress(`${matched[1] ?? ""} ${matched[2] ?? ""}`);
+    const normalized =
+      extractAddressFromText(value) ??
+      normalizeAddress(value);
+
+    if (normalized) {
+      candidates.push(normalized);
+    }
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const next1 = lines[i + 1] ?? "";
+    const next2 = lines[i + 2] ?? "";
+    const next3 = lines[i + 3] ?? "";
+
+    pushAddress(line);
+
+    const isAddressLabelLine =
+      ADDRESS_LABELS.some((regex) => regex.test(line)) ||
+      ZIPCODE_LABELS.some((regex) => regex.test(line)) ||
+      /〒\s*\d{3}-?\d{4}/.test(line);
+
+    if (isAddressLabelLine) {
+      pushAddress([line, next1].filter(Boolean).join(" "));
+      pushAddress([line, next1, next2].filter(Boolean).join(" "));
+      pushAddress([line, next1, next2, next3].filter(Boolean).join(" "));
+    }
+  }
+
+  return uniqueNonEmpty(candidates);
+}
+
+function collectAddressCandidatesFromPage(page: PageData) {
+  const pairs = extractPairs(page.html);
+
+  const addressPairValue = pickPairValue(pairs, ADDRESS_LABELS) ?? "";
+  const zipcodePairValue = pickPairValue(pairs, ZIPCODE_LABELS) ?? "";
+
+  const footerText = stripHtmlKeepLineBreaks(extractFooterHtml(page.html));
+
+  return uniqueNonEmpty([
+    normalizeAddress(addressPairValue),
+    extractAddressFromText(addressPairValue),
+    extractAddressFromText([addressPairValue, zipcodePairValue].join(" ")),
+    ...collectAddressCandidatesFromText(page.structuredText),
+    ...collectAddressCandidatesFromText(page.text),
+    ...collectAddressCandidatesFromText(footerText),
+  ]);
 }
 
 function normalizeEmail(value: string) {
@@ -3616,15 +3691,28 @@ function getStrongCandidatePathsForFocus(focus: CrawlPageFocus) {
       ];
     case "contact":
       return [
+        "/company/",
+        "/company/index.html",
+        "/company.html",
+        "/company/outline.html",
+        "/company/profile.html",
+        "/company/overview.html",
+        "/company/info/",
+        "/company/about/",
+        "/about/",
+        "/about.html",
+        "/about/company/",
+        "/profile/",
+        "/profile.html",
+        "/outline.html",
+        "/overview.html",
+        "/access/",
+        "/access.html",
+        "/company/access.html",
         "/contact/",
         "/contact.html",
         "/inquiry/",
         "/inquiry.html",
-        "/access/",
-        "/access.html",
-        "/company/access.html",
-        "/company/profile.html",
-        "/company/overview.html",
       ];
     case "permit":
       return [
@@ -3715,15 +3803,28 @@ function getCandidateLinkScore(
   }
 
   if (focus === "contact") {
-    if (CONTACT_KEYWORDS.test(target)) score += 280;
     if (
-      /(access|所在地|住所|本社|本店|支店|営業所|事業所|office|map)/i.test(
+      /(会社概要|会社案内|会社情報|企業情報|法人概要|企業概要|会社データ|会社基本情報|outline|profile|company|corporate|about|gaiyou|overview|information)/i.test(
         target
       )
     ) {
-      score += 220;
+      score += 380;
     }
-    if (COMPANY_KEYWORDS.test(target)) score += 120;
+
+    if (
+      /(access|アクセス|所在地|住所|本社所在地|本店所在地|本社|本店|支店|営業所|事業所|工場|office|map)/i.test(
+        target
+      )
+    ) {
+      score += 360;
+    }
+
+    if (COMPANY_KEYWORDS.test(target)) score += 260;
+    if (CONTACT_KEYWORDS.test(target)) score += 180;
+
+    if (RECRUIT_KEYWORDS.test(target) || NEWS_BLOG_KEYWORDS.test(target)) {
+      score -= 260;
+    }
   }
 
   if (focus === "representative") {
@@ -4140,6 +4241,24 @@ function pageBoost(url: string) {
   return score;
 }
 
+function getAddressPagePriorityBoost(page: PageData) {
+  const target = decodeURIComponent(
+    `${page.finalUrl} ${page.title} ${page.h1}`
+  );
+
+  const text = page.structuredText.slice(0, 4000);
+  let score = 0;
+
+  if (ADDRESS_PAGE_STRONG_KEYWORDS.test(target)) score += 340;
+  if (ADDRESS_PAGE_STRONG_KEYWORDS.test(text)) score += 220;
+  if (ADDRESS_LABELS.some((regex) => regex.test(text))) score += 180;
+  if (/〒\s*\d{3}-?\d{4}/.test(text)) score += 160;
+
+  if (ADDRESS_PAGE_WEAK_KEYWORDS.test(target)) score -= 360;
+
+  return score;
+}
+
 function processPage(
   page: PageData,
   best: Partial<Record<keyof CrawlExtractedFields, BestValue>>,
@@ -4253,19 +4372,26 @@ function processPage(
 
   const addressPairValue = pickPairValue(pairs, ADDRESS_LABELS) ?? "";
   const zipcodePairValue = pickPairValue(pairs, ZIPCODE_LABELS) ?? addressPairValue;
-  const detectedAddress = extractAddressFromText(
-    [addressPairValue, zipcodePairValue, page.text].filter(Boolean).join(" ")
-  );
+  const addressCandidates = collectAddressCandidatesFromPage(page);
 
   if (shouldProcessFieldInFocus(selectedFieldSet, "zipcode", focus)) {
-    addBest(best, "zipcode", normalizeZipcode(zipcodePairValue), 220 + boost);
-    addBest(best, "zipcode", normalizeZipcode(addressPairValue), 210 + boost);
+    addBest(best, "zipcode", normalizeZipcode(zipcodePairValue), 240 + boost);
+    addBest(best, "zipcode", normalizeZipcode(addressPairValue), 230 + boost);
+    addBest(best, "zipcode", normalizeZipcode(page.structuredText), 80 + boost);
     addBest(best, "zipcode", normalizeZipcode(page.text), 40 + boost);
   }
 
   if (shouldProcessFieldInFocus(selectedFieldSet, "address", focus)) {
-    addBest(best, "address", normalizeAddress(addressPairValue), 220 + boost);
-    addBest(best, "address", detectedAddress, 215 + boost);
+    const addressPageBoost = getAddressPagePriorityBoost(page);
+
+    addressCandidates.forEach((candidate, index) => {
+      addBest(
+        best,
+        "address",
+        candidate,
+        320 + boost + addressPageBoost - index * 5
+      );
+    });
   }
 
   if (shouldProcessFieldInFocus(selectedFieldSet, "established_date", focus)) {
