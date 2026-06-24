@@ -203,7 +203,8 @@ export async function GET(req: NextRequest) {
       employees.map(async (employee) => {
         const settings = await getMasterDataUserPermissionSettings(
           employee.id,
-          employee.organization
+          employee.organization,
+          adminUser.dbMode ?? "neon"
         );
 
         return {
@@ -277,6 +278,7 @@ export async function PATCH(req: NextRequest) {
       organization: targetEmployee.organization,
       permissions,
       allowedFilters,
+      dbMode: adminUser.dbMode ?? "neon",
     });
 
     return NextResponse.json({

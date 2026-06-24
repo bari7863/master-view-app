@@ -980,7 +980,8 @@ async function getListScopeSearchParamsForRequest(req: NextRequest) {
 
   const settings = await getMasterDataUserPermissionSettings(
     user.id,
-    user.organization
+    user.organization,
+    user.dbMode ?? "neon"
   );
 
   return buildSearchParamsFromListScopeFilters(settings.allowedFilters);

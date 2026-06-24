@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { dbReady, pool } from "@/lib/db";
+import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
 import {
-  MasterDataAuthUser,
   requireMasterDataUser,
+  type MasterDataAuthUser,
+  type MasterDataDbMode,
 } from "@/lib/master-data-auth";
 
 export const MASTER_DATA_PERMISSION_KEYS = [
@@ -124,11 +125,14 @@ export function normalizeMasterDataAllowedFilters(
 }
 
 export async function ensureMasterDataPermissionTables(
-  client: Queryable = pool
+  dbMode: MasterDataDbMode = "neon",
+  client?: Queryable
 ) {
-  await dbReady;
+  const targetPool = client ?? getMasterDataPool(dbMode);
 
-  await client.query(`
+  await getMasterDataDbReady(dbMode);
+
+  await targetPool.query(`
     CREATE TABLE IF NOT EXISTS public.master_data_user_permissions (
       user_id text PRIMARY KEY,
       organization text NOT NULL,
@@ -138,7 +142,7 @@ export async function ensureMasterDataPermissionTables(
     )
   `);
 
-  await client.query(`
+  await targetPool.query(`
     CREATE TABLE IF NOT EXISTS public.master_data_user_scopes (
       user_id text PRIMARY KEY,
       organization text NOT NULL,
@@ -151,11 +155,14 @@ export async function ensureMasterDataPermissionTables(
 
 export async function getMasterDataUserPermissionSettings(
   userId: string,
-  organization: string
+  organization: string,
+  dbMode: MasterDataDbMode = "neon"
 ): Promise<MasterDataPermissionSettings> {
-  await ensureMasterDataPermissionTables();
+  await ensureMasterDataPermissionTables(dbMode);
 
-  const permissionResult = await pool.query(
+  const targetPool = getMasterDataPool(dbMode);
+
+  const permissionResult = await targetPool.query(
     `
       SELECT permissions
       FROM public.master_data_user_permissions
@@ -168,7 +175,7 @@ export async function getMasterDataUserPermissionSettings(
     [userId, organization]
   );
 
-  const scopeResult = await pool.query(
+  const scopeResult = await targetPool.query(
     `
       SELECT allowed_filters
       FROM public.master_data_user_scopes
@@ -196,18 +203,22 @@ export async function upsertMasterDataUserPermissionSettings({
   organization,
   permissions,
   allowedFilters,
+  dbMode = "neon",
 }: {
   userId: string;
   organization: string;
   permissions?: unknown;
   allowedFilters?: unknown;
+  dbMode?: MasterDataDbMode;
 }) {
-  await ensureMasterDataPermissionTables();
+  await ensureMasterDataPermissionTables(dbMode);
+
+  const targetPool = getMasterDataPool(dbMode);
 
   if (permissions !== undefined) {
     const normalizedPermissions = normalizeMasterDataPermissions(permissions);
 
-    await pool.query(
+    await targetPool.query(
       `
         INSERT INTO public.master_data_user_permissions (
           user_id,
@@ -230,7 +241,7 @@ export async function upsertMasterDataUserPermissionSettings({
     const normalizedAllowedFilters =
       normalizeMasterDataAllowedFilters(allowedFilters);
 
-    await pool.query(
+    await targetPool.query(
       `
         INSERT INTO public.master_data_user_scopes (
           user_id,
@@ -249,7 +260,7 @@ export async function upsertMasterDataUserPermissionSettings({
     );
   }
 
-  return getMasterDataUserPermissionSettings(userId, organization);
+  return getMasterDataUserPermissionSettings(userId, organization, dbMode);
 }
 
 export async function requireMasterDataPermission(
@@ -283,7 +294,8 @@ export async function requireMasterDataPermission(
 
   const settings = await getMasterDataUserPermissionSettings(
     result.user.id,
-    result.user.organization
+    result.user.organization,
+    result.user.dbMode ?? "neon"
   );
 
   if (!settings.permissions[permissionKey]) {

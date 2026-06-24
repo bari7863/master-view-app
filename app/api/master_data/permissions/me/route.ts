@@ -31,7 +31,8 @@ export async function GET(req: NextRequest) {
   try {
     const settings = await getMasterDataUserPermissionSettings(
       user.id,
-      user.organization
+      user.organization,
+      user.dbMode ?? "neon"
     );
 
     return NextResponse.json({
