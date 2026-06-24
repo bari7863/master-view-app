@@ -1,34 +1,53 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Pool } from "pg";
+import { Pool, type PoolConfig } from "pg";
+import type { MasterDataDbMode } from "@/lib/master-data-auth";
 
 declare global {
   // eslint-disable-next-line no-var
-  var pgPool: Pool | undefined;
+  var masterDataPools: Partial<Record<MasterDataDbMode, Pool>> | undefined;
   // eslint-disable-next-line no-var
-  var masterDataColumnInitPromise: Promise<void> | undefined;
+  var masterDataDbReadyPromises:
+    | Partial<Record<MasterDataDbMode, Promise<void>>>
+    | undefined;
 }
 
-const poolConfig = process.env.DATABASE_URL
-  ? {
-      connectionString: process.env.DATABASE_URL,
+function createMasterDataPoolConfig(dbMode: MasterDataDbMode): PoolConfig {
+  if (dbMode === "postgresql") {
+    if (process.env.DATABASE_URL_POSTGRESQL?.trim()) {
+      return {
+        connectionString: process.env.DATABASE_URL_POSTGRESQL,
+      };
     }
-  : {
+
+    return {
       host: process.env.POSTGRES_HOST,
       port: Number(process.env.POSTGRES_PORT || 5432),
       user: process.env.POSTGRES_USER,
       password: process.env.POSTGRES_PASSWORD,
       database: process.env.POSTGRES_DB,
     };
+  }
 
-if (!global.pgPool) {
-  global.pgPool = new Pool(poolConfig);
+  return {
+    connectionString: process.env.DATABASE_URL_NEON || process.env.DATABASE_URL,
+  };
 }
 
-export const pool = global.pgPool;
+function getMasterDataPoolByMode(dbMode: MasterDataDbMode) {
+  if (!global.masterDataPools) {
+    global.masterDataPools = {};
+  }
 
-async function ensureMasterDataLoginHistoryTable() {
-  await pool.query(`
+  if (!global.masterDataPools[dbMode]) {
+    global.masterDataPools[dbMode] = new Pool(createMasterDataPoolConfig(dbMode));
+  }
+
+  return global.masterDataPools[dbMode]!;
+}
+
+async function ensureMasterDataLoginHistoryTable(targetPool: Pool) {
+  await targetPool.query(`
     CREATE TABLE IF NOT EXISTS master_data_login_history (
       id BIGSERIAL PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -44,18 +63,38 @@ async function ensureMasterDataLoginHistoryTable() {
   `);
 }
 
-export const dbReady =
-  global.masterDataColumnInitPromise ||
-  (async () => {
+function createMasterDataDbReadyPromise(dbMode: MasterDataDbMode) {
+  const targetPool = getMasterDataPoolByMode(dbMode);
+
+  return (async () => {
     const sqlFilePath = join(process.cwd(), "sql", "add_column.sql");
     const sql = await readFile(sqlFilePath, "utf8");
     const normalizedSql = sql.trim();
 
     if (normalizedSql) {
-      await pool.query(normalizedSql);
+      await targetPool.query(normalizedSql);
     }
 
-    await ensureMasterDataLoginHistoryTable();
+    await ensureMasterDataLoginHistoryTable(targetPool);
   })();
+}
 
-global.masterDataColumnInitPromise = dbReady;
+export function getMasterDataPool(dbMode: MasterDataDbMode) {
+  return getMasterDataPoolByMode(dbMode);
+}
+
+export function getMasterDataDbReady(dbMode: MasterDataDbMode) {
+  if (!global.masterDataDbReadyPromises) {
+    global.masterDataDbReadyPromises = {};
+  }
+
+  if (!global.masterDataDbReadyPromises[dbMode]) {
+    global.masterDataDbReadyPromises[dbMode] =
+      createMasterDataDbReadyPromise(dbMode);
+  }
+
+  return global.masterDataDbReadyPromises[dbMode]!;
+}
+
+export const pool = getMasterDataPool("neon");
+export const dbReady = getMasterDataDbReady("neon");

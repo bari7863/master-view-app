@@ -9,11 +9,18 @@ const MASTER_DATA_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 30;
 
 export type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
+export type MasterDataDbMode = "neon" | "postgresql";
+
+export function normalizeMasterDataDbMode(value: unknown): MasterDataDbMode {
+  return value === "postgresql" ? "postgresql" : "neon";
+}
+
 export type MasterDataAuthUser = {
   id: string;
   name: string;
   role: MasterDataLoginRole;
   organization: string;
+  dbMode?: MasterDataDbMode;
 };
 
 type MasterDataAuthResult = {
@@ -59,6 +66,7 @@ function createMasterDataAuthUserPayload(loginUser: MasterDataAuthUser) {
       name: loginUser.name,
       role: loginUser.role,
       organization: loginUser.organization,
+      dbMode: normalizeMasterDataDbMode(loginUser.dbMode),
     }),
     "utf8"
   ).toString("base64url");
@@ -84,6 +92,7 @@ function parseMasterDataAuthUserPayload(
       typeof parsed.organization === "string"
         ? parsed.organization.trim()
         : "";
+    const dbMode = normalizeMasterDataDbMode(parsed.dbMode);
 
     if (
       id === "" ||
@@ -100,6 +109,7 @@ function parseMasterDataAuthUserPayload(
       name,
       role,
       organization,
+      dbMode,
     };
   } catch {
     return null;

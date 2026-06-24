@@ -251,12 +251,15 @@ function createEmptyItemInspectionMethodSelections(): Record<
 
 type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
+type MasterDataDbMode = "neon" | "postgresql";
+
 type MasterDataLoginUser = {
   id: string;
   password: string;
   name: string;
   organization: string;
   role: MasterDataLoginRole;
+  dbMode?: MasterDataDbMode;
 };
 
 type MasterDataLoginHistoryItem = {
@@ -3283,6 +3286,7 @@ export default function Home() {
   const [loginStatus, setLoginStatus] =
     useState<MasterDataLoginStatus>("checking");
 
+  const [loginDbMode, setLoginDbMode] = useState<MasterDataDbMode>("neon");
   const [loginId, setLoginId] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
@@ -3915,6 +3919,7 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          db: loginDbMode,
           id: normalizedLoginId,
           password: loginPassword,
         }),
@@ -3978,6 +3983,7 @@ export default function Home() {
     setLoginUser(null);
     setLoginHistory([]);
     setLoginStatus("logged_out");
+    setLoginDbMode("neon");
     setLoginId("");
     setLoginPassword("");
     setSettingsPasswordVisible(false);
@@ -11029,6 +11035,24 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               </div>
 
               <div className="space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    DB
+                  </label>
+
+                  <select
+                    value={loginDbMode}
+                    onChange={(e) =>
+                      setLoginDbMode(e.target.value as MasterDataDbMode)
+                    }
+                    disabled={loginLoading}
+                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-500/10 disabled:bg-slate-100"
+                  >
+                    <option value="neon">Neon</option>
+                    <option value="postgresql">Supabase</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-700">
                     ID

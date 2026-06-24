@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
-import { dbReady, pool } from "@/lib/db";
+import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
 import {
+  getCurrentMasterDataUser,
   requireMasterDataAuth,
   requireMasterDataUser,
 } from "@/lib/master-data-auth";
@@ -11,6 +12,15 @@ import {
   getMasterDataUserPermissionSettings,
   requireMasterDataPermission,
 } from "@/lib/master-data-permissions";
+
+function getRequestMasterDataDb(req: NextRequest) {
+  const dbMode = getCurrentMasterDataUser(req)?.dbMode ?? "neon";
+
+  return {
+    dbReady: getMasterDataDbReady(dbMode),
+    pool: getMasterDataPool(dbMode),
+  };
+}
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -1051,6 +1061,8 @@ function buildSearchParamsFromReadPayload(payload: Record<string, unknown>) {
 
 async function handleReadRequest(req: NextRequest, searchParams: URLSearchParams) {
   try {
+    const { dbReady, pool } = getRequestMasterDataDb(req);
+
     await dbReady;
     await ensureMasterDataIdColumn(pool);
     const valuesFor = searchParams.get("valuesFor") as FilterKey | null;
@@ -1617,6 +1629,8 @@ export async function POST(req: NextRequest) {
   const authError = requireMasterDataAuth(req);
   if (authError) return authError;
 
+  const { dbReady, pool } = getRequestMasterDataDb(req);
+
   const contentType = req.headers.get("content-type") || "";
 
   if (contentType.includes("application/json")) {
@@ -1858,6 +1872,7 @@ export async function DELETE(req: NextRequest) {
   const authError = requireMasterDataAuth(req);
   if (authError) return authError;
 
+  const { dbReady, pool } = getRequestMasterDataDb(req);
   const client = await pool.connect();
 
   try {

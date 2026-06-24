@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   clearMasterDataAuthCookie,
+  getCurrentMasterDataUser,
+  normalizeMasterDataDbMode,
   refreshMasterDataAuthCookie,
   requireMasterDataAuth,
   setMasterDataAuthCookie,
+  type MasterDataDbMode,
 } from "@/lib/master-data-auth";
-import { dbReady, pool } from "@/lib/db";
+import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -229,9 +232,13 @@ function toLoginHistoryIsoString(value: Date | string) {
 }
 
 async function saveMasterDataLoginHistoryToDb(
+  dbMode: MasterDataDbMode,
   loginUser: MasterDataLoginUser,
   event: MasterDataLoginHistoryEvent
 ) {
+  const dbReady = getMasterDataDbReady(dbMode);
+  const pool = getMasterDataPool(dbMode);
+
   await dbReady;
 
   await pool.query(
@@ -257,7 +264,13 @@ async function saveMasterDataLoginHistoryToDb(
   );
 }
 
-async function fetchMasterDataLoginHistoryFromDb(userId: string) {
+async function fetchMasterDataLoginHistoryFromDb(
+  dbMode: MasterDataDbMode,
+  userId: string
+) {
+  const dbReady = getMasterDataDbReady(dbMode);
+  const pool = getMasterDataPool(dbMode);
+
   await dbReady;
 
   const result = await pool.query<MasterDataLoginHistoryRow>(
@@ -294,6 +307,8 @@ export async function POST(req: NextRequest) {
     const id = typeof body.id === "string" ? body.id.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
 
+    const dbMode = normalizeMasterDataDbMode(body.db);
+
     const loginUser = findMasterDataLoginUser(id, password);
 
     if (!loginUser) {
@@ -305,9 +320,9 @@ export async function POST(req: NextRequest) {
 
     const loginHistoryEvent = createMasterDataLoginHistoryEvent(req);
 
-    await saveMasterDataLoginHistoryToDb(loginUser, loginHistoryEvent);
+    await saveMasterDataLoginHistoryToDb(dbMode, loginUser, loginHistoryEvent);
 
-    const loginHistory = await fetchMasterDataLoginHistoryFromDb(loginUser.id);
+    const loginHistory = await fetchMasterDataLoginHistoryFromDb(dbMode, loginUser.id);
 
     const response = NextResponse.json({
       ok: true,
@@ -317,6 +332,7 @@ export async function POST(req: NextRequest) {
         name: loginUser.name,
         role: loginUser.role,
         organization: loginUser.organization,
+        dbMode,
       },
       loginHistoryEvent,
       loginHistory,
@@ -327,6 +343,7 @@ export async function POST(req: NextRequest) {
       name: loginUser.name,
       role: loginUser.role,
       organization: loginUser.organization,
+      dbMode,
     });
 
     return response;
@@ -349,6 +366,8 @@ export async function GET(req: NextRequest) {
     return authError;
   }
 
+  const dbMode = getCurrentMasterDataUser(req)?.dbMode ?? "neon";
+
   const keepAlive = new URL(req.url).searchParams.get("keepAlive") === "1";
 
   if (keepAlive) {
@@ -367,7 +386,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const loginHistory = await fetchMasterDataLoginHistoryFromDb(userId);
+    const loginHistory = await fetchMasterDataLoginHistoryFromDb(dbMode, userId);
 
     return NextResponse.json({
       ok: true,
