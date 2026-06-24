@@ -4413,7 +4413,13 @@ export default function Home() {
     }
 
     void fetchCurrentUserPermissions(loginUser);
-  }, [loginStatus, loginUser?.id, loginUser?.role, loginUser?.organization]);
+  }, [
+    loginStatus,
+    loginUser?.id,
+    loginUser?.role,
+    loginUser?.organization,
+    loginUser?.dbMode,
+  ]);
 
   useEffect(() => {
     if (loginStatus !== "logged_in") return;

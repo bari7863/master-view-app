@@ -134,22 +134,70 @@ export async function ensureMasterDataPermissionTables(
 
   await targetPool.query(`
     CREATE TABLE IF NOT EXISTS public.master_data_user_permissions (
-      user_id text PRIMARY KEY,
+      db_mode text NOT NULL DEFAULT '${dbMode}',
+      user_id text NOT NULL,
       organization text NOT NULL,
       permissions jsonb NOT NULL DEFAULT '{}'::jsonb,
       created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (db_mode, user_id)
     )
   `);
 
   await targetPool.query(`
+    ALTER TABLE public.master_data_user_permissions
+    ADD COLUMN IF NOT EXISTS db_mode text NOT NULL DEFAULT '${dbMode}'
+  `);
+
+  await targetPool.query(`
+    UPDATE public.master_data_user_permissions
+    SET db_mode = '${dbMode}'
+    WHERE db_mode IS NULL OR db_mode = ''
+  `);
+
+  await targetPool.query(`
+    ALTER TABLE public.master_data_user_permissions
+    DROP CONSTRAINT IF EXISTS master_data_user_permissions_pkey
+  `);
+
+  await targetPool.query(`
+    ALTER TABLE public.master_data_user_permissions
+    ADD CONSTRAINT master_data_user_permissions_pkey
+    PRIMARY KEY (db_mode, user_id)
+  `);
+
+  await targetPool.query(`
     CREATE TABLE IF NOT EXISTS public.master_data_user_scopes (
-      user_id text PRIMARY KEY,
+      db_mode text NOT NULL DEFAULT '${dbMode}',
+      user_id text NOT NULL,
       organization text NOT NULL,
       allowed_filters jsonb NOT NULL DEFAULT '{}'::jsonb,
       created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (db_mode, user_id)
     )
+  `);
+
+  await targetPool.query(`
+    ALTER TABLE public.master_data_user_scopes
+    ADD COLUMN IF NOT EXISTS db_mode text NOT NULL DEFAULT '${dbMode}'
+  `);
+
+  await targetPool.query(`
+    UPDATE public.master_data_user_scopes
+    SET db_mode = '${dbMode}'
+    WHERE db_mode IS NULL OR db_mode = ''
+  `);
+
+  await targetPool.query(`
+    ALTER TABLE public.master_data_user_scopes
+    DROP CONSTRAINT IF EXISTS master_data_user_scopes_pkey
+  `);
+
+  await targetPool.query(`
+    ALTER TABLE public.master_data_user_scopes
+    ADD CONSTRAINT master_data_user_scopes_pkey
+    PRIMARY KEY (db_mode, user_id)
   `);
 }
 
@@ -166,26 +214,28 @@ export async function getMasterDataUserPermissionSettings(
     `
       SELECT permissions
       FROM public.master_data_user_permissions
-      WHERE user_id = $1
+      WHERE db_mode = $1
+        AND user_id = $2
       ORDER BY
-        CASE WHEN organization = $2 THEN 0 ELSE 1 END,
+        CASE WHEN organization = $3 THEN 0 ELSE 1 END,
         updated_at DESC
       LIMIT 1
     `,
-    [userId, organization]
+    [dbMode, userId, organization]
   );
 
   const scopeResult = await targetPool.query(
     `
       SELECT allowed_filters
       FROM public.master_data_user_scopes
-      WHERE user_id = $1
+      WHERE db_mode = $1
+        AND user_id = $2
       ORDER BY
-        CASE WHEN organization = $2 THEN 0 ELSE 1 END,
+        CASE WHEN organization = $3 THEN 0 ELSE 1 END,
         updated_at DESC
       LIMIT 1
     `,
-    [userId, organization]
+    [dbMode, userId, organization]
   );
 
   return {
@@ -221,19 +271,20 @@ export async function upsertMasterDataUserPermissionSettings({
     await targetPool.query(
       `
         INSERT INTO public.master_data_user_permissions (
+          db_mode,
           user_id,
           organization,
           permissions,
           updated_at
         )
-        VALUES ($1, $2, $3::jsonb, now())
-        ON CONFLICT (user_id)
+        VALUES ($1, $2, $3, $4::jsonb, now())
+        ON CONFLICT (db_mode, user_id)
         DO UPDATE SET
           organization = EXCLUDED.organization,
           permissions = EXCLUDED.permissions,
           updated_at = now()
       `,
-      [userId, organization, JSON.stringify(normalizedPermissions)]
+      [dbMode, userId, organization, JSON.stringify(normalizedPermissions)]
     );
   }
 
@@ -244,19 +295,20 @@ export async function upsertMasterDataUserPermissionSettings({
     await targetPool.query(
       `
         INSERT INTO public.master_data_user_scopes (
+          db_mode,
           user_id,
           organization,
           allowed_filters,
           updated_at
         )
-        VALUES ($1, $2, $3::jsonb, now())
-        ON CONFLICT (user_id)
+        VALUES ($1, $2, $3, $4::jsonb, now())
+        ON CONFLICT (db_mode, user_id)
         DO UPDATE SET
           organization = EXCLUDED.organization,
           allowed_filters = EXCLUDED.allowed_filters,
           updated_at = now()
       `,
-      [userId, organization, JSON.stringify(normalizedAllowedFilters)]
+      [dbMode, userId, organization, JSON.stringify(normalizedAllowedFilters)]
     );
   }
 
