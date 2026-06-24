@@ -20,9 +20,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const loginUser = {
+    id: user.id,
+    name: user.name,
+    role: user.role,
+    organization: user.organization,
+    dbMode: user.dbMode ?? "neon",
+  };
+
   if (user.role === "スーパー管理者") {
     return NextResponse.json({
       ok: true,
+      loginUser,
       permissions: {},
       allowedFilters: {},
     });
@@ -37,6 +46,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      loginUser,
       permissions: settings.permissions,
       allowedFilters: settings.allowedFilters,
     });

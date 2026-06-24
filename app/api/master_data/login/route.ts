@@ -69,10 +69,7 @@ function parseMasterDataLoginUsersByRole(
         typeof item.organization === "string" ? item.organization.trim() : "";
 
       const rawRole = item.role;
-      const resolvedRole =
-        role === "管理者" && rawRole === "スーパー管理者"
-          ? "スーパー管理者"
-          : role;
+      const resolvedRole = isMasterDataLoginRole(rawRole) ? rawRole : role;
 
       if (id === "" || password === "" || name === "") {
         return null;
@@ -100,54 +97,62 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
     "従業員"
   );
 
-  if (adminUsers.length > 0 || employeeUsers.length > 0) {
-    return [...adminUsers, ...employeeUsers];
-  }
-
   const usersText = process.env.MASTER_DATA_LOGIN_USERS;
 
-  if (usersText && usersText.trim() !== "") {
-    const parsed = JSON.parse(usersText) as unknown;
+  const commonUsers =
+    usersText && usersText.trim() !== ""
+      ? (() => {
+          const parsed = JSON.parse(usersText) as unknown;
 
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
+          if (!Array.isArray(parsed)) {
+            return [];
+          }
 
-    return parsed
-      .map((user) => {
-        if (!user || typeof user !== "object") {
-          return null;
-        }
+          return parsed
+            .map((user) => {
+              if (!user || typeof user !== "object") {
+                return null;
+              }
 
-        const item = user as Record<string, unknown>;
+              const item = user as Record<string, unknown>;
 
-        const id = typeof item.id === "string" ? item.id.trim() : "";
-        const password =
-          typeof item.password === "string" ? item.password : "";
-        const name = typeof item.name === "string" ? item.name.trim() : "";
-        const role = item.role;
+              const id = typeof item.id === "string" ? item.id.trim() : "";
+              const password =
+                typeof item.password === "string" ? item.password : "";
+              const name =
+                typeof item.name === "string" ? item.name.trim() : "";
+              const role = item.role;
 
-        const organization =
-          typeof item.organization === "string" ? item.organization.trim() : "";
+              const organization =
+                typeof item.organization === "string"
+                  ? item.organization.trim()
+                  : "";
 
-        if (
-          id === "" ||
-          password === "" ||
-          name === "" ||
-          !isMasterDataLoginRole(role)
-        ) {
-          return null;
-        }
+              if (
+                id === "" ||
+                password === "" ||
+                name === "" ||
+                !isMasterDataLoginRole(role)
+              ) {
+                return null;
+              }
 
-        return {
-          id,
-          password,
-          name,
-          organization,
-          role,
-        };
-      })
-      .filter((user): user is MasterDataLoginUser => user !== null);
+              return {
+                id,
+                password,
+                name,
+                organization,
+                role,
+              };
+            })
+            .filter((user): user is MasterDataLoginUser => user !== null);
+        })()
+      : [];
+
+  const allUsers = [...commonUsers, ...employeeUsers, ...adminUsers];
+
+  if (allUsers.length > 0) {
+    return allUsers;
   }
 
   const legacyId = process.env.MASTER_DATA_LOGIN_ID?.trim() ?? "";
@@ -294,10 +299,28 @@ async function fetchMasterDataLoginHistoryFromDb(
   }));
 }
 
+function getMasterDataLoginRolePriority(role: MasterDataLoginRole) {
+  if (role === "従業員") {
+    return 0;
+  }
+
+  if (role === "管理者") {
+    return 1;
+  }
+
+  return 2;
+}
+
 function findMasterDataLoginUser(id: string, password: string) {
-  return getMasterDataLoginUsers().find(
+  const matchedUsers = getMasterDataLoginUsers().filter(
     (user) => user.id === id && user.password === password
   );
+
+  return matchedUsers.sort(
+    (a, b) =>
+      getMasterDataLoginRolePriority(a.role) -
+      getMasterDataLoginRolePriority(b.role)
+  )[0];
 }
 
 export async function POST(req: NextRequest) {

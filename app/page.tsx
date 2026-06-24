@@ -3255,7 +3255,7 @@ export default function Home() {
 
   const canUsePermission = (permissionKey: MasterDataPermissionKey) => {
     if (!loginUser) {
-      return true;
+      return false;
     }
 
     if (loginUser.role === "スーパー管理者") {
@@ -3263,10 +3263,10 @@ export default function Home() {
     }
 
     if (!currentUserPermissionLoaded) {
-      return true;
+      return false;
     }
 
-    return currentUserPermissions[permissionKey] !== false;
+    return currentUserPermissions[permissionKey] === true;
   };
 
   const canUseAnyPermission = (permissionKeys: MasterDataPermissionKey[]) => {
@@ -3294,6 +3294,10 @@ export default function Home() {
   const [loginError, setLoginError] = useState("");
   const [loginUser, setLoginUser] = useState<MasterDataLoginUser | null>(null);
   const [screenReady, setScreenReady] = useState(false);
+
+  const canShowPermissionManagement =
+    loginStatus === "logged_in" &&
+    (loginUser?.role === "スーパー管理者" || loginUser?.role === "管理者");
 
   const [inspectionCancelConfirmTarget, setInspectionCancelConfirmTarget] =
     useState<InspectionCancelConfirmTarget | null>(null);
@@ -3327,6 +3331,19 @@ export default function Home() {
 
   const canShowListColumnFilters = canUsePermission("search.columnFilters");
 
+  const canUseListPanel = canUseAnyPermission([
+    "list.add",
+    "list.delete",
+    "list.itemDelete",
+    "list.dedupe",
+  ]);
+
+  const canUseCsvPanel = canUseAnyPermission([
+    "csv.import",
+    "csv.export",
+    "csv.template",
+  ]);
+
   const createVisibleCrawlFieldSelections = (
     checked: boolean
   ): Record<CrawlFieldKey, boolean> => {
@@ -3353,6 +3370,7 @@ export default function Home() {
     }, {} as Record<FilterKey, boolean>);
   };
 
+  const currentUserPermissionRequestIdRef = useRef(0);
   const fetchDataRequestIdRef = useRef(0);
   const filterValueRequestIdRef = useRef<Partial<Record<FilterKey, number>>>({});
   const crawlPreviewRequestIdRef = useRef(0);
@@ -3362,16 +3380,16 @@ export default function Home() {
   const itemInspectionPreviewScrollRef = useRef<HTMLDivElement | null>(null);
 
   const fetchCurrentUserPermissions = async (targetUser = loginUser) => {
+    const requestId = ++currentUserPermissionRequestIdRef.current;
+
     setCurrentUserPermissionLoaded(false);
 
     if (!targetUser) {
-      setCurrentUserPermissions({});
-      setCurrentUserPermissionLoaded(true);
-      return;
-    }
+      if (requestId !== currentUserPermissionRequestIdRef.current) {
+        return;
+      }
 
-    if (targetUser.role === "スーパー管理者") {
-      setCurrentUserPermissions({});
+      setCurrentUserPermissions(createPermissionValues(false));
       setCurrentUserPermissionLoaded(true);
       return;
     }
@@ -3384,22 +3402,66 @@ export default function Home() {
 
       const data = await readApiResponse(res);
 
-      if (!res.ok || !data.ok) {
+      if (requestId !== currentUserPermissionRequestIdRef.current) {
+        return;
+      }
+
+      if (!res.ok || !data.ok || !data.loginUser) {
         throw new Error(data.error || "ログイン中ユーザーの権限取得に失敗しました");
       }
 
-      setCurrentUserPermissions(data.permissions || {});
+      const verifiedLoginUser = data.loginUser;
+
+      setLoginUser(verifiedLoginUser);
+
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          MASTER_DATA_LOGIN_USER_KEY,
+          JSON.stringify(verifiedLoginUser)
+        );
+      }
+
+      if (verifiedLoginUser.role !== "スーパー管理者" && settingsTab === "permissionManagement") {
+        setSettingsTab("profile");
+      }
+
+      if (verifiedLoginUser.role === "従業員") {
+        setPermissionEmployees([]);
+        setSelectedPermissionEmployeeId("");
+        setPermissionError("");
+        setPermissionMessage("");
+        setPermissionListScopeOpen(false);
+        setPermissionListScopeSearchOpen(false);
+      }
+
+      setCurrentUserPermissions(
+        verifiedLoginUser.role === "スーパー管理者"
+          ? createPermissionValues(true)
+          : {
+              ...createPermissionValues(true),
+              ...(data.permissions || {}),
+            }
+      );
       setCurrentUserPermissionLoaded(true);
     } catch {
-      setCurrentUserPermissions({});
+      if (requestId !== currentUserPermissionRequestIdRef.current) {
+        return;
+      }
+
+      setCurrentUserPermissions(createPermissionValues(false));
       setCurrentUserPermissionLoaded(true);
     }
   };
 
   const fetchPermissionEmployees = async () => {
-    if (!isMasterDataManagerRole(loginUser?.role)) {
+    if (!canShowPermissionManagement || loginUser?.role === "従業員") {
       setPermissionEmployees([]);
       setSelectedPermissionEmployeeId("");
+      setPermissionError("");
+      setPermissionMessage("");
+      setPermissionListScopeOpen(false);
+      setPermissionListScopeSearchOpen(false);
+      setSettingsTab("profile");
       return;
     }
 
@@ -3444,13 +3506,16 @@ export default function Home() {
     employeeId: string,
     permissionKey: MasterDataPermissionKey
   ) => {
+    if (!canShowPermissionManagement || loginUser?.role === "従業員") {
+      return;
+    }
     setPermissionEmployees((prev) =>
       prev.map((employee) => {
         if (employee.id !== employeeId) {
           return employee;
         }
 
-        const currentChecked = employee.permissions[permissionKey] !== false;
+        const currentChecked = employee.permissions[permissionKey] === false;
         const nextChecked = !currentChecked;
         const nextPermissions = { ...employee.permissions };
 
@@ -3481,6 +3546,10 @@ export default function Home() {
     permissionKeys: MasterDataPermissionKey[],
     checked: boolean
   ) => {
+
+    if (!canShowPermissionManagement || loginUser?.role === "従業員") {
+      return;
+    }
     setPermissionEmployees((prev) =>
       prev.map((employee) => {
         if (employee.id !== employeeId) {
@@ -3538,6 +3607,9 @@ export default function Home() {
     };
 
     const handleApplyPermissionListScope = () => {
+      if (!canShowPermissionManagement || loginUser?.role === "従業員") {
+        return;
+      }
       if (!selectedPermissionEmployee) {
         return;
       }
@@ -3569,6 +3641,9 @@ export default function Home() {
     };
 
   const handleClearPermissionListScope = () => {
+    if (!canShowPermissionManagement || loginUser?.role === "従業員") {
+      return;
+    }
     if (!selectedPermissionEmployee) {
       return;
     }
@@ -3775,6 +3850,12 @@ export default function Home() {
   };
 
   const openPermissionListScopeModal = () => {
+    if (!canShowPermissionManagement || loginUser?.role === "従業員") {
+      setPermissionListScopeOpen(false);
+      setPermissionListScopeSearchOpen(false);
+      setSettingsTab("profile");
+      return;
+    }
     permissionListScopeBaseColumnStatesRef.current =
       cloneColumnStates(appliedColumnStates);
 
@@ -3853,6 +3934,16 @@ export default function Home() {
   };
 
   const handleSaveEmployeePermissions = async () => {
+    if (!canShowPermissionManagement || loginUser?.role === "従業員") {
+      setPermissionEmployees([]);
+      setSelectedPermissionEmployeeId("");
+      setPermissionError("");
+      setPermissionMessage("");
+      setPermissionListScopeOpen(false);
+      setPermissionListScopeSearchOpen(false);
+      setSettingsTab("profile");
+      return;
+    }
     if (!selectedPermissionEmployee) {
       return;
     }
@@ -3881,13 +3972,23 @@ export default function Home() {
         throw new Error(data.error || "権限情報の保存に失敗しました");
       }
 
+      const savedEmployee = data.employee;
+
       setPermissionEmployees((prev) =>
         prev.map((employee) =>
-          employee.id === data.employee?.id ? data.employee : employee
+          employee.id === savedEmployee.id ? savedEmployee : employee
         )
       );
-      
-      await fetchPermissionEmployees();
+
+      setSelectedPermissionEmployeeId(savedEmployee.id);
+
+      if (loginUser?.id === savedEmployee.id) {
+        setCurrentUserPermissions({
+          ...createPermissionValues(true),
+          ...(savedEmployee.permissions || {}),
+        });
+        setCurrentUserPermissionLoaded(true);
+      }
 
       setPermissionMessage("権限を保存しました");
     } catch (e) {
@@ -3928,38 +4029,75 @@ export default function Home() {
 
       const data = await readApiResponse(res);
 
-      if (!res.ok || !data.ok) {
+      if (!res.ok || !data.ok || !data.loginUser) {
         throw new Error(data.error || "IDまたはパスワードが違います");
       }
 
-      const nextLoginUser = data.loginUser ?? null;
+      const permissionRes = await fetch("/api/master_data/permissions/me", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const permissionData = await readApiResponse(permissionRes);
+
+      if (!permissionRes.ok || !permissionData.ok || !permissionData.loginUser) {
+        throw new Error(
+          permissionData.error || "ログイン中ユーザーの権限取得に失敗しました"
+        );
+      }
+
+      const nextLoginUser = permissionData.loginUser;
 
       const nextLoginHistory =
         data.loginHistory ||
         (data.loginHistoryEvent ? [data.loginHistoryEvent] : []);
 
-            if (typeof window !== "undefined") {
-              window.sessionStorage.setItem(MASTER_DATA_LOGIN_SESSION_KEY, "1");
-              refreshMasterDataLoginExpiresAt();
+      const nextPermissions =
+        nextLoginUser.role === "スーパー管理者"
+          ? createPermissionValues(true)
+          : {
+              ...createPermissionValues(true),
+              ...(permissionData.permissions || {}),
+            };
 
-              if (nextLoginUser) {
-                window.sessionStorage.setItem(
-                  MASTER_DATA_LOGIN_USER_KEY,
-                  JSON.stringify(nextLoginUser)
-                );
-              } else {
-                window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
-              }
-            }
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(MASTER_DATA_LOGIN_SESSION_KEY, "1");
+        refreshMasterDataLoginExpiresAt();
 
-            setLoginUser(nextLoginUser);
-            setLoginHistory(nextLoginHistory);
-            setLoginStatus("logged_in");
-            setLoginPassword("");
-            setLoginError("");
+        window.sessionStorage.setItem(
+          MASTER_DATA_LOGIN_USER_KEY,
+          JSON.stringify(nextLoginUser)
+        );
+      }
+
+      currentUserPermissionRequestIdRef.current += 1;
+
+      setLoginUser(nextLoginUser);
+      setLoginHistory(nextLoginHistory);
+      setLoginStatus("logged_in");
+      setLoginPassword("");
+      setLoginError("");
+      setCurrentUserPermissions(nextPermissions);
+      setCurrentUserPermissionLoaded(true);
+
+      const nextCanShowPermissionManagement =
+        nextLoginUser.role === "スーパー管理者" ||
+        nextLoginUser.role === "管理者";
+
+      if (!nextCanShowPermissionManagement) {
+        setSettingsTab("profile");
+        setPermissionEmployees([]);
+        setSelectedPermissionEmployeeId("");
+        setPermissionError("");
+        setPermissionMessage("");
+        setPermissionListScopeOpen(false);
+        setPermissionListScopeSearchOpen(false);
+      }
     } catch (e) {
       setLoginStatus("logged_out");
       setLoginUser(null);
+      setCurrentUserPermissions({});
+      setCurrentUserPermissionLoaded(false);
       setLoginError(
         e instanceof Error ? e.message : "ログインに失敗しました"
       );
@@ -3969,6 +4107,7 @@ export default function Home() {
   };
 
   const handleLogout = async () => {
+    currentUserPermissionRequestIdRef.current += 1;
     try {
       await fetch("/api/master_data/login", {
         method: "DELETE",
@@ -3989,10 +4128,13 @@ export default function Home() {
     setSettingsPasswordVisible(false);
     setLoginPasswordVisible(false);
     setLoginError("");
+    setSettingsTab("profile");
     setPermissionEmployees([]);
     setSelectedPermissionEmployeeId("");
     setPermissionError("");
     setPermissionMessage("");
+    setPermissionListScopeOpen(false);
+    setPermissionListScopeSearchOpen(false);
     setCurrentUserPermissions({});
     setCurrentUserPermissionLoaded(false);
   };
@@ -4311,7 +4453,10 @@ export default function Home() {
         Number.isFinite(savedLoginExpiresAt) &&
         savedLoginExpiresAt > Date.now();
 
-      let savedLoginUser: MasterDataLoginUser | null = null;
+      let verifiedLoginUser: MasterDataLoginUser | null = null;
+      let verifiedLoginHistory: MasterDataLoginHistoryItem[] = [];
+      let verifiedPermissions = createPermissionValues(false);
+      let verifiedPermissionLoaded = false;
 
       if (!isValidLoginSession) {
         window.sessionStorage.removeItem(MASTER_DATA_LOGIN_SESSION_KEY);
@@ -4321,16 +4466,45 @@ export default function Home() {
         refreshMasterDataLoginExpiresAt();
 
         try {
-          const savedLoginUserText = window.sessionStorage.getItem(
-            MASTER_DATA_LOGIN_USER_KEY
+          const res = await fetch("/api/master_data/permissions/me", {
+            method: "GET",
+            cache: "no-store",
+          });
+
+          const data = await readApiResponse(res);
+
+          if (!res.ok || !data.ok || !data.loginUser) {
+            throw new Error(data.error || "ログインユーザー情報を確認できません");
+          }
+
+          verifiedLoginUser = data.loginUser;
+
+          window.sessionStorage.setItem(
+            MASTER_DATA_LOGIN_USER_KEY,
+            JSON.stringify(verifiedLoginUser)
           );
 
-          savedLoginUser = savedLoginUserText
-            ? (JSON.parse(savedLoginUserText) as MasterDataLoginUser)
-            : null;
+          verifiedLoginHistory = await fetchMasterDataLoginHistory(
+            verifiedLoginUser.id
+          );
+
+          verifiedPermissions =
+            verifiedLoginUser.role === "スーパー管理者"
+              ? createPermissionValues(true)
+              : {
+                  ...createPermissionValues(true),
+                  ...(data.permissions || {}),
+                };
+
+          verifiedPermissionLoaded = true;
         } catch {
+          window.sessionStorage.removeItem(MASTER_DATA_LOGIN_SESSION_KEY);
+          window.sessionStorage.removeItem(MASTER_DATA_LOGIN_EXPIRES_AT_KEY);
           window.sessionStorage.removeItem(MASTER_DATA_LOGIN_USER_KEY);
-          savedLoginUser = null;
+          verifiedLoginUser = null;
+          verifiedLoginHistory = [];
+          verifiedPermissions = createPermissionValues(false);
+          verifiedPermissionLoaded = false;
         }
       }
 
@@ -4342,14 +4516,22 @@ export default function Home() {
 
       if (canceled) return;
 
-      const savedLoginHistory =
-        isValidLoginSession && savedLoginUser
-          ? await fetchMasterDataLoginHistory(savedLoginUser.id)
-          : [];
+      setLoginUser(verifiedLoginUser);
+      setLoginHistory(verifiedLoginHistory);
+      setLoginStatus(verifiedLoginUser ? "logged_in" : "logged_out");
+      setCurrentUserPermissions(verifiedPermissions);
+      setCurrentUserPermissionLoaded(verifiedPermissionLoaded);
 
-      setLoginUser(isValidLoginSession ? savedLoginUser : null);
-      setLoginHistory(savedLoginHistory);
-      setLoginStatus(isValidLoginSession ? "logged_in" : "logged_out");
+      if (!verifiedLoginUser || verifiedLoginUser.role === "従業員") {
+        setSettingsTab("profile");
+        setPermissionEmployees([]);
+        setSelectedPermissionEmployeeId("");
+        setPermissionError("");
+        setPermissionMessage("");
+        setPermissionListScopeOpen(false);
+        setPermissionListScopeSearchOpen(false);
+      }
+
       setScreenReady(true);
     };
 
@@ -4361,10 +4543,42 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (loginStatus !== "logged_in") return;
+    if (loginStatus !== "logged_in" || !loginUser) return;
+
+    if (loginUser.role !== "スーパー管理者" && !currentUserPermissionLoaded) {
+      return;
+    }
 
     fetchData();
-  }, [page, limit, appliedColumnStates, appliedAdvancedFilters, loginStatus]);
+  }, [
+    page,
+    limit,
+    appliedColumnStates,
+    appliedAdvancedFilters,
+    loginStatus,
+    loginUser?.id,
+    loginUser?.role,
+    loginUser?.organization,
+    loginUser?.dbMode,
+    currentUserPermissionLoaded,
+  ]);
+
+  useEffect(() => {
+    if (canShowPermissionManagement) {
+      return;
+    }
+
+    if (settingsTab === "permissionManagement") {
+      setSettingsTab("profile");
+    }
+
+    setPermissionEmployees([]);
+    setSelectedPermissionEmployeeId("");
+    setPermissionError("");
+    setPermissionMessage("");
+    setPermissionListScopeOpen(false);
+    setPermissionListScopeSearchOpen(false);
+  }, [canShowPermissionManagement, settingsTab]);
 
   useEffect(() => {
     masterListScrollRef.current?.scrollTo({ top: 0 });
@@ -4406,9 +4620,33 @@ export default function Home() {
   }, [canShowListColumnFilters]);
 
   useEffect(() => {
+    if (openSidebarPanel === "list" && !canUseListPanel) {
+      setOpenSidebarPanel(null);
+    }
+
+    if (openSidebarPanel === "csv" && !canUseCsvPanel) {
+      setOpenSidebarPanel(null);
+    }
+
+    if (openSidebarPanel === "inspection" && !canUseCrawlPanel && !canUseItemInspectionPanel) {
+      setOpenSidebarPanel(null);
+    }
+  }, [
+    openSidebarPanel,
+    canUseListPanel,
+    canUseCsvPanel,
+    canUseCrawlPanel,
+    canUseItemInspectionPanel,
+  ]);
+
+  useEffect(() => {
     if (loginStatus !== "logged_in" || !loginUser) {
       setCurrentUserPermissions({});
       setCurrentUserPermissionLoaded(false);
+      return;
+    }
+
+    if (currentUserPermissionLoaded) {
       return;
     }
 
@@ -4419,6 +4657,7 @@ export default function Home() {
     loginUser?.role,
     loginUser?.organization,
     loginUser?.dbMode,
+    currentUserPermissionLoaded,
   ]);
 
   useEffect(() => {
@@ -5929,12 +6168,7 @@ export default function Home() {
       return (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {!canUseAnyPermission([
-              "list.delete",
-              "list.add",
-              "list.itemDelete",
-              "list.dedupe",
-            ]) && (
+            {!canUseListPanel && (
               <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-8 text-center text-sm text-slate-400 sm:col-span-2">
                 使用できるリスト操作がありません
               </div>
@@ -6279,7 +6513,7 @@ export default function Home() {
         <div className="space-y-5">
           <div
             className={`sticky top-0 z-30 grid gap-2 rounded-2xl border border-sky-300/10 bg-gradient-to-br from-white/8 via-[#0f172a]/95 to-[#0b1220]/95 p-2 shadow-[0_12px_30px_rgba(0,0,0,0.25)] backdrop-blur-xl ${
-              isMasterDataManagerRole(loginUser?.role) ? "grid-cols-3" : "grid-cols-2"
+              canShowPermissionManagement ? "grid-cols-3" : "grid-cols-2"
             }`}
           >
             <button
@@ -6299,7 +6533,7 @@ export default function Home() {
               </span>
             </button>
 
-            {isMasterDataManagerRole(loginUser?.role) && (
+            {canShowPermissionManagement && (
               <button
                 type="button"
                 onClick={() => {
@@ -7003,7 +7237,7 @@ export default function Home() {
             </div>
           )}
 
-          {isMasterDataManagerRole(loginUser?.role) &&
+          {canShowPermissionManagement &&
             settingsTab === "permissionManagement" && (
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
                 <div className="rounded-2xl border border-white/10 bg-[#0f172a] p-5">
@@ -10550,20 +10784,11 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     }
 
     if (item.key === "list") {
-      return canUseAnyPermission([
-        "list.add",
-        "list.delete",
-        "list.itemDelete",
-        "list.dedupe",
-      ]);
+      return canUseListPanel;
     }
 
     if (item.key === "csv") {
-      return canUseAnyPermission([
-        "csv.import",
-        "csv.export",
-        "csv.template",
-      ]);
+      return canUseCsvPanel;
     }
 
     if (item.key === "inspection") {
@@ -10602,6 +10827,12 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
     activeAdvancedFilterKey === "prefecture" ||
     activeAdvancedFilterKey === "industry" ||
     activeAdvancedFilterKey === "tag";
+
+    const isCurrentUserPermissionPreparing =
+    loginStatus === "logged_in" &&
+    !!loginUser &&
+    loginUser.role !== "スーパー管理者" &&
+    !currentUserPermissionLoaded;
 
   const blockingLoadingState = loginLoading
     ? {
@@ -11016,7 +11247,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
           message={blockingLoadingState.message}
         />
       )}
-      {!screenReady || loginStatus === "checking" ? (
+      {!screenReady || loginStatus === "checking" || isCurrentUserPermissionPreparing ? (
         <BlockingLoadingOverlay
           title="読み込み中"
           message="画面を準備しています"

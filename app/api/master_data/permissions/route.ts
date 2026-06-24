@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireMasterDataAdmin } from "@/lib/master-data-auth";
 import {
-  getMasterDataUserPermissionSettings,
+  getMasterDataUsersPermissionSettings,
   upsertMasterDataUserPermissionSettings,
 } from "@/lib/master-data-permissions";
 
@@ -59,12 +59,7 @@ function parseMasterDataLoginUsersByRole(
           ? "スーパー管理者"
           : role;
 
-      if (
-        id === "" ||
-        password === "" ||
-        name === "" ||
-        organization === ""
-      ) {
+      if (id === "" || password === "" || name === "") {
         return null;
       }
 
@@ -128,7 +123,6 @@ function getMasterDataLoginUsers(): MasterDataLoginUser[] {
         id === "" ||
         password === "" ||
         name === "" ||
-        organization === "" ||
         !isMasterDataLoginRole(role)
       ) {
         return null;
@@ -199,24 +193,26 @@ export async function GET(req: NextRequest) {
       );
     });
 
-    const items = await Promise.all(
-      employees.map(async (employee) => {
-        const settings = await getMasterDataUserPermissionSettings(
-          employee.id,
-          employee.organization,
-          adminUser.dbMode ?? "neon"
-        );
-
-        return {
-          id: employee.id,
-          name: employee.name,
-          role: employee.role,
-          organization: employee.organization,
-          permissions: settings.permissions,
-          allowedFilters: settings.allowedFilters,
-        };
-      })
+    const settingsByUserId = await getMasterDataUsersPermissionSettings(
+      employees.map((employee) => ({
+        id: employee.id,
+        organization: employee.organization,
+      })),
+      adminUser.dbMode ?? "neon"
     );
+
+    const items = employees.map((employee) => {
+      const settings = settingsByUserId[employee.id];
+
+      return {
+        id: employee.id,
+        name: employee.name,
+        role: employee.role,
+        organization: employee.organization,
+        permissions: settings.permissions,
+        allowedFilters: settings.allowedFilters,
+      };
+    });
 
     return NextResponse.json({
       ok: true,
@@ -273,12 +269,14 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    const primaryDbMode = adminUser.dbMode ?? "neon";
+
     const settings = await upsertMasterDataUserPermissionSettings({
       userId: targetEmployee.id,
       organization: targetEmployee.organization,
       permissions,
       allowedFilters,
-      dbMode: adminUser.dbMode ?? "neon",
+      dbMode: primaryDbMode,
     });
 
     return NextResponse.json({

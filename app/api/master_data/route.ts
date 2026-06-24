@@ -972,9 +972,13 @@ function mergeWhereClauses(
 }
 
 async function getListScopeSearchParamsForRequest(req: NextRequest) {
-  const { user } = requireMasterDataUser(req);
+  const { user, errorResponse } = requireMasterDataUser(req);
 
-  if (!user || user.role === "スーパー管理者") {
+  if (errorResponse || !user) {
+    throw new Error("ログインユーザー情報を確認できません");
+  }
+
+  if (user.role === "スーパー管理者") {
     return null;
   }
 
@@ -1619,16 +1623,21 @@ async function handleReadRequest(req: NextRequest, searchParams: URLSearchParams
 }
 
 export async function GET(req: NextRequest) {
-  const authError = requireMasterDataAuth(req);
-  if (authError) return authError;
+  const { errorResponse } = requireMasterDataUser(req);
+
+  if (errorResponse) {
+    return errorResponse;
+  }
 
   const { searchParams } = new URL(req.url);
   return handleReadRequest(req, searchParams);
 }
-
 export async function POST(req: NextRequest) {
-  const authError = requireMasterDataAuth(req);
-  if (authError) return authError;
+  const { errorResponse } = requireMasterDataUser(req);
+
+  if (errorResponse) {
+    return errorResponse;
+  }
 
   const { dbReady, pool } = getRequestMasterDataDb(req);
 
@@ -1870,8 +1879,11 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const authError = requireMasterDataAuth(req);
-  if (authError) return authError;
+  const { errorResponse } = requireMasterDataUser(req);
+
+  if (errorResponse) {
+    return errorResponse;
+  }
 
   const { dbReady, pool } = getRequestMasterDataDb(req);
   const client = await pool.connect();
