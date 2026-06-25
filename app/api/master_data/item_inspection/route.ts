@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { dbReady, pool } from "@/lib/db";
+import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
 import {
+  getCurrentMasterDataUser,
   requireMasterDataAuth,
   requireMasterDataUser,
 } from "@/lib/master-data-auth";
@@ -14,6 +15,26 @@ import {
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
+
+type MasterDataDbMode = "neon" | "postgresql";
+
+function normalizeMasterDataDbMode(value: unknown): MasterDataDbMode {
+  return value === "postgresql" || value === "supabase"
+    ? "postgresql"
+    : "neon";
+}
+
+function getRequestMasterDataDb(req: NextRequest) {
+  const dbMode = normalizeMasterDataDbMode(
+    getCurrentMasterDataUser(req)?.dbMode
+  );
+
+  return {
+    dbMode,
+    dbReady: getMasterDataDbReady(dbMode),
+    pool: getMasterDataPool(dbMode),
+  };
+}
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -161,6 +182,7 @@ type ItemInspectionJobStatus = "running" | "paused" | "completed" | "error";
 
 type ItemInspectionJob = {
   id: string;
+  dbMode: MasterDataDbMode;
   status: ItemInspectionJobStatus;
   createdAt: number;
   updatedAt: number;
@@ -346,6 +368,16 @@ function scheduleJobCleanup(jobId: string, delayMs = JOB_TTL_MS) {
   setTimeout(() => {
     itemInspectionJobs.delete(jobId);
   }, delayMs);
+}
+
+function getItemInspectionJob(jobId: string, dbMode: MasterDataDbMode) {
+  const job = itemInspectionJobs.get(jobId);
+
+  if (!job || job.dbMode !== dbMode) {
+    return null;
+  }
+
+  return job;
 }
 
 function parseFilterModels(searchParams: URLSearchParams) {
@@ -927,13 +959,16 @@ async function buildWhereClauseWithListScope(
   const base = buildWhereClause(searchParams, skipKey);
   const { user } = requireMasterDataUser(req);
 
-  if (!user || user.role === "管理者") {
+  if (!user || user.role === "スーパー管理者") {
     return base;
   }
 
+  const { dbMode } = getRequestMasterDataDb(req);
+
   const settings = await getMasterDataUserPermissionSettings(
     user.id,
-    user.organization
+    user.organization,
+    dbMode
   );
 
   const scopeSearchParams = buildSearchParamsFromListScopeFilters(
@@ -2686,6 +2721,8 @@ async function fetchInspectionTargets(
   req: NextRequest,
   payload: Record<string, unknown>
 ): Promise<InspectionTargetRow[]> {
+  const { dbReady, pool } = getRequestMasterDataDb(req);
+
   await dbReady;
   const client = await pool.connect();
 
@@ -2900,6 +2937,8 @@ async function handleStartJob(req: NextRequest, payload: Record<string, unknown>
     );
   }
 
+  const { dbMode } = getRequestMasterDataDb(req);
+
   const targetRows = await fetchInspectionTargets(req, payload);
 
   if (targetRows.length === 0) {
@@ -2924,6 +2963,7 @@ async function handleStartJob(req: NextRequest, payload: Record<string, unknown>
 
   const job: ItemInspectionJob = {
     id: jobId,
+    dbMode,
     status: "running",
     createdAt: now,
     updatedAt: now,
@@ -2961,7 +3001,7 @@ async function handleStartJob(req: NextRequest, payload: Record<string, unknown>
   );
 }
 
-async function handleGetJobStatus(payload: Record<string, unknown>) {
+async function handleGetJobStatus(req: NextRequest, payload: Record<string, unknown>) {
   const jobId = String(payload.jobId ?? "").trim();
 
   if (!jobId) {
@@ -2971,7 +3011,8 @@ async function handleGetJobStatus(payload: Record<string, unknown>) {
     );
   }
 
-  const job = itemInspectionJobs.get(jobId);
+  const { dbMode } = getRequestMasterDataDb(req);
+  const job = getItemInspectionJob(jobId, dbMode);
 
   if (!job) {
     return NextResponse.json(
@@ -2993,7 +3034,7 @@ async function handleGetJobStatus(payload: Record<string, unknown>) {
   );
 }
 
-async function handlePauseJob(payload: Record<string, unknown>) {
+async function handlePauseJob(req: NextRequest, payload: Record<string, unknown>) {
   const jobId = String(payload.jobId ?? "").trim();
 
   if (!jobId) {
@@ -3003,7 +3044,8 @@ async function handlePauseJob(payload: Record<string, unknown>) {
     );
   }
 
-  const job = itemInspectionJobs.get(jobId);
+  const { dbMode } = getRequestMasterDataDb(req);
+  const job = getItemInspectionJob(jobId, dbMode);
 
   if (!job) {
     return NextResponse.json(
@@ -3029,7 +3071,7 @@ async function handlePauseJob(payload: Record<string, unknown>) {
   });
 }
 
-async function handleCancelJob(payload: Record<string, unknown>) {
+async function handleCancelJob(req: NextRequest, payload: Record<string, unknown>) {
   const jobId = String(payload.jobId ?? "").trim();
 
   if (!jobId) {
@@ -3039,7 +3081,8 @@ async function handleCancelJob(payload: Record<string, unknown>) {
     );
   }
 
-  const job = itemInspectionJobs.get(jobId);
+  const { dbMode } = getRequestMasterDataDb(req);
+  const job = getItemInspectionJob(jobId, dbMode);
 
   if (!job) {
     return NextResponse.json({
@@ -3057,7 +3100,7 @@ async function handleCancelJob(payload: Record<string, unknown>) {
   });
 }
 
-async function handleResumeJob(payload: Record<string, unknown>) {
+async function handleResumeJob(req: NextRequest, payload: Record<string, unknown>) {
   const jobId = String(payload.jobId ?? "").trim();
 
   if (!jobId) {
@@ -3067,7 +3110,8 @@ async function handleResumeJob(payload: Record<string, unknown>) {
     );
   }
 
-  const job = itemInspectionJobs.get(jobId);
+  const { dbMode } = getRequestMasterDataDb(req);
+  const job = getItemInspectionJob(jobId, dbMode);
 
   if (!job) {
     return NextResponse.json(
@@ -3100,7 +3144,7 @@ async function handleResumeJob(payload: Record<string, unknown>) {
   });
 }
 
-async function handleApplyPreviewChanges(payload: Record<string, unknown>) {
+async function handleApplyPreviewChanges(req: NextRequest, payload: Record<string, unknown>) {
   const changes = Array.isArray(payload.changes)
     ? payload.changes
         .filter(
@@ -3133,10 +3177,21 @@ async function handleApplyPreviewChanges(payload: Record<string, unknown>) {
     );
   }
 
-  const client = await pool.connect();
+  const { dbMode, dbReady, pool } = getRequestMasterDataDb(req);
+  const jobId = String(payload.jobId ?? "").trim();
+  const job = jobId ? itemInspectionJobs.get(jobId) : null;
 
-  try {
-    await dbReady;
+  if (job && job.dbMode !== dbMode) {
+    return NextResponse.json(
+      { ok: false, error: "ログイン中のDBと項目精査ジョブのDBが一致しません" },
+      { status: 400 }
+    );
+  }
+
+  await dbReady;
+    const client = await pool.connect();
+
+    try {
     await ensureMasterDataIdColumn(client);
     await client.query("BEGIN");
 
@@ -3213,7 +3268,6 @@ export async function POST(req: NextRequest) {
     const authError = requireMasterDataAuth(req);
     if (authError) return authError;
 
-    await dbReady;
     const payload = (await req.json()) as Record<string, unknown>;
     const action = String(payload.action ?? "");
 
@@ -3269,23 +3323,23 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "get_job_status") {
-      return handleGetJobStatus(payload);
+      return handleGetJobStatus(req, payload);
     }
 
     if (action === "pause_job") {
-      return handlePauseJob(payload);
+      return handlePauseJob(req, payload);
     }
 
     if (action === "cancel_job") {
-      return handleCancelJob(payload);
+      return handleCancelJob(req, payload);
     }
 
     if (action === "resume_job") {
-      return handleResumeJob(payload);
+      return handleResumeJob(req, payload);
     }
 
     if (action === "apply_preview_changes") {
-      return handleApplyPreviewChanges(payload);
+      return handleApplyPreviewChanges(req, payload);
     }
 
     return NextResponse.json(

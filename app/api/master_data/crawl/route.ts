@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
-import { pool } from "@/lib/db";
+import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
 import type { PoolClient } from "pg";
 import {
   crawlCompanyWebsite,
@@ -10,6 +10,7 @@ import {
   type CrawlExtractedOffice,
 } from "@/lib/master-data-crawler";
 import {
+  getCurrentMasterDataUser,
   refreshMasterDataAuthCookie,
   requireMasterDataAuth,
   requireMasterDataUser,
@@ -19,6 +20,22 @@ import {
   requireMasterDataPermission,
   type MasterDataPermissionKey,
 } from "@/lib/master-data-permissions";
+
+type MasterDataDbMode = "neon" | "postgresql";
+
+function normalizeMasterDataDbMode(value: unknown): MasterDataDbMode {
+  return value === "postgresql" || value === "supabase"
+    ? "postgresql"
+    : "neon";
+}
+
+function getRequestMasterDataDbMode(req: NextRequest) {
+  return normalizeMasterDataDbMode(getCurrentMasterDataUser(req)?.dbMode);
+}
+
+function getWorkerMasterDataDbMode(body: CrawlRequestBody) {
+  return normalizeMasterDataDbMode(body.dbMode);
+}
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -242,6 +259,7 @@ type PermissionListScopeFilters = {
 };
 
 type CrawlRequestBody = {
+  dbMode?: MasterDataDbMode | "supabase" | null;
   action?:
     | "start_preview_job"
     | "get_job_status"
@@ -846,9 +864,12 @@ async function getListScopeFiltersForRequest(req: NextRequest) {
     return null;
   }
 
+  const dbMode = getRequestMasterDataDbMode(req);
+
   const settings = await getMasterDataUserPermissionSettings(
     user.id,
-    user.organization
+    user.organization,
+    dbMode
   );
 
   return parsePermissionListScopeFilters(settings.allowedFilters);
@@ -1796,6 +1817,7 @@ function hasMultipleEffectiveCandidates(
 
 type CrawlJobState = {
   jobId: string;
+  dbMode: MasterDataDbMode;
   selectedFields: CrawlSelectableFieldKey[];
   selectedFieldLabels: string[];
   nextIndex: number;
@@ -1931,12 +1953,12 @@ const CRAWL_COMPANY_TIMEOUT_MS = 90 * 1000;
 const CRAWL_COMPANY_TIMEOUT_ERROR_MESSAGE =
   "__MASTER_DATA_CRAWL_COMPANY_TIMEOUT__";
 
-function startCrawlJobRunner(jobId: string) {
+function startCrawlJobRunner(jobId: string, dbMode: MasterDataDbMode) {
   if (runningCrawlJobIds.has(jobId)) return;
 
   runningCrawlJobIds.add(jobId);
 
-  void runCrawlJob(jobId)
+  void runCrawlJob(jobId, dbMode)
     .catch(() => {
       // runCrawlJob内で状態保存するため、ここでは落とさない
     })
@@ -1950,7 +1972,7 @@ function startCrawlJobRunner(jobId: string) {
       }
 
       setTimeout(() => {
-        startCrawlJobRunner(jobId);
+        startCrawlJobRunner(jobId, job.dbMode);
       }, CRAWL_JOB_RESTART_DELAY_MS);
     });
 }
@@ -2308,7 +2330,7 @@ async function persistCrawlJobStateIfNeeded(
 async function persistCrawlJobState(job: CrawlJobState) {
   snapshotCrawlRunTimer(job);
 
-  const client = await pool.connect();
+  const client = await getMasterDataPool(job.dbMode).connect();
 
   try {
     await ensureCrawlJobTables(client);
@@ -2393,8 +2415,11 @@ async function persistCrawlJobState(job: CrawlJobState) {
   }
 }
 
-async function deletePersistedCrawlJobState(jobId: string) {
-  const client = await pool.connect();
+async function deletePersistedCrawlJobState(
+  jobId: string,
+  dbMode: MasterDataDbMode
+) {
+  const client = await getMasterDataPool(dbMode).connect();
 
   try {
     await ensureCrawlJobTables(client);
@@ -2413,13 +2438,16 @@ async function deletePersistedCrawlJobState(jobId: string) {
   }
 }
 
-async function loadPersistedCrawlJobState(jobId: string) {
+async function loadPersistedCrawlJobState(
+  jobId: string,
+  dbMode: MasterDataDbMode
+) {
   const existing = crawlJobs.get(jobId);
-  if (existing) {
+  if (existing?.dbMode === dbMode) {
     return existing;
   }
 
-  const client = await pool.connect();
+  const client = await getMasterDataPool(dbMode).connect();
 
   try {
     await ensureCrawlJobTables(client);
@@ -2492,6 +2520,7 @@ async function loadPersistedCrawlJobState(jobId: string) {
 
     const job: CrawlJobState = {
       jobId: String(row.job_id),
+      dbMode,
       selectedFields: normalizedSelectedFields,
       selectedFieldLabels: buildSelectedFieldLabels(normalizedSelectedFields),
       nextIndex: Number(row.next_index ?? 0),
@@ -2525,12 +2554,15 @@ async function loadPersistedCrawlJobState(jobId: string) {
   }
 }
 
-async function getCrawlJobFromMemoryOrFile(jobId?: string | null) {
+async function getCrawlJobFromMemoryOrFile(
+  jobId: string | null | undefined,
+  dbMode: MasterDataDbMode
+) {
   if (!jobId) {
     return null;
   }
 
-  return await loadPersistedCrawlJobState(jobId);
+  return await loadPersistedCrawlJobState(jobId, dbMode);
 }
 
 function isCrawlPausedError(error: unknown) {
@@ -3033,9 +3065,10 @@ async function markCrawlTargetsProcessing(
 }
 
 async function withCrawlDbClient<T>(
+  dbMode: MasterDataDbMode,
   callback: (client: DbClient) => Promise<T>
 ): Promise<T> {
-  const client = await pool.connect();
+  const client = await getMasterDataPool(dbMode).connect();
 
   try {
     return await callback(client);
@@ -3704,7 +3737,7 @@ async function fetchCrawlElapsedMsFromTargets(
 }
 
 async function syncCrawlElapsedMsFromTargets(job: CrawlJobState) {
-  const targetElapsedMs = await withCrawlDbClient((client) =>
+  const targetElapsedMs = await withCrawlDbClient(job.dbMode, (client) =>
     fetchCrawlElapsedMsFromTargets(client, job.jobId)
   );
 
@@ -3736,8 +3769,8 @@ async function syncCrawlElapsedMsFromTargets(job: CrawlJobState) {
   await persistCrawlJobState(job);
 }
 
-async function runCrawlJob(jobId: string) {
-  const firstJob = await getCrawlJobFromMemoryOrFile(jobId);
+async function runCrawlJob(jobId: string, dbMode: MasterDataDbMode) {
+  const firstJob = await getCrawlJobFromMemoryOrFile(jobId, dbMode);
   if (!firstJob || firstJob.completed) return;
 
   firstJob.running = true;
@@ -3763,7 +3796,7 @@ async function runCrawlJob(jobId: string) {
   };
 
   try {
-    await withCrawlDbClient(async (client) => {
+    await withCrawlDbClient(firstJob.dbMode, async (client) => {
       await ensureCrawlPreviewTable(client);
       await ensureCrawlJobTables(client);
     });
@@ -3788,8 +3821,9 @@ async function runCrawlJob(jobId: string) {
         break;
       }
 
-      const row = await withCrawlDbClient((client) =>
-        fetchCrawlTargetByIndex(client, job.jobId, index)
+      const row = await withCrawlDbClient<Record<string, unknown> | null>(
+        job.dbMode,
+        (client) => fetchCrawlTargetByIndex(client, job.jobId, index)
       );
 
       if (!row) {
@@ -3803,7 +3837,7 @@ async function runCrawlJob(jobId: string) {
       job.currentCompany = normalizeNullableText(row.company);
       job.currentWebsiteUrl = normalizeNullableText(row.website_url);
 
-      await withCrawlDbClient((client) =>
+      await withCrawlDbClient(job.dbMode, (client) =>
         markCrawlTargetStatus(client, job.jobId, index, "processing")
       );
 
@@ -3822,7 +3856,7 @@ async function runCrawlJob(jobId: string) {
           targetStatus = "skipped";
           statusReason = "企業サイトURLが空です";
         } else {
-          const currentRowData = await withCrawlDbClient((client) =>
+          const currentRowData = await withCrawlDbClient(job.dbMode, (client) =>
             fetchSourceRowForPreview(client, String(row.row_id ?? ""))
           );
 
@@ -3883,7 +3917,7 @@ async function runCrawlJob(jobId: string) {
               });
 
               if (rowPreviewItems.length > 0) {
-                await withCrawlDbClient((client) =>
+                await withCrawlDbClient(job.dbMode, (client) =>
                   insertCrawlPreviewItems(client, job.jobId, rowPreviewItems)
                 );
 
@@ -3919,7 +3953,7 @@ async function runCrawlJob(jobId: string) {
         }
       } finally {
         if (!pauseTriggered) {
-          await withCrawlDbClient((client) =>
+          await withCrawlDbClient(job.dbMode, (client) =>
             markCrawlTargetStatus(
               client,
               job.jobId,
@@ -4178,6 +4212,13 @@ export async function POST(req: NextRequest) {
       action === "worker_report_target" ||
       action === "worker_report_targets";
 
+    const dbMode = isWorkerAction
+      ? getWorkerMasterDataDbMode(body)
+      : getRequestMasterDataDbMode(req);
+    const activePool = getMasterDataPool(dbMode);
+
+    await getMasterDataDbReady(dbMode);
+
     if (!isWorkerAction) {
       const requiredPermission =
         action === "start_preview_job" ||
@@ -4224,7 +4265,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      client = await pool.connect();
+      client = await activePool.connect();
 
       try {
         await ensureCrawlJobTables(client);
@@ -4273,7 +4314,7 @@ export async function POST(req: NextRequest) {
           }
 
           crawlJobs.delete(jobId);
-          const job = await loadPersistedCrawlJobState(jobId);
+          const job = await loadPersistedCrawlJobState(jobId, dbMode);
 
           if (!job) {
             return NextResponse.json(
@@ -4301,7 +4342,7 @@ export async function POST(req: NextRequest) {
           }
 
           crawlJobs.delete(jobId);
-          const job = await loadPersistedCrawlJobState(jobId);
+          const job = await loadPersistedCrawlJobState(jobId, dbMode);
 
           if (!job) {
             return NextResponse.json(
@@ -4334,7 +4375,7 @@ export async function POST(req: NextRequest) {
           }
 
           crawlJobs.delete(jobId);
-          const job = await loadPersistedCrawlJobState(jobId);
+          const job = await loadPersistedCrawlJobState(jobId, dbMode);
 
           if (!job) {
             return NextResponse.json(
@@ -4369,7 +4410,7 @@ export async function POST(req: NextRequest) {
           }
 
           crawlJobs.delete(jobId);
-          const job = await loadPersistedCrawlJobState(jobId);
+          const job = await loadPersistedCrawlJobState(jobId, dbMode);
 
           if (!job) {
             return NextResponse.json(
@@ -4412,7 +4453,7 @@ export async function POST(req: NextRequest) {
         crawlJobs.delete(statusJobId);
       }
 
-      const job = await getCrawlJobFromMemoryOrFile(statusJobId);
+      const job = await getCrawlJobFromMemoryOrFile(statusJobId, dbMode);
 
       if (!job) {
         return NextResponse.json(
@@ -4433,7 +4474,7 @@ export async function POST(req: NextRequest) {
           job.paused = false;
           startCrawlRunTimer(job);
           await persistCrawlJobState(job);
-          startCrawlJobRunner(job.jobId);
+          startCrawlJobRunner(job.jobId, job.dbMode);
         } else {
           await persistCrawlJobState(job);
         }
@@ -4454,7 +4495,7 @@ export async function POST(req: NextRequest) {
         return response;
       }
 
-      client = await pool.connect();
+      client = await activePool.connect();
 
       const previewResult = await buildPublicPreviewRows(
         client,
@@ -4480,7 +4521,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "cancel_job") {
-      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null, dbMode);
 
       if (!job) {
         return NextResponse.json(
@@ -4489,7 +4530,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      client = await pool.connect();
+      client = await activePool.connect();
 
       job.pauseRequested = false;
       job.running = false;
@@ -4509,7 +4550,7 @@ export async function POST(req: NextRequest) {
       );
 
       crawlJobs.delete(job.jobId);
-      await deletePersistedCrawlJobState(job.jobId);
+      await deletePersistedCrawlJobState(job.jobId, job.dbMode);
 
       return NextResponse.json({
         ok: true,
@@ -4518,7 +4559,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "pause_job") {
-      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null, dbMode);
 
       if (!job) {
         return NextResponse.json(
@@ -4532,7 +4573,7 @@ export async function POST(req: NextRequest) {
 
       await persistCrawlJobState(job);
 
-      client = await pool.connect();
+      client = await activePool.connect();
 
       await updateJobWorkerColumns(client, job.jobId, {
         status: "paused",
@@ -4546,7 +4587,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "resume_job") {
-      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null, dbMode);
 
       if (!job) {
         return NextResponse.json(
@@ -4577,7 +4618,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      client = await pool.connect();
+      client = await activePool.connect();
 
       job.pauseRequested = false;
       job.paused = false;
@@ -4603,7 +4644,7 @@ export async function POST(req: NextRequest) {
       }
 
       // localhostでは従来通りNext.js内部runnerで再開する
-      startCrawlJobRunner(job.jobId);
+      startCrawlJobRunner(job.jobId, job.dbMode);
 
       return NextResponse.json({
         ...buildJobResponse(job),
@@ -4613,7 +4654,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "save_partial") {
-      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null);
+      const job = await getCrawlJobFromMemoryOrFile(body.jobId ?? null, dbMode);
 
       if (!job) {
         return NextResponse.json(
@@ -4629,7 +4670,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      client = await pool.connect();
+      client = await activePool.connect();
 
       const result = await savePreviewItems(client, job, body.selectedChanges);
       const remainingCount = Math.max(job.total - job.nextIndex, 0);
@@ -4645,7 +4686,7 @@ export async function POST(req: NextRequest) {
       if (remainingCount === 0 && previewResult.total === 0) {
         await deleteAllCrawlPreviewItems(client, job.jobId);
         crawlJobs.delete(job.jobId);
-        await deletePersistedCrawlJobState(job.jobId);
+        await deletePersistedCrawlJobState(job.jobId, job.dbMode);
       } else {
         await persistCrawlJobState(job);
       }
@@ -4663,7 +4704,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === "start_preview_job") {
-      client = await pool.connect();
+      client = await activePool.connect();
 
       const selectedFieldSet = normalizeSelectedFields(body.selectedFields);
       const selectedFields = Array.from(selectedFieldSet);
@@ -4737,6 +4778,7 @@ export async function POST(req: NextRequest) {
 
       const job: CrawlJobState = {
         jobId,
+        dbMode,
         selectedFields,
         selectedFieldLabels: buildSelectedFieldLabels(selectedFields),
         nextIndex: 0,
@@ -4780,7 +4822,7 @@ export async function POST(req: NextRequest) {
       }
 
       // localhostでは従来通りNext.js内部runnerで実行する
-      startCrawlJobRunner(jobId);
+      startCrawlJobRunner(jobId, dbMode);
 
       return NextResponse.json({
         ...buildJobResponse(job),

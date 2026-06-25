@@ -815,19 +815,37 @@ type LocalCrawlWorkerStatus = {
   startedAt: string;
 };
 
+function getActiveCrawlJobStorageKey() {
+  if (typeof window === "undefined") {
+    return ACTIVE_CRAWL_JOB_STORAGE_KEY;
+  }
+
+  try {
+    const loginUser = JSON.parse(
+      window.sessionStorage.getItem(MASTER_DATA_LOGIN_USER_KEY) || "{}"
+    ) as MasterDataLoginUser;
+
+    return `${ACTIVE_CRAWL_JOB_STORAGE_KEY}:${loginUser.dbMode ?? "neon"}`;
+  } catch {
+    return `${ACTIVE_CRAWL_JOB_STORAGE_KEY}:neon`;
+  }
+}
+
 function saveActiveCrawlJobId(jobId: string | null) {
   if (typeof window === "undefined") return;
 
+  const storageKey = getActiveCrawlJobStorageKey();
+
   if (jobId) {
-    window.localStorage.setItem(ACTIVE_CRAWL_JOB_STORAGE_KEY, jobId);
+    window.localStorage.setItem(storageKey, jobId);
   } else {
-    window.localStorage.removeItem(ACTIVE_CRAWL_JOB_STORAGE_KEY);
+    window.localStorage.removeItem(storageKey);
   }
 }
 
 function loadActiveCrawlJobId() {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(ACTIVE_CRAWL_JOB_STORAGE_KEY);
+  return window.localStorage.getItem(getActiveCrawlJobStorageKey());
 }
 
 const CRAWL_ELAPSED_STORAGE_PREFIX = "master-data-crawl-elapsed-ms:";
@@ -10681,6 +10699,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
         },
         body: JSON.stringify({
           action: "apply_preview_changes",
+          jobId: itemInspectionJobId,
           changes: targetChanges,
         }),
       });

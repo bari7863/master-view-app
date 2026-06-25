@@ -7,9 +7,18 @@ import { crawlCompanyWebsite, type CrawlExtractedFields, type CrawlSelectableFie
 
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || "0";
 
+type MasterDataDbMode = "neon" | "postgresql";
+
+function normalizeMasterDataDbMode(value: unknown): MasterDataDbMode {
+  return value === "postgresql" || value === "supabase"
+    ? "postgresql"
+    : "neon";
+}
+
 type WorkerConfig = {
   apiBaseUrl: string;
   workerToken: string;
+  dbMode?: MasterDataDbMode | "supabase";
   workerName?: string;
   localPort?: number;
   pollIntervalMs?: number;
@@ -20,6 +29,7 @@ type WorkerStatus = {
   workerId: string;
   workerName: string;
   apiBaseUrl: string;
+  dbMode: MasterDataDbMode;
   running: boolean;
   currentJobId: string | null;
   currentCompany: string | null;
@@ -87,6 +97,7 @@ function loadConfig(): WorkerConfig {
     const sample: WorkerConfig = {
       apiBaseUrl: "https://master-view-app-ruby.vercel.app",
       workerToken: "ここにVercelと同じMASTER_CRAWL_WORKER_TOKENを入れてください",
+      dbMode: "neon",
       workerName: os.hostname(),
       localPort: 39281,
       pollIntervalMs: 3000,
@@ -108,6 +119,7 @@ function loadConfig(): WorkerConfig {
   return {
     ...config,
     apiBaseUrl: config.apiBaseUrl.replace(/\/+$/, ""),
+    dbMode: normalizeMasterDataDbMode(config.dbMode),
     workerName: os.hostname(),
     localPort: config.localPort || 39281,
     pollIntervalMs: config.pollIntervalMs || 3000,
@@ -138,6 +150,7 @@ const status: WorkerStatus = {
   workerId,
   workerName: config.workerName || os.hostname(),
   apiBaseUrl: config.apiBaseUrl,
+  dbMode: normalizeMasterDataDbMode(config.dbMode),
   running: false,
   currentJobId: null,
   currentCompany: null,
@@ -155,6 +168,7 @@ async function callApi<T>(body: Record<string, unknown>): Promise<T> {
     },
     body: JSON.stringify({
       ...body,
+      dbMode: normalizeMasterDataDbMode(config.dbMode),
       workerId,
       workerName: config.workerName,
     }),
