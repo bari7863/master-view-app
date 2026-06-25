@@ -262,6 +262,41 @@ type MasterDataLoginUser = {
   dbMode?: MasterDataDbMode;
 };
 
+const MASTER_DATA_DB_OPTIONS: {
+  key: MasterDataDbMode;
+  label: string;
+  description: string;
+  mark: string;
+}[] = [
+  {
+    key: "neon",
+    label: "Neon",
+    description: "Neon側のデータベースを使用します",
+    mark: "N",
+  },
+  {
+    key: "postgresql",
+    label: "Supabase",
+    description: "Supabase側のデータベースを使用します",
+    mark: "S",
+  },
+];
+
+function getMasterDataDbLabel(dbMode: MasterDataDbMode | undefined) {
+  return (
+    MASTER_DATA_DB_OPTIONS.find((option) => option.key === dbMode)?.label ??
+    "Neon"
+  );
+}
+
+function getMasterDataDbMenuBadgeClass(dbMode: MasterDataDbMode | undefined) {
+  if (dbMode === "postgresql") {
+    return "border-emerald-300/35 bg-emerald-400/10 text-emerald-100";
+  }
+
+  return "border-cyan-300/35 bg-cyan-400/10 text-cyan-100";
+}
+
 type MasterDataLoginHistoryItem = {
   loggedAt: string;
   ipAddress: string;
@@ -1229,6 +1264,7 @@ type SidebarPanelKey =
   | "list"
   | "csv"
   | "inspection"
+  | "database"
   | "theme"
   | "settings";
 
@@ -1247,6 +1283,7 @@ const SIDEBAR_PANEL_TITLES: Record<SidebarPanelKey, string> = {
   list: "リスト",
   csv: "CSV取込",
   inspection: "精査",
+  database: "データベース",
   theme: "テーマ",
   settings: "設定",
 };
@@ -1256,6 +1293,7 @@ const SIDEBAR_MENU_ITEMS: { key: SidebarPanelKey; label: string }[] = [
   { key: "list", label: "リスト" },
   { key: "csv", label: "CSV" },
   { key: "inspection", label: "精査" },
+  { key: "database", label: "データベース" },
   { key: "theme", label: "テーマ" },
   { key: "settings", label: "設定" },
 ];
@@ -1314,6 +1352,23 @@ function SidebarMenuIcon({
         <path d="M14 3v5h5" />
         <path d="M8 13h8" />
         <path d="M8 17h5" />
+      </svg>
+    );
+  }
+
+  if (menuKey === "database") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        className={className}
+      >
+        <ellipse cx="12" cy="5.5" rx="6.5" ry="3" />
+        <path d="M5.5 5.5v6c0 1.65 2.9 3 6.5 3s6.5-1.35 6.5-3v-6" />
+        <path d="M5.5 11.5v6c0 1.65 2.9 3 6.5 3s6.5-1.35 6.5-3v-6" />
+        <path d="M8.5 12.5c1 .55 2.2.8 3.5.8s2.5-.25 3.5-.8" />
       </svg>
     );
   }
@@ -3311,6 +3366,9 @@ export default function Home() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [loginUser, setLoginUser] = useState<MasterDataLoginUser | null>(null);
+  const [databaseSwitching, setDatabaseSwitching] = useState(false);
+  const [databaseSwitchMessage, setDatabaseSwitchMessage] = useState("");
+  const [databaseSwitchError, setDatabaseSwitchError] = useState("");
   const [screenReady, setScreenReady] = useState(false);
 
   const canShowPermissionManagement =
@@ -4121,6 +4179,84 @@ export default function Home() {
       );
     } finally {
       setLoginLoading(false);
+    }
+  };
+
+  const handleSwitchDatabase = async (nextDbMode: MasterDataDbMode) => {
+    if (!loginUser) {
+      return;
+    }
+
+    const currentDbMode = loginUser.dbMode ?? "neon";
+
+    if (currentDbMode === nextDbMode) {
+      return;
+    }
+
+    setDatabaseSwitching(true);
+    setDatabaseSwitchMessage("");
+    setDatabaseSwitchError("");
+
+    try {
+      const res = await fetch("/api/master_data/login", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          db: nextDbMode,
+        }),
+        cache: "no-store",
+      });
+
+      const data = await readApiResponse(res);
+
+      if (!res.ok || !data.ok || !data.loginUser) {
+        throw new Error(data.error || "データベースの切り替えに失敗しました");
+      }
+
+      const nextLoginUser: MasterDataLoginUser = {
+        ...loginUser,
+        ...data.loginUser,
+        dbMode: nextDbMode,
+      };
+
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          MASTER_DATA_LOGIN_USER_KEY,
+          JSON.stringify(nextLoginUser)
+        );
+      }
+
+      setLoginUser(nextLoginUser);
+      setLoginDbMode(nextDbMode);
+      setRows([]);
+      setTotal(0);
+      setTotalPages(1);
+      setPage(1);
+      setOpenFilterKey(null);
+      setOpenAdvancedFilterKey(null);
+      setCurrentUserPermissions(createPermissionValues(false));
+      setCurrentUserPermissionLoaded(false);
+
+      await fetchCurrentUserPermissions(nextLoginUser);
+
+      const nextLoginHistory = await fetchMasterDataLoginHistory(
+        nextLoginUser.id
+      );
+
+      setLoginHistory(nextLoginHistory);
+      setDatabaseSwitchMessage(
+        `${getMasterDataDbLabel(nextDbMode)}に切り替えました`
+      );
+    } catch (e) {
+      setDatabaseSwitchError(
+        e instanceof Error
+          ? e.message
+          : "データベースの切り替えに失敗しました"
+      );
+    } finally {
+      setDatabaseSwitching(false);
     }
   };
 
@@ -6524,6 +6660,73 @@ export default function Home() {
       );
     }
 
+    if (openSidebarPanel === "database") {
+      const currentDbMode = loginUser?.dbMode ?? "neon";
+
+      return (
+        <div className="flex flex-col gap-3">
+          {MASTER_DATA_DB_OPTIONS.map((option) => {
+            const active = currentDbMode === option.key;
+            const isSupabase = option.key === "postgresql";
+
+            const cardClass = isSupabase
+              ? active
+                ? "border-emerald-300/60 bg-gradient-to-br from-emerald-400/24 via-emerald-500/12 to-[#0b1220] text-emerald-100 shadow-[0_0_28px_rgba(16,185,129,0.18)]"
+                : "border-emerald-300/25 bg-gradient-to-br from-emerald-500/14 via-[#0f172a] to-[#0b1220] text-emerald-100 hover:border-emerald-300/45 hover:bg-emerald-500/10"
+              : active
+              ? "border-cyan-300/60 bg-gradient-to-br from-cyan-400/24 via-sky-500/12 to-[#0b1220] text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.18)]"
+              : "border-cyan-300/25 bg-gradient-to-br from-cyan-500/14 via-[#0f172a] to-[#0b1220] text-cyan-100 hover:border-cyan-300/45 hover:bg-cyan-500/10";
+
+            const iconClass = isSupabase
+              ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
+              : "border-cyan-300/30 bg-cyan-400/10 text-cyan-100";
+
+            const badgeClass = isSupabase
+              ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-100"
+              : "border-cyan-300/35 bg-cyan-400/10 text-cyan-100";
+
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => handleSwitchDatabase(option.key)}
+                disabled={databaseSwitching}
+                className={`group w-full rounded-2xl border p-4 text-left transition disabled:opacity-60 ${cardClass}`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-lg font-black ${iconClass}`}
+                  >
+                    {option.mark}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-black text-slate-100">
+                        {option.label}
+                      </div>
+
+                      {active && (
+                        <span
+                          className={`shrink-0 rounded-full border px-4 py-1.5 text-xs font-bold ${badgeClass}`}
+                        >
+                          選択中
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-1 text-xs leading-5 text-slate-400">
+                      {option.description}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
     if (openSidebarPanel === "settings") {
       const nameParts = splitMasterDataLoginName(loginUser?.name);
 
@@ -7570,7 +7773,7 @@ export default function Home() {
       ];
 
       return (
-        <div className="grid grid-cols-1 gap-3">
+        <div className="flex flex-col gap-3">
           {themeOptions.map((option) => {
             const active = themeMode === option.key;
 
@@ -7624,7 +7827,7 @@ export default function Home() {
                 onClick={() => {
                   setThemeMode(option.key);
                 }}
-                className={`group rounded-2xl border p-4 text-left transition ${themeCardClass} ${
+                className={`group w-full rounded-2xl border p-4 text-left transition ${themeCardClass} ${
                   option.key === "light"
                     ? "theme-light-mode-button"
                     : option.key === "dark"
@@ -10826,7 +11029,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       ? "max-w-[760px]"
       : openSidebarPanel === "settings"
       ? "max-w-[1180px]"
-      : openSidebarPanel === "theme"
+      : openSidebarPanel === "theme" || openSidebarPanel === "database"
       ? "max-w-[560px]"
       : "max-w-[520px]";
 
@@ -10940,6 +11143,16 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       tone: "working",
       title: "権限 保存中",
       message: "権限設定を保存しています",
+      loading: true,
+    });
+  }
+
+  if (databaseSwitching) {
+    topLeftNoticeItems.push({
+      key: "database-switching",
+      tone: "working",
+      title: "データベース 切替中",
+      message: "データベースを切り替えています",
       loading: true,
     });
   }
@@ -11081,6 +11294,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   addTopLeftTextNotice("crawl-error", "error", "クローリング エラー", crawlError);
   addTopLeftTextNotice("item-inspection-error", "error", "項目精査 エラー", itemInspectionError);
   addTopLeftTextNotice("permission-error", "error", "権限管理 エラー", permissionError);
+  addTopLeftTextNotice("database-switch-error", "error", "データベース エラー", databaseSwitchError);
   addTopLeftTextNotice("data-error", "error", "エラー", error);
 
   addTopLeftTextNotice("mynavi-message", "success", "マイナビ新卒", mynaviMessage);
@@ -11091,6 +11305,7 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
   addTopLeftTextNotice("crawl-message", "success", "クローリング", crawlMessage);
   addTopLeftTextNotice("item-inspection-message", "success", "項目精査", itemInspectionMessage);
   addTopLeftTextNotice("permission-message", "success", "権限管理", permissionMessage);
+  addTopLeftTextNotice("database-switch-message", "success", "データベース", databaseSwitchMessage);
 
   const selectedCrawlFields = visibleCrawlConfirmFieldOptions
     .filter((field) => crawlFieldSelections[field.key])
@@ -11473,7 +11688,9 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
                         </span>
 
                         {sidebarOpen && (
-                          <span className="min-w-0 whitespace-nowrap leading-none">{item.label}</span>
+                          <span className="min-w-0 whitespace-nowrap leading-none">
+                            {item.label}
+                          </span>
                         )}
                       </button>
 

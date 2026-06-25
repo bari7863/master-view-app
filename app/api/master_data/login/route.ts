@@ -429,6 +429,61 @@ export async function GET(req: NextRequest) {
   }
 }
 
+export async function PATCH(req: NextRequest) {
+  const authError = requireMasterDataAuth(req);
+
+  if (authError) {
+    return authError;
+  }
+
+  try {
+    const currentUser = getCurrentMasterDataUser(req);
+
+    if (!currentUser) {
+      return NextResponse.json(
+        { ok: false, error: "ログインしてください" },
+        { status: 401 }
+      );
+    }
+
+    const body = (await req.json()) as Record<string, unknown>;
+    const dbMode = normalizeMasterDataDbMode(body.db);
+
+    const response = NextResponse.json({
+      ok: true,
+      loginUser: {
+        id: currentUser.id,
+        password: "",
+        name: currentUser.name,
+        role: currentUser.role,
+        organization: currentUser.organization,
+        dbMode,
+      },
+    });
+
+    setMasterDataAuthCookie(response, {
+      id: currentUser.id,
+      name: currentUser.name,
+      role: currentUser.role,
+      organization: currentUser.organization,
+      dbMode,
+    });
+
+    return response;
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "データベースの切り替えでエラーが発生しました",
+      },
+      { status: 500 }
+    );
+  }
+}
+
 export async function DELETE() {
   const response = NextResponse.json({ ok: true });
   clearMasterDataAuthCookie(response);

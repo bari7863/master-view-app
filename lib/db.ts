@@ -14,9 +14,9 @@ declare global {
 
 function createMasterDataPoolConfig(dbMode: MasterDataDbMode): PoolConfig {
   if (dbMode === "postgresql") {
-    if (process.env.DATABASE_URL_POSTGRESQL?.trim()) {
+    if (process.env.DATABASE_URL_SUPABASE?.trim()) {
       return {
-        connectionString: process.env.DATABASE_URL_POSTGRESQL,
+        connectionString: process.env.DATABASE_URL_SUPABASE,
       };
     }
 

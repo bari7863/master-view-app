@@ -61,6 +61,29 @@ https://master-view-app-ruby.vercel.app/
 
 ---
 
+## DB構成
+
+このアプリでは、Neon DBとSupabase DBを使用します。
+
+DBはアプリ上で切り替えて使用します。
+
+- Neonを選択した場合は、Neon DBのデータを表示・保存します
+- Supabaseを選択した場合は、Supabase DBのデータを表示・保存します
+- クローリング結果、項目精査結果、権限管理設定も、選択中のDB側に保存します
+- NeonとSupabaseのデータは混在させない前提です
+
+主な接続先は以下です。
+
+```text
+既存互換用: DATABASE_URL
+Neon DB: DATABASE_URL_NEON
+Supabase DB: DATABASE_URL_SUPABASE
+```
+
+`.env.local` とVercel環境変数の両方に、必要なDB接続情報を設定してください。
+
+---
+
 ## 技術構成
 
 主な技術構成は以下です。
@@ -69,7 +92,7 @@ https://master-view-app-ruby.vercel.app/
 - React
 - TypeScript
 - Node.js
-- PostgreSQL / Neon
+- PostgreSQL / Neon / Supabase
 - Playwright
 - Vercel
 - workerによるクローリング処理
@@ -410,6 +433,8 @@ master-view-app/.env.local
 
 ```env
 DATABASE_URL="postgresql://xxxxx"
+DATABASE_URL_NEON="postgresql://xxxxx"
+DATABASE_URL_SUPABASE="postgresql://xxxxx"
 
 MASTER_DATA_AUTH_TOKEN="xxxxx"
 
@@ -423,12 +448,36 @@ MASTER_DATA_LOGIN_EMPLOYEES="xxxxx"
 
 ### `DATABASE_URL`
 
-DBに接続するためのURLです。
+既存互換用のDB接続URLです。
 
-Neon PostgreSQLなどの接続文字列を設定します。
+現在は、Neon DBの接続文字列を設定します。
 
 ```env
 DATABASE_URL="postgresql://xxxxx"
+```
+
+---
+
+### `DATABASE_URL_NEON`
+
+Neon DBに接続するためのURLです。
+
+アプリ上でNeonを選択した場合、この接続先を使用します。
+
+```env
+DATABASE_URL_NEON="postgresql://xxxxx"
+```
+
+---
+
+### `DATABASE_URL_SUPABASE`
+
+Supabase DBに接続するためのURLです。
+
+アプリ上でSupabaseを選択した場合、この接続先を使用します。
+
+```env
+DATABASE_URL_SUPABASE="postgresql://xxxxx"
 ```
 
 ---
@@ -641,6 +690,8 @@ Vercel
 ### 登録する主なKey
 
 - `DATABASE_URL`
+- `DATABASE_URL_NEON`
+- `DATABASE_URL_SUPABASE`
 - `MASTER_DATA_AUTH_TOKEN`
 - `MASTER_DATA_LOGIN_ADMINS`
 - `MASTER_DATA_LOGIN_EMPLOYEES`
@@ -659,15 +710,25 @@ Vercel
 
 ### 注意点
 
-すでに `DATABASE_URL` が登録されている場合、同じKeyを新規追加するとエラーになります。
+すでに同じKeyが登録されている場合、同じKeyを新規追加するとエラーになります。
 
-その場合は、新規追加ではなく、既存の `DATABASE_URL` を編集してください。
+その場合は、新規追加ではなく、既存のKeyを編集してください。
 
 KeyとValueの考え方は以下です。
 
 ```text
 Key: DATABASE_URL
-Value: postgresql://xxxxx
+Value: Neon DBの接続URL
+```
+
+```text
+Key: DATABASE_URL_NEON
+Value: Neon DBの接続URL
+```
+
+```text
+Key: DATABASE_URL_SUPABASE
+Value: Supabase DBの接続URL
 ```
 
 ```text

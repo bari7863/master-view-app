@@ -75,6 +75,44 @@ directory-tree.txt
 
 ---
 
+## DB構成・DB切替の注意点
+
+このプロジェクトでは、既存のNeon DBに加えて、Supabase DBも使用します。
+
+基本方針は以下です。
+
+* Neon DBは、既存の `DATABASE_URL` で接続します
+* Supabase DBは、`SUPABASE_DATABASE_URL` で接続します
+* アプリ上で選択中のDBに応じて、NeonまたはSupabaseのどちらか一方を参照・保存します
+* Neonを選択している場合は、Neon DBのデータのみ取得・保存します
+* Supabaseを選択している場合は、Supabase DBのデータのみ取得・保存します
+* NeonとSupabaseのデータ、クローリング結果、項目精査結果、権限管理設定を混在させないでください
+* DB接続やAPIを修正する場合は、Neon環境とSupabase環境の両方で同じ処理が動くか確認してください
+* 権限管理はDBごとに分離して扱います
+* Neon側で保存した権限設定を、Supabase側に勝手に反映しないでください
+* Supabase側で保存した権限設定を、Neon側に勝手に反映しないでください
+
+DB切替に関係する主なファイル。
+
+```text
+app/page.tsx
+app/api/master_data/route.ts
+app/api/master_data/[id]/route.ts
+app/api/master_data/crawl/route.ts
+app/api/master_data/export/route.ts
+app/api/master_data/item_inspection/route.ts
+app/api/master_data/login/route.ts
+app/api/master_data/permissions/route.ts
+app/api/master_data/permissions/me/route.ts
+lib/db.ts
+lib/master-data-auth.ts
+lib/master-data-permissions.ts
+```
+
+DB切替に関係する修正では、画面側だけでなくAPI側も必ず確認してください。
+
+---
+
 ## 絶対に守るルール
 
 ### 1. 既存機能を壊さない
