@@ -729,6 +729,8 @@ Vercel
 - `MASTER_DATA_LOGIN_ADMINS`
 - `MASTER_DATA_LOGIN_EMPLOYEES`
 
+**⚠️ 2026年8月時点、本番Vercelに`DATABASE_URL_SUPABASE`が未設定であることを確認済み**(既存の環境変数はNeon統合による自動生成分のみ)。このため本番ではスーパー管理者であってもSupabaseに切り替えるとログインエラーになる。Supabaseの接続文字列(Supabaseダッシュボード → Project Settings → Database → Connection string)を取得し、上記の手順で登録すること。詳細は`docs/progress.md`参照。
+
 ---
 
 ### 設定対象

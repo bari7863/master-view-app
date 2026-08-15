@@ -10,9 +10,22 @@
 
 ## サマリー
 
-- 全7フェーズ中、**Phase 0が完了**、残り6フェーズは未着手
+- 全7フェーズ中、**Phase 0が完了・本番反映済み**、残り6フェーズは未着手
 - 優先順位はロードマップのPhase番号そのまま(0が最優先、6が最後)
-- **本番(masterマージ・`vercel --prod`)へはまだ反映していない**。コミット前の状態(このworktree内)で作業が止まっている
+- 本番反映済み: masterマージ完了、`vercel --prod`実行済み(`master-view-app-ruby.vercel.app`)
+- **本番反映直後に新たな設定漏れを発見。要対応(下記参照)**
+
+---
+
+## ⚠️ 対応が必要な項目
+
+**Vercel本番にSupabaseの接続情報が設定されていない**。本番の環境変数一覧(`vercel env ls production`)を確認したところ、`DATABASE_NEON_PROJECT_ID`等が存在することから、既存の環境変数群は全てVercel Marketplace経由のNeon統合が自動生成したものと判明。`DATABASE_URL_SUPABASE`のようなSupabase専用の接続情報は本番に一つも無い。
+
+実際にスーパー管理者アカウントで本番にログインしSupabaseへの切替を試したところ、`connect ECONNREFUSED 127.0.0.1:5432`で失敗した。**現状、本番ではスーパー管理者であってもSupabaseに切り替えられない**。
+
+これは今回のセッションで作った不具合ではなく、以前からの設定漏れ。対応にはSupabaseの接続文字列(機密情報)の入力が必要なため、ユーザー自身の対応が必要。
+
+**対応方法**: Vercel Dashboard → `master-view-app`プロジェクト → Settings → Environment Variables → 新規追加 → Key=`DATABASE_URL_SUPABASE`、Value=Supabaseの接続文字列(Supabaseダッシュボードの Project Settings → Database → Connection string から取得)。対象環境はProduction/Previewにチェック。
 
 ---
 
@@ -20,7 +33,7 @@
 
 | 優先順位 | フェーズ | ステータス |
 |---|---|---|
-| 0 | データ基盤の拡張整備 | 完了(本番反映待ち) |
+| 0 | データ基盤の拡張整備 | 完了・本番反映済み |
 | 1 | CRM基礎(顧客管理) | 未着手 |
 | 2 | SFA(案件管理・行動管理・予実管理) | 未着手 |
 | 3 | データ分析・ダッシュボード | 未着手 |
@@ -30,7 +43,7 @@
 
 ---
 
-## Phase 0: データ基盤の拡張整備(完了・本番反映待ち)
+## Phase 0: データ基盤の拡張整備(完了・本番反映済み)
 
 ### 完了した内容
 
@@ -66,6 +79,7 @@
 - `app/api/master_data/export/route.ts`のスコープバイパス条件が他API(`route.ts`/`crawl/route.ts`/`item_inspection/route.ts`)と違い「管理者」になっていた → 「スーパー管理者」に統一
 - `app/api/master_data/[id]/route.ts`が認証チェック一切なし+DB固定のまま放置されていた → フロントから未参照であることを確認の上で削除
 - `app/page.tsx`の`handleSwitchDatabase`が、サーバーが解決したdbModeでなくクライアント側の要求値をそのまま使っていた → サーバー応答(`data.loginUser.dbMode`)を信頼するよう修正
+- `app/page.tsx`の`BlockingLoadingOverlay`が`typeof document === "undefined"`ガードのみで、クライアント初回レンダリング(hydration前)でも即座に`createPortal`を実行していたため、ログイン画面表示時に`Hydration failed`エラーが発生していた(本番反映より前から存在していた問題を本番反映後に調査・特定) → マウント完了後にのみportalを出すよう修正、本番相当ビルドで解消を確認済み
 
 **運用面のドキュメント整備**
 
@@ -77,10 +91,6 @@
 
 - 担当者/活動履歴/案件それぞれのCRUD API・画面は未実装(Phase0はテーブルと作成ロジックのみが対象範囲)
 - 対応する権限キー(`contacts.view`等)は、`lib/master-data-permissions.ts`の`MASTER_DATA_PERMISSION_KEYS`配列に追加するだけで自動対応するが、`app/page.tsx`内にローカルの権限キー型定義が重複しているため、そちらも手動同期が必要(既存の技術的負債)
-
-### 既知の問題(未対応・実害は確認されていない)
-
-- ログイン画面表示時、ブラウザコンソールに`Hydration failed`(React error #418)エラーが出る。`git stash`で今回のセッションの変更を全て退避した状態でも再現することを確認済みのため、**今回のセッションより前から存在する既存の問題**。画面表示・ログイン・CSV抽出などの主要機能への実害は確認されていない。原因は未調査
 
 ### 関連ファイル
 
@@ -99,7 +109,7 @@ LOCAL_DEV_START.md
 
 ### 次にやること
 
-1. 本番反映(コミット→PR更新→masterマージ→`vercel --prod`)。ユーザーの最終承認待ちで保留中
+1. **Vercel本番にSupabaseの接続情報(`DATABASE_URL_SUPABASE`)を設定する**(上記「対応が必要な項目」参照、ユーザー対応待ち)
 2. Phase 1(CRM基礎)着手: 担当者/活動履歴のCRUD API・画面実装、権限キー追加
 
 ---
