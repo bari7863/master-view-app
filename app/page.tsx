@@ -251,7 +251,7 @@ function createEmptyItemInspectionMethodSelections(): Record<
 
 type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
-type MasterDataDbMode = "neon" | "postgresql";
+type MasterDataDbMode = "neon" | "postgresql" | "local";
 
 type MasterDataLoginUser = {
   id: string;
@@ -280,6 +280,12 @@ const MASTER_DATA_DB_OPTIONS: {
     description: "Supabase側のデータベースを使用します",
     mark: "S",
   },
+  {
+    key: "local",
+    label: "PostgreSQL",
+    description: "このPCのローカルデータベースを使用します(ローカル実行時のみ)",
+    mark: "P",
+  },
 ];
 
 function getMasterDataDbLabel(dbMode: MasterDataDbMode | undefined) {
@@ -292,6 +298,10 @@ function getMasterDataDbLabel(dbMode: MasterDataDbMode | undefined) {
 function getMasterDataDbMenuBadgeClass(dbMode: MasterDataDbMode | undefined) {
   if (dbMode === "postgresql") {
     return "border-emerald-300/35 bg-emerald-400/10 text-emerald-100";
+  }
+
+  if (dbMode === "local") {
+    return "border-amber-300/35 bg-amber-400/10 text-amber-100";
   }
 
   return "border-cyan-300/35 bg-cyan-400/10 text-cyan-100";
@@ -3360,6 +3370,7 @@ export default function Home() {
     useState<MasterDataLoginStatus>("checking");
 
   const [loginDbMode, setLoginDbMode] = useState<MasterDataDbMode>("neon");
+  const [isLocalAppRuntimeReady, setIsLocalAppRuntimeReady] = useState(false);
   const [loginId, setLoginId] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginPasswordVisible, setLoginPasswordVisible] = useState(false);
@@ -3370,6 +3381,10 @@ export default function Home() {
   const [databaseSwitchMessage, setDatabaseSwitchMessage] = useState("");
   const [databaseSwitchError, setDatabaseSwitchError] = useState("");
   const [screenReady, setScreenReady] = useState(false);
+
+  useEffect(() => {
+    setIsLocalAppRuntimeReady(isLocalAppRuntime());
+  }, []);
 
   const canShowPermissionManagement =
     loginStatus === "logged_in" &&
@@ -4218,7 +4233,6 @@ export default function Home() {
       const nextLoginUser: MasterDataLoginUser = {
         ...loginUser,
         ...data.loginUser,
-        dbMode: nextDbMode,
       };
 
       if (typeof window !== "undefined") {
@@ -4229,7 +4243,7 @@ export default function Home() {
       }
 
       setLoginUser(nextLoginUser);
-      setLoginDbMode(nextDbMode);
+      setLoginDbMode(nextLoginUser.dbMode ?? "neon");
       setRows([]);
       setTotal(0);
       setTotalPages(1);
@@ -6665,11 +6679,18 @@ export default function Home() {
 
       return (
         <div className="flex flex-col gap-3">
-          {MASTER_DATA_DB_OPTIONS.map((option) => {
+          {MASTER_DATA_DB_OPTIONS.filter(
+            (option) => option.key !== "local" || isLocalAppRuntimeReady
+          ).map((option) => {
             const active = currentDbMode === option.key;
             const isSupabase = option.key === "postgresql";
+            const isLocalDb = option.key === "local";
 
-            const cardClass = isSupabase
+            const cardClass = isLocalDb
+              ? active
+                ? "border-amber-300/60 bg-gradient-to-br from-amber-400/24 via-amber-500/12 to-[#0b1220] text-amber-100 shadow-[0_0_28px_rgba(245,158,11,0.18)]"
+                : "border-amber-300/25 bg-gradient-to-br from-amber-500/14 via-[#0f172a] to-[#0b1220] text-amber-100 hover:border-amber-300/45 hover:bg-amber-500/10"
+              : isSupabase
               ? active
                 ? "border-emerald-300/60 bg-gradient-to-br from-emerald-400/24 via-emerald-500/12 to-[#0b1220] text-emerald-100 shadow-[0_0_28px_rgba(16,185,129,0.18)]"
                 : "border-emerald-300/25 bg-gradient-to-br from-emerald-500/14 via-[#0f172a] to-[#0b1220] text-emerald-100 hover:border-emerald-300/45 hover:bg-emerald-500/10"
@@ -6677,11 +6698,15 @@ export default function Home() {
               ? "border-cyan-300/60 bg-gradient-to-br from-cyan-400/24 via-sky-500/12 to-[#0b1220] text-cyan-100 shadow-[0_0_28px_rgba(34,211,238,0.18)]"
               : "border-cyan-300/25 bg-gradient-to-br from-cyan-500/14 via-[#0f172a] to-[#0b1220] text-cyan-100 hover:border-cyan-300/45 hover:bg-cyan-500/10";
 
-            const iconClass = isSupabase
+            const iconClass = isLocalDb
+              ? "border-amber-300/30 bg-amber-400/10 text-amber-100"
+              : isSupabase
               ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
               : "border-cyan-300/30 bg-cyan-400/10 text-cyan-100";
 
-            const badgeClass = isSupabase
+            const badgeClass = isLocalDb
+              ? "border-amber-300/35 bg-amber-400/10 text-amber-100"
+              : isSupabase
               ? "border-emerald-300/35 bg-emerald-400/10 text-emerald-100"
               : "border-cyan-300/35 bg-cyan-400/10 text-cyan-100";
 
@@ -11017,6 +11042,10 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
       return canUseCrawlPanel || canUseItemInspectionPanel;
     }
 
+    if (item.key === "database") {
+      return isLocalAppRuntimeReady || loginUser?.role === "スーパー管理者";
+    }
+
     return true;
   });
 
@@ -11506,23 +11535,26 @@ const scheduleCrawlRecovery = (targetJobId?: string | null) => {
               </div>
 
               <div className="space-y-5">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    DB
-                  </label>
+                {isLocalAppRuntimeReady && (
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      DB
+                    </label>
 
-                  <select
-                    value={loginDbMode}
-                    onChange={(e) =>
-                      setLoginDbMode(e.target.value as MasterDataDbMode)
-                    }
-                    disabled={loginLoading}
-                    className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-500/10 disabled:bg-slate-100"
-                  >
-                    <option value="neon">Neon</option>
-                    <option value="postgresql">Supabase</option>
-                  </select>
-                </div>
+                    <select
+                      value={loginDbMode}
+                      onChange={(e) =>
+                        setLoginDbMode(e.target.value as MasterDataDbMode)
+                      }
+                      disabled={loginLoading}
+                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-base text-slate-900 outline-none transition focus:border-sky-500 focus:ring-4 focus:ring-sky-500/10 disabled:bg-slate-100"
+                    >
+                      <option value="neon">Neon</option>
+                      <option value="postgresql">Supabase</option>
+                      <option value="local">PostgreSQL</option>
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-700">

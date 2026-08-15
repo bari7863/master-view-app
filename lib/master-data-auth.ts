@@ -9,10 +9,38 @@ const MASTER_DATA_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 30;
 
 export type MasterDataLoginRole = "スーパー管理者" | "管理者" | "従業員";
 
-export type MasterDataDbMode = "neon" | "postgresql";
+export type MasterDataDbMode = "neon" | "postgresql" | "local";
 
 export function normalizeMasterDataDbMode(value: unknown): MasterDataDbMode {
-  return value === "postgresql" ? "postgresql" : "neon";
+  if (value === "postgresql" || value === "supabase") {
+    return "postgresql";
+  }
+
+  if (value === "local") {
+    return "local";
+  }
+
+  return "neon";
+}
+
+// Vercel環境ではDATABASE_URL_LOCALが未設定な上、一般ユーザーは常にNeonのみ
+// 使える運用にする。スーパー管理者だけがログイン後のDB切替でSupabase/ローカルに
+// アクセスできる(app/page.tsxの表示制御と合わせて、ここでもAPI側で強制する)。
+export function isVercelRuntime() {
+  return process.env.VERCEL === "1";
+}
+
+export function resolveMasterDataDbModeForLogin(
+  requestedDbMode: unknown,
+  role: MasterDataLoginRole
+): MasterDataDbMode {
+  const normalized = normalizeMasterDataDbMode(requestedDbMode);
+
+  if (isVercelRuntime() && role !== "スーパー管理者") {
+    return "neon";
+  }
+
+  return normalized;
 }
 
 export type MasterDataAuthUser = {

@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   clearMasterDataAuthCookie,
   getCurrentMasterDataUser,
-  normalizeMasterDataDbMode,
   refreshMasterDataAuthCookie,
   requireMasterDataAuth,
+  resolveMasterDataDbModeForLogin,
   setMasterDataAuthCookie,
   type MasterDataDbMode,
 } from "@/lib/master-data-auth";
 import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
+import { ensureMasterDataCrmTables } from "@/lib/master-data-schema";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -246,6 +247,14 @@ async function saveMasterDataLoginHistoryToDb(
 
   await dbReady;
 
+  try {
+    await ensureMasterDataCrmTables(dbMode);
+  } catch (error) {
+    // Phase1(担当者/活動履歴/案件)の土台テーブル作成に失敗しても、
+    // ログイン自体は継続させる(まだ誰も使わない機能でログインを壊さない)
+    console.error("ensureMasterDataCrmTables ERROR:", error);
+  }
+
   await pool.query(
     `
       INSERT INTO master_data_login_history (
@@ -330,8 +339,6 @@ export async function POST(req: NextRequest) {
     const id = typeof body.id === "string" ? body.id.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
 
-    const dbMode = normalizeMasterDataDbMode(body.db);
-
     const loginUser = findMasterDataLoginUser(id, password);
 
     if (!loginUser) {
@@ -340,6 +347,10 @@ export async function POST(req: NextRequest) {
         { status: 401 }
       );
     }
+
+    // Vercel環境では、スーパー管理者以外は常にNeonでログインさせる
+    // (画面側でDB選択欄自体を非表示にしているが、API側でも強制する)
+    const dbMode = resolveMasterDataDbModeForLogin(body.db, loginUser.role);
 
     const loginHistoryEvent = createMasterDataLoginHistoryEvent(req);
 
@@ -447,7 +458,10 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = (await req.json()) as Record<string, unknown>;
-    const dbMode = normalizeMasterDataDbMode(body.db);
+
+    // Vercel環境では、スーパー管理者以外はDB切替を実行できない
+    // (画面側で「データベース」メニュー自体を非表示にしているが、API側でも強制する)
+    const dbMode = resolveMasterDataDbModeForLogin(body.db, currentUser.role);
 
     const response = NextResponse.json({
       ok: true,
