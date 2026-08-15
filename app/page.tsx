@@ -2296,7 +2296,17 @@ function BlockingLoadingOverlay({
   title: string;
   message: string;
 }) {
-  if (typeof document === "undefined") return null;
+  // typeof document === "undefined" のガードだけだと、クライアント側の
+  // 最初のレンダリング(hydration前)でも即座にcreatePortalが実行され、
+  // サーバー(null)とクライアント(portal追加)が食い違いhydration errorになる。
+  // マウント完了後にのみportalを出すことで、SSR/クライアント初回描画を揃える。
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
 
   return createPortal(
     <div className="app-modal-root master-data-loading-overlay fixed inset-0 z-[10050] bg-slate-950/55 backdrop-blur-md">
@@ -3277,15 +3287,9 @@ export default function Home() {
 
   const [themeMode, setThemeMode] = useState<"system" | "dark" | "light">("system");
 
-  const [systemThemeMode, setSystemThemeMode] = useState<"dark" | "light">(() => {
-    if (typeof window === "undefined") {
-      return "dark";
-    }
-
-    return window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-  });
+  // サーバー側は常に"dark"を返すため、初期値もサーバーと同じ"dark"に揃える
+  // (hydration mismatch防止)。実際のOS設定は下のuseEffectがマウント後すぐに反映する。
+  const [systemThemeMode, setSystemThemeMode] = useState<"dark" | "light">("dark");
 
   const effectiveThemeMode = themeMode === "system" ? systemThemeMode : themeMode;
 

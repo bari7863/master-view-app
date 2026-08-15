@@ -1123,25 +1123,25 @@ DB、API、画面、CSV、権限管理の整合性が崩れないようにして
 
 ---
 
-### 既知の問題(未対応・実害は確認されていない)
-
-- ログイン画面表示時、ブラウザコンソールに`Hydration failed`(React error #418)エラーが出る。`git stash`で今回のSFA/CRM拡張セッションの変更を全て退避した状態でも再現することを確認済みのため、今回のセッションより前から存在する問題。画面表示・ログイン・CSV抽出などの主要機能への実害は確認されていないが、原因は未調査。次に触るタイミングで調査推奨
-
----
-
 ## 24. SFA/CRM/MA拡張(ロードマップ)の進捗
 
 詳細は `docs/roadmap.md`(全体ロードマップ、Phase 0〜6)と `docs/progress.md`(進捗ダッシュボード)を参照。**新しい会話でこのプロジェクトの続きを行う場合は、必ずこの2つを先に読んでください。**
 
-### Phase 0(データ基盤の拡張整備)完了、2026年8月
+### Phase 0(データ基盤の拡張整備)完了・本番反映済み、2026年8月
 
 - 企業マスタに紐づく担当者・活動履歴・案件テーブル(`master_data_contacts`/`master_data_activities`/`master_data_deals`)の作成ロジックを`lib/master-data-schema.ts`に追加。ログイン成功時に自動作成される(Neon/Supabase/ローカルPostgreSQL全対応)
 - DB選択肢に「PostgreSQL」(このPCのローカルデータベース)を追加。ローカル実行時のみ表示され、Vercel本番では非表示(常にNeon)。スーパー管理者だけがログイン後の「データベース」メニューでSupabase/ローカルPostgreSQLに切り替えられる
-- 本番反映前レビューで、既存の重大バグを2件発見・修正済み
+- 本番反映前レビューで、既存の重大バグを発見・修正済み
   - `app/api/master_data/export/route.ts`(CSV抽出)がDB切替を無視し常にNeonを見ていた問題 → 修正
   - `app/api/master_data/[id]/route.ts`(認証チェックが一切ない未使用エンドポイント) → フロントから未参照であることを確認の上で削除
+  - ログイン画面表示時に`Hydration failed`(React error #418)が出ていた問題(`app/page.tsx`の`BlockingLoadingOverlay`が`typeof document === "undefined"`ガードのみでクライアント初回レンダリング時にも即座に`createPortal`を実行していたため) → マウント完了後にのみportalを出すよう修正、本番反映後に調査・特定し解消を確認済み
 - `npm run sync:backup`(Neon→Supabase/ローカル複製)、`npm run sync:restore`(Supabase→Neon復旧)のコマンドを追加。コマンドは`LOCAL_DEV_START.md`にまとめてある
 - Vercelの自動デプロイを`vercel.json`(`git.deploymentEnabled: false`)で無効化。本番反映は手動で`vercel --prod`を実行する運用に変更
+- masterマージ・`vercel --prod`とも完了済み(`master-view-app-ruby.vercel.app`)
+
+### 既知の問題(未対応・要ユーザー対応)
+
+- **Vercel本番にSupabaseの接続情報が設定されていない**。`vercel env ls production`で確認したところ、既存の環境変数は全てVercel Marketplace経由のNeon統合が自動生成したもの(`DATABASE_NEON_PROJECT_ID`等)のみで、`DATABASE_URL_SUPABASE`のようなSupabase専用の接続情報は本番に一つも無い。スーパー管理者アカウントで本番にログインしSupabaseへの切替を試したところ`connect ECONNREFUSED 127.0.0.1:5432`で失敗することを確認済み。今回のセッションで作った不具合ではなく既存の設定漏れ。対応にはSupabaseの接続文字列(機密情報)が必要なため、Vercelダッシュボードでユーザー自身が設定する必要がある(Settings → Environment Variables → Key: `DATABASE_URL_SUPABASE`)
 
 ### Phase 1(CRM基礎・顧客管理)着手時にやること
 
