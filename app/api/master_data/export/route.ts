@@ -2,12 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
-import { dbReady, pool } from "@/lib/db";
-import { requireMasterDataUser } from "@/lib/master-data-auth";
+import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
+import {
+  getCurrentMasterDataUser,
+  requireMasterDataUser,
+  type MasterDataDbMode,
+} from "@/lib/master-data-auth";
 import {
   getMasterDataUserPermissionSettings,
   requireMasterDataPermission,
 } from "@/lib/master-data-permissions";
+
+function getRequestMasterDataDb(req: NextRequest) {
+  const dbMode = getCurrentMasterDataUser(req)?.dbMode ?? "neon";
+
+  return {
+    dbMode,
+    dbReady: getMasterDataDbReady(dbMode),
+    pool: getMasterDataPool(dbMode),
+  };
+}
 
 const FILTER_COLUMN_MAP = {
   company: `"企業名"`,
@@ -750,7 +764,8 @@ function mergeWhereClauses(
 
 async function buildExportWhereClauseWithListScope(
   req: NextRequest,
-  searchParams: URLSearchParams | null
+  searchParams: URLSearchParams | null,
+  dbMode: MasterDataDbMode
 ) {
   const base = searchParams
     ? buildWhereClause(searchParams)
@@ -758,13 +773,14 @@ async function buildExportWhereClauseWithListScope(
 
   const { user } = requireMasterDataUser(req);
 
-  if (!user || user.role === "管理者") {
+  if (!user || user.role === "スーパー管理者") {
     return base;
   }
 
   const settings = await getMasterDataUserPermissionSettings(
     user.id,
-    user.organization
+    user.organization,
+    dbMode
   );
 
   const scopeSearchParams = buildSearchParamsFromListScopeFilters(
@@ -815,8 +831,9 @@ function createCsvDownloadStream(options: {
   baseSql: string;
   baseParams: unknown[];
   dedupeCsvHeader: CsvColumn | null;
+  pool: ReturnType<typeof getMasterDataPool>;
 }) {
-  const { baseSql, baseParams, dedupeCsvHeader } = options;
+  const { baseSql, baseParams, dedupeCsvHeader, pool } = options;
   const encoder = new TextEncoder();
 
   return new ReadableStream<Uint8Array>({
@@ -933,6 +950,8 @@ function buildSearchParamsFromExportPayload(payload: Record<string, unknown>) {
 }
 
 async function handleExportRequest(req: NextRequest, searchParams: URLSearchParams) {
+  const { dbMode, dbReady, pool } = getRequestMasterDataDb(req);
+
   await dbReady;
   await ensureMasterDataIdColumn(pool);
 
@@ -970,8 +989,8 @@ async function handleExportRequest(req: NextRequest, searchParams: URLSearchPara
 
   const { whereSql, params } =
     exportScope === "all"
-      ? await buildExportWhereClauseWithListScope(req, null)
-      : await buildExportWhereClauseWithListScope(req, searchParams);
+      ? await buildExportWhereClauseWithListScope(req, null, dbMode)
+      : await buildExportWhereClauseWithListScope(req, searchParams, dbMode);
 
   const baseSql = `
     SELECT
@@ -1012,6 +1031,7 @@ async function handleExportRequest(req: NextRequest, searchParams: URLSearchPara
     baseSql,
     baseParams: params,
     dedupeCsvHeader,
+    pool,
   });
 
   const fileName = createFileName();

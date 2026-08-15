@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getMasterDataDbReady, getMasterDataPool } from "@/lib/db";
 import {
   getCurrentMasterDataUser,
+  normalizeMasterDataDbMode,
   requireMasterDataAuth,
   requireMasterDataUser,
+  type MasterDataDbMode,
 } from "@/lib/master-data-auth";
 import {
   getMasterDataUserPermissionSettings,
@@ -15,14 +17,6 @@ import {
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
-
-type MasterDataDbMode = "neon" | "postgresql";
-
-function normalizeMasterDataDbMode(value: unknown): MasterDataDbMode {
-  return value === "postgresql" || value === "supabase"
-    ? "postgresql"
-    : "neon";
-}
 
 function getRequestMasterDataDb(req: NextRequest) {
   const dbMode = normalizeMasterDataDbMode(

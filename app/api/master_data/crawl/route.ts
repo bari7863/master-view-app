@@ -11,23 +11,17 @@ import {
 } from "@/lib/master-data-crawler";
 import {
   getCurrentMasterDataUser,
+  normalizeMasterDataDbMode,
   refreshMasterDataAuthCookie,
   requireMasterDataAuth,
   requireMasterDataUser,
+  type MasterDataDbMode,
 } from "@/lib/master-data-auth";
 import {
   getMasterDataUserPermissionSettings,
   requireMasterDataPermission,
   type MasterDataPermissionKey,
 } from "@/lib/master-data-permissions";
-
-type MasterDataDbMode = "neon" | "postgresql";
-
-function normalizeMasterDataDbMode(value: unknown): MasterDataDbMode {
-  return value === "postgresql" || value === "supabase"
-    ? "postgresql"
-    : "neon";
-}
 
 function getRequestMasterDataDbMode(req: NextRequest) {
   return normalizeMasterDataDbMode(getCurrentMasterDataUser(req)?.dbMode);

@@ -32,7 +32,6 @@ GitHubで最初に読む概要は `README.md` を参照してください。
 ```text
 app/page.tsx
 app/api/master_data/route.ts
-app/api/master_data/[id]/route.ts
 app/api/master_data/crawl/route.ts
 app/api/master_data/export/route.ts
 app/api/master_data/item_inspection/route.ts
@@ -44,15 +43,26 @@ lib/db.ts
 lib/master-data-auth.ts
 lib/master-data-permissions.ts
 lib/master-data-crawler.ts
+lib/master-data-schema.ts
 scripts/crawl-worker.ts
 dist/worker/crawl-worker.cjs
 release/MasterCrawlWorker/
 scripts/mynavi_shinsotsu_unified.py
+scripts/sync-master-data-to-backups.mjs
+scripts/restore-neon-from-supabase.mjs
 sql/add_column.sql
+vercel.json
 README.md
 docs/handover.md
+docs/roadmap.md
+docs/progress.md
+LOCAL_DEV_START.md
 directory-tree.txt
 ```
+
+`app/api/master_data/[id]/route.ts` は2026年8月に削除しました(認証チェックが一切なくDBも固定のまま放置された未使用エンドポイントだったため。フロントから未参照であることを確認済み)。個別セル更新は `app/api/master_data/route.ts` のPOSTアクション経由で行っています。
+
+`lib/master-data-schema.ts` は、企業マスタに紐づく担当者・活動履歴・案件テーブル(SFA/CRM拡張用、ロードマップPhase1以降で使用予定)の作成ロジックです。詳細は `docs/roadmap.md` と `docs/progress.md` を参照してください。
 
 ---
 
@@ -77,27 +87,30 @@ directory-tree.txt
 
 ## DB構成・DB切替の注意点
 
-このプロジェクトでは、既存のNeon DBに加えて、Supabase DBも使用します。
+このプロジェクトでは、Neon DB・Supabase DB・ローカルPostgreSQLの3つを使用します(2026年8月〜)。
+
+- **Neon** = 大元・本番。複数人が操作する前提
+- **Supabase** = Neonのバックアップ。`npm run sync:backup` でNeonの内容を複製する
+- **ローカルPostgreSQL** = 開発・テスト用。このPC上でのみ使える(`isLocalAppRuntime()`でホスト名判定)
 
 基本方針は以下です。
 
-* Neon DBは、既存の `DATABASE_URL` で接続します
-* Supabase DBは、`SUPABASE_DATABASE_URL` で接続します
-* アプリ上で選択中のDBに応じて、NeonまたはSupabaseのどちらか一方を参照・保存します
-* Neonを選択している場合は、Neon DBのデータのみ取得・保存します
-* Supabaseを選択している場合は、Supabase DBのデータのみ取得・保存します
-* NeonとSupabaseのデータ、クローリング結果、項目精査結果、権限管理設定を混在させないでください
-* DB接続やAPIを修正する場合は、Neon環境とSupabase環境の両方で同じ処理が動くか確認してください
+* Neon DBは `DATABASE_URL_NEON`(または既存互換の `DATABASE_URL`)で接続します
+* Supabase DBは `DATABASE_URL_SUPABASE` で接続します
+* ローカルPostgreSQLは `DATABASE_URL_LOCAL` で接続します(Vercel側には設定しない、ローカル専用)
+* アプリ上で選択中のDBに応じて、3つのうちどれか一方のみを参照・保存します
+* Neon・Supabase・ローカルPostgreSQLのデータ、クローリング結果、項目精査結果、権限管理設定を混在させないでください
+* DB接続やAPIを修正する場合は、Neon・Supabase・ローカルPostgreSQLの3環境すべてで同じ処理が動くか確認してください(`getCurrentMasterDataUser(req)?.dbMode` からdbModeを解決し、`getMasterDataPool(dbMode)`/`getMasterDataDbReady(dbMode)` を使う。固定の `pool`/`dbReady` importは使わない)
 * 権限管理はDBごとに分離して扱います
-* Neon側で保存した権限設定を、Supabase側に勝手に反映しないでください
-* Supabase側で保存した権限設定を、Neon側に勝手に反映しないでください
+* 各DB間で保存した権限設定を、他のDB側に勝手に反映しないでください
+
+**Vercel本番環境での制限**: スーパー管理者以外のユーザーは、Vercel上では常にNeonのみ使えます。ログイン画面のDB選択欄も表示されません。スーパー管理者だけがログイン後の「データベース」メニューでSupabase/ローカルPostgreSQLに切り替えられます。判定は `lib/master-data-auth.ts` の `isVercelRuntime()`(`process.env.VERCEL === "1"`)と `resolveMasterDataDbModeForLogin()` で、画面側・API側の両方に入っています。ローカル実行時はこの制限はかかりません(誰でも切り替え可能)。
 
 DB切替に関係する主なファイル。
 
 ```text
 app/page.tsx
 app/api/master_data/route.ts
-app/api/master_data/[id]/route.ts
 app/api/master_data/crawl/route.ts
 app/api/master_data/export/route.ts
 app/api/master_data/item_inspection/route.ts
@@ -107,9 +120,10 @@ app/api/master_data/permissions/me/route.ts
 lib/db.ts
 lib/master-data-auth.ts
 lib/master-data-permissions.ts
+lib/master-data-schema.ts
 ```
 
-DB切替に関係する修正では、画面側だけでなくAPI側も必ず確認してください。
+DB切替に関係する修正では、画面側だけでなくAPI側も必ず確認してください。特に固定の `pool`/`dbReady` importを新規コードにコピーしないこと(過去に `export/route.ts` と `[id]/route.ts` がこれで長期間バグを抱えていた)。
 
 ---
 
@@ -347,6 +361,14 @@ lib/master-data-permissions.ts
 
 権限管理の修正をした場合も、Vercel環境でログイン・権限取得が正しく動くか確認してください。
 
+### Vercel自動デプロイの無効化(2026年8月〜)
+
+`vercel.json` に `git.deploymentEnabled: false` を設定しており、GitHubへのpush/PR/マージによる自動デプロイ(Preview/Production共)は起きません。無料プランのデプロイ回数制限を避けるための運用です。
+
+- 本番反映は手動で `vercel --prod` を実行する
+- プレビュー確認は手動で `vercel`(`--prod`なし)を実行する。実行のたびに専用URLが発行される
+- GitHubにpushしただけでは何も反映されない。「pushしたのに本番に出ていない」は正常な状態
+
 ---
 
 ## 秘密情報の扱い
@@ -373,7 +395,12 @@ lib/master-data-permissions.ts
 ```text
 README.md
 docs/handover.md
+docs/roadmap.md
+docs/progress.md
+LOCAL_DEV_START.md
 directory-tree.txt
 ```
 
 READMEは概要、handover.mdは詳細仕様、directory-tree.txtは現在のディレクトリ構成確認用です。
+
+`docs/roadmap.md` は、企業マスタ管理アプリをSFA/CRM/MA統合基盤へ拡張するための全体ロードマップ(Phase 0〜6)です。`docs/progress.md` は各Phaseの進捗状況(未着手/着手中/完了)です。**新しい会話でこのプロジェクトの続きを行う場合は、必ずこの2つを先に読んで、どこまで完了しているか把握してください。** `LOCAL_DEV_START.md` には、ローカル起動・DB同期(`sync:backup`/`sync:restore`)・Vercelプレビューデプロイのコマンドがまとまっています。

@@ -190,23 +190,6 @@ DBカラムを変更するときは、このファイルも確認が必要です
 
 ---
 
-### `app/api/master_data/[id]/route.ts`
-
-特定のマスタデータ1件に対するAPIです。
-
-担当範囲。
-
-- 1件単位の取得
-- 1件単位の更新
-- 1件単位の削除
-- 詳細表示や個別編集に関係する処理
-
-実際の役割はコードを確認してください。
-
-権限管理と連動している場合は、権限がないユーザーが個別更新や削除をできないようになっているか確認してください。
-
----
-
 ### `app/api/master_data/crawl/route.ts`
 
 クローリングAPIです。
@@ -905,6 +888,18 @@ MASTER_DATA_LOGIN_EMPLOYEES
 
 ---
 
+### Vercel自動デプロイの無効化(2026年8月〜)
+
+`vercel.json`に`git.deploymentEnabled: false`を設定し、GitHubへのpush/PR/マージによる自動デプロイ(Preview/Production共)を無効化しています。無料プランのデプロイ回数制限を避けるための運用変更です。
+
+- 本番反映は手動で`vercel --prod`を実行する
+- プレビュー確認は手動で`vercel`(`--prod`なし)を実行する。実行のたびに専用URLが発行される
+- GitHubにpushしただけでは何も反映されない点に注意する
+
+また、DB切替に`"local"`(このPCのローカルPostgreSQL)が追加されています。Vercel本番環境では、`lib/master-data-auth.ts`の`isVercelRuntime()`(`process.env.VERCEL === "1"`)により、スーパー管理者以外は常にNeonのみ使える制限がAPI側・画面側の両方にかかっています。
+
+---
+
 ## 18. よくあったエラー
 
 ### `Maximum call stack size exceeded`
@@ -1125,6 +1120,34 @@ DB、API、画面、CSV、権限管理の整合性が崩れないようにして
 - 権限変更後の即時反映
 - API側の権限チェック強化
 - Vercel環境とローカル環境での権限差異チェック
+
+---
+
+### 既知の問題(未対応・実害は確認されていない)
+
+- ログイン画面表示時、ブラウザコンソールに`Hydration failed`(React error #418)エラーが出る。`git stash`で今回のSFA/CRM拡張セッションの変更を全て退避した状態でも再現することを確認済みのため、今回のセッションより前から存在する問題。画面表示・ログイン・CSV抽出などの主要機能への実害は確認されていないが、原因は未調査。次に触るタイミングで調査推奨
+
+---
+
+## 24. SFA/CRM/MA拡張(ロードマップ)の進捗
+
+詳細は `docs/roadmap.md`(全体ロードマップ、Phase 0〜6)と `docs/progress.md`(進捗ダッシュボード)を参照。**新しい会話でこのプロジェクトの続きを行う場合は、必ずこの2つを先に読んでください。**
+
+### Phase 0(データ基盤の拡張整備)完了、2026年8月
+
+- 企業マスタに紐づく担当者・活動履歴・案件テーブル(`master_data_contacts`/`master_data_activities`/`master_data_deals`)の作成ロジックを`lib/master-data-schema.ts`に追加。ログイン成功時に自動作成される(Neon/Supabase/ローカルPostgreSQL全対応)
+- DB選択肢に「PostgreSQL」(このPCのローカルデータベース)を追加。ローカル実行時のみ表示され、Vercel本番では非表示(常にNeon)。スーパー管理者だけがログイン後の「データベース」メニューでSupabase/ローカルPostgreSQLに切り替えられる
+- 本番反映前レビューで、既存の重大バグを2件発見・修正済み
+  - `app/api/master_data/export/route.ts`(CSV抽出)がDB切替を無視し常にNeonを見ていた問題 → 修正
+  - `app/api/master_data/[id]/route.ts`(認証チェックが一切ない未使用エンドポイント) → フロントから未参照であることを確認の上で削除
+- `npm run sync:backup`(Neon→Supabase/ローカル複製)、`npm run sync:restore`(Supabase→Neon復旧)のコマンドを追加。コマンドは`LOCAL_DEV_START.md`にまとめてある
+- Vercelの自動デプロイを`vercel.json`(`git.deploymentEnabled: false`)で無効化。本番反映は手動で`vercel --prod`を実行する運用に変更
+
+### Phase 1(CRM基礎・顧客管理)着手時にやること
+
+- 担当者(`master_data_contacts`)・活動履歴(`master_data_activities`)のCRUD API・画面をまだ作っていない(Phase0はテーブルと作成ロジックのみが対象範囲)
+- 対応する権限キー(`contacts.view`等)は、`lib/master-data-permissions.ts`の`MASTER_DATA_PERMISSION_KEYS`配列に追加するだけで自動対応する(ただし`app/page.tsx`内にローカルの権限キー型定義が重複しているため、そちらも手動で同期が必要。既存の技術的負債として要注意)
+- クローリングで取得済みの代表者名・電話番号・メールアドレスを、担当者情報の初期値として活用する設計を検討
 
 ---
 

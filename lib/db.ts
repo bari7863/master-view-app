@@ -13,6 +13,12 @@ declare global {
 }
 
 function createMasterDataPoolConfig(dbMode: MasterDataDbMode): PoolConfig {
+  if (dbMode === "local") {
+    return {
+      connectionString: process.env.DATABASE_URL_LOCAL,
+    };
+  }
+
   if (dbMode === "postgresql") {
     if (process.env.DATABASE_URL_SUPABASE?.trim()) {
       return {

@@ -4,6 +4,8 @@
 
 企業リストの取り込み、一覧管理、検索・フィルタ、CSV出力、クローリング、候補値の確認・保存などを行い、フォーム営業・テレアポ・営業リスト精査に使いやすいマスタデータを作ることを目的としています。
 
+今後は、この企業マスタを土台にSFA(案件管理)・CRM(顧客管理)・MA(メール/フォーム自動配信)機能を追加し、営業・マーケティング統合基盤へ拡張していく計画です。全体像は [docs/roadmap.md](docs/roadmap.md)、現在の進捗は [docs/progress.md](docs/progress.md) を参照してください。
+
 ---
 
 ## 公開URL
@@ -63,14 +65,15 @@ https://master-view-app-ruby.vercel.app/
 
 ## DB構成
 
-このアプリでは、Neon DBとSupabase DBを使用します。
+このアプリでは、Neon DB・Supabase DB・ローカルPostgreSQLの3つを使用します。
 
 DBはアプリ上で切り替えて使用します。
 
-- Neonを選択した場合は、Neon DBのデータを表示・保存します
-- Supabaseを選択した場合は、Supabase DBのデータを表示・保存します
+- Neonを選択した場合は、Neon DBのデータを表示・保存します(本番・大元のDB)
+- Supabaseを選択した場合は、Supabase DBのデータを表示・保存します(Neonのバックアップ)
+- PostgreSQLを選択した場合は、このPCのローカルデータベースを表示・保存します(開発・テスト用。ローカル実行時のみ選択肢に表示される)
 - クローリング結果、項目精査結果、権限管理設定も、選択中のDB側に保存します
-- NeonとSupabaseのデータは混在させない前提です
+- Neon・Supabase・ローカルPostgreSQLのデータは混在させない前提です
 
 主な接続先は以下です。
 
@@ -78,9 +81,32 @@ DBはアプリ上で切り替えて使用します。
 既存互換用: DATABASE_URL
 Neon DB: DATABASE_URL_NEON
 Supabase DB: DATABASE_URL_SUPABASE
+ローカルPostgreSQL: DATABASE_URL_LOCAL
 ```
 
-`.env.local` とVercel環境変数の両方に、必要なDB接続情報を設定してください。
+`.env.local` とVercel環境変数の両方に、必要なDB接続情報を設定してください。`DATABASE_URL_LOCAL`はローカル開発専用のため、Vercel側には設定しません。
+
+### 運用の流れ
+
+1. 新しいテーブル・カラムの変更や動作確認は、まずPostgreSQL(ローカル)で行う
+2. 問題なければNeon(本番)に反映する
+3. Neonの内容(リストの追加・削除・精査・クローリング結果など)に変更があった際は、以下のコマンドでSupabase・ローカルPostgreSQLへ複製する
+
+```bash
+npm run sync:backup
+```
+
+Neonの`master_data`テーブル(スキーマ+データ全件)をSupabaseとローカルPostgreSQLへ完全に複製するコマンド。実行のたびに反映先の既存データは上書きされる。
+
+**重要な注意点**: これは「常に最新のNeonの内容で上書きするミラー」であり、世代管理(過去の一時点への復旧)はできない。誤ってNeon側でデータを壊してしまった直後に気づかず`npm run sync:backup`を実行すると、唯一のバックアップだったSupabase側の正常データも同時に上書きされ、復旧できなくなる。Neon側で何か想定外の操作(誤削除等)が起きた疑いがある場合は、状況を確認してから`sync:backup`を実行すること。
+
+万が一Neon側のリストに問題が起きた場合は、バックアップ(Supabase)の内容でNeonを復旧できる。
+
+```bash
+npm run sync:restore
+```
+
+Neon本番への書き込みを伴うため、実行すると確認プロンプトが表示される。`yes`と入力した場合のみ実行される。
 
 ---
 
@@ -109,8 +135,6 @@ master-view-app/
 ├─ app
 │  ├─ api
 │  │  └─ master_data
-│  │     ├─ [id]
-│  │     │  └─ route.ts
 │  │     ├─ crawl
 │  │     │  └─ route.ts
 │  │     ├─ export
@@ -134,12 +158,17 @@ master-view-app/
 │  └─ worker
 │     └─ crawl-worker.cjs
 ├─ docs
-│  └─ handover.md
+│  ├─ handover.md
+│  ├─ progress.html
+│  ├─ progress.md
+│  ├─ roadmap.html
+│  └─ roadmap.md
 ├─ lib
 │  ├─ db.ts
 │  ├─ master-data-auth.ts
 │  ├─ master-data-crawler.ts
-│  └─ master-data-permissions.ts
+│  ├─ master-data-permissions.ts
+│  └─ master-data-schema.ts
 ├─ public
 │  ├─ file.svg
 │  ├─ globe.svg
@@ -153,19 +182,23 @@ master-view-app/
 │     └─ worker-id.txt
 ├─ scripts
 │  ├─ crawl-worker.ts
-│  └─ mynavi_shinsotsu_unified.py
+│  ├─ mynavi_shinsotsu_unified.py
+│  ├─ restore-neon-from-supabase.mjs
+│  └─ sync-master-data-to-backups.mjs
 ├─ sql
 │  └─ add_column.sql
 ├─ .gitignore
 ├─ CLAUDE.md
 ├─ directory-tree.txt
 ├─ eslint.config.mjs
+├─ LOCAL_DEV_START.md
 ├─ next.config.ts
 ├─ package.json
 ├─ package-lock.json
 ├─ postcss.config.mjs
 ├─ README.md
-└─ tsconfig.json
+├─ tsconfig.json
+└─ vercel.json
 ```
 
 ---
@@ -185,14 +218,6 @@ master-view-app/
 マスタデータ本体のAPIです。
 
 一覧取得、検索、フィルタ、保存、DB更新、CSV取込、候補値の反映などを担当します。
-
----
-
-### `app/api/master_data/[id]/route.ts`
-
-特定のマスタデータ1件に対するAPIです。
-
-個別データの取得・更新・削除など、1件単位の処理に関係する可能性があります。
 
 ---
 
@@ -281,6 +306,14 @@ DB接続設定です。
 クローリングの中心ロジックです。
 
 企業HPへのアクセス、HTML取得、PlaywrightによるJSレンダリング、候補ページ探索、代表者名・従業員数・電話番号・問い合わせフォームURLなどの抽出を担当します。
+
+---
+
+### `lib/master-data-schema.ts`
+
+企業マスタに紐づく担当者・活動履歴・案件テーブル(SFA/CRM拡張用、ロードマップPhase1以降で使用予定)の作成ロジックです。
+
+ログイン成功時に自動でテーブルが作成されます(Neon/Supabase/ローカルPostgreSQL全て対応)。詳細は `docs/roadmap.md` と `docs/progress.md` を参照してください。
 
 ---
 
@@ -750,19 +783,29 @@ Value: 従業員ログイン用の値
 
 ## デプロイ方法
 
-VercelとGitHubを連携している場合、基本的にはGitHubにpushすると自動デプロイされます。
-
-```bash
-git add .
-git commit -m "READMEを更新"
-git push
-```
+**GitHubへのpush/PR/マージによる自動デプロイは`vercel.json`(`git.deploymentEnabled: false`)で無効化しています。** Vercelの無料プランのデプロイ回数制限を避けるため、本番反映は手動でのみ行う運用です。
 
 デプロイ前には、できれば以下を実行します。
 
 ```bash
 npm run build
 ```
+
+### プレビューで確認する(本番には反映されない)
+
+```bash
+vercel
+```
+
+実行するたびに専用のプレビューURLが発行されます。ここでVercel環境としての動作を確認してから本番に進めます。
+
+### 本番へ反映する
+
+```bash
+vercel --prod
+```
+
+これで本番URL(`master-view-app-ruby.vercel.app`)に反映されます。GitHubへのpushだけでは反映されない点に注意してください。
 
 ---
 

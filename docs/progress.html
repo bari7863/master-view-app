@@ -1,0 +1,407 @@
+<title>統合管理システム 進捗ダッシュボード</title>
+<style>
+:root{
+  --bg:#F6F7FB;
+  --surface:#FFFFFF;
+  --surface-2:#EEF1F8;
+  --border:#DCE1EE;
+  --text:#1B2333;
+  --text-muted:#5B6478;
+  --text-faint:#8991A6;
+  --accent:#2F4CDD;
+  --accent-strong:#1E33A8;
+  --accent-soft:#E4E9FC;
+  --accent-soft-2:#EFF3FF;
+  --success:#1E8A5F;
+  --success-strong:#146B48;
+  --success-soft:#E1F5EC;
+  --warn:#B4560B;
+  --warn-strong:#8A4108;
+  --warn-soft:#FBEADC;
+  --font-jp:"Hiragino Sans","Yu Gothic UI","Yu Gothic","Noto Sans JP",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10131C;
+    --surface:#161A27;
+    --surface-2:#1D2231;
+    --border:#2B3247;
+    --text:#E7E9F2;
+    --text-muted:#9AA3BD;
+    --text-faint:#6C7590;
+    --accent:#7C93FF;
+    --accent-strong:#A9B8FF;
+    --accent-soft:rgba(124,147,255,0.16);
+    --accent-soft-2:rgba(124,147,255,0.08);
+    --success:#4ADE94;
+    --success-strong:#7CF0B4;
+    --success-soft:rgba(74,222,148,0.14);
+    --warn:#E3A15B;
+    --warn-strong:#F0BE8A;
+    --warn-soft:rgba(227,161,91,0.14);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10131C;
+  --surface:#161A27;
+  --surface-2:#1D2231;
+  --border:#2B3247;
+  --text:#E7E9F2;
+  --text-muted:#9AA3BD;
+  --text-faint:#6C7590;
+  --accent:#7C93FF;
+  --accent-strong:#A9B8FF;
+  --accent-soft:rgba(124,147,255,0.16);
+  --accent-soft-2:rgba(124,147,255,0.08);
+  --success:#4ADE94;
+  --success-strong:#7CF0B4;
+  --success-soft:rgba(74,222,148,0.14);
+  --warn:#E3A15B;
+  --warn-strong:#F0BE8A;
+  --warn-soft:rgba(227,161,91,0.14);
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--font-jp);
+  line-height:1.75;
+  font-feature-settings:"palt";
+}
+.wrap{
+  max-width:880px;
+  margin:0 auto;
+  padding:64px 24px 96px;
+}
+
+.eyebrow{
+  font-size:12.5px;
+  font-weight:700;
+  letter-spacing:.14em;
+  color:var(--accent);
+  text-transform:uppercase;
+  margin:0 0 14px;
+}
+h1{
+  font-size:clamp(26px,4vw,34px);
+  font-weight:800;
+  letter-spacing:-0.01em;
+  margin:0 0 10px;
+  text-wrap:balance;
+}
+.updated{
+  margin:0;
+  font-size:13.5px;
+  color:var(--text-faint);
+}
+
+/* summary card */
+.summary{
+  margin-top:32px;
+  padding:26px 28px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:12px;
+  display:flex;
+  gap:28px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.summary-ring{
+  flex:0 0 auto;
+  width:96px;
+  height:96px;
+}
+.summary-ring svg{ width:100%; height:100%; transform:rotate(-90deg); }
+.summary-ring .track{ fill:none; stroke:var(--surface-2); stroke-width:10; }
+.summary-ring .value{ fill:none; stroke:var(--success); stroke-width:10; stroke-linecap:round; }
+.summary-ring-wrap{ position:relative; }
+.summary-ring-label{
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; font-weight:800; color:var(--text);
+  font-variant-numeric:tabular-nums;
+}
+.summary-text{ flex:1; min-width:220px; }
+.summary-text .label{
+  font-size:11.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--text-faint); margin:0 0 8px;
+}
+.summary-text p{ margin:0; font-size:15px; }
+.summary-text strong{ color:var(--success-strong); }
+
+/* status legend */
+.legend{
+  margin-top:20px;
+  display:flex;
+  gap:16px;
+  flex-wrap:wrap;
+  font-size:12.5px;
+  color:var(--text-muted);
+}
+.legend span{ display:inline-flex; align-items:center; gap:6px; }
+.legend .dot{ width:8px; height:8px; border-radius:50%; }
+.dot.done{ background:var(--success); }
+.dot.doing{ background:var(--accent); }
+.dot.todo{ background:var(--text-faint); }
+
+/* section title */
+.section-title{
+  margin:56px 0 20px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:var(--text-faint);
+}
+
+/* phase list */
+.phase-row{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  padding:16px 18px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:10px;
+  margin-bottom:10px;
+}
+.phase-row.done{ border-left:4px solid var(--success); }
+.phase-row.todo{ border-left:4px solid var(--border); opacity:.85; }
+.phase-n{
+  flex:0 0 auto;
+  width:28px; height:28px;
+  border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:12.5px; font-weight:800;
+  font-variant-numeric:tabular-nums;
+  background:var(--surface-2);
+  color:var(--text-muted);
+}
+.phase-row.done .phase-n{ background:var(--success-soft); color:var(--success-strong); }
+.phase-name{ flex:1; min-width:0; font-size:14.5px; font-weight:700; }
+.status-badge{
+  flex:0 0 auto;
+  font-size:11.5px;
+  font-weight:700;
+  padding:5px 12px;
+  border-radius:999px;
+  white-space:nowrap;
+}
+.status-badge.done{ background:var(--success-soft); color:var(--success-strong); }
+.status-badge.todo{ background:var(--surface-2); color:var(--text-faint); }
+
+/* phase 0 detail card */
+.detail-card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:26px 28px;
+}
+.detail-card h3{
+  margin:0 0 4px;
+  font-size:18px;
+  font-weight:800;
+}
+.detail-card .sub{
+  margin:0 0 20px;
+  font-size:13.5px;
+  color:var(--text-muted);
+}
+.detail-card h4{
+  margin:20px 0 10px;
+  font-size:11.5px;
+  font-weight:700;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  color:var(--text-faint);
+}
+.detail-card h4:first-of-type{ margin-top:0; }
+.detail-card ul{
+  margin:0;
+  padding-left:20px;
+  font-size:14px;
+}
+.detail-card li{ margin-bottom:6px; }
+.detail-card code{
+  background:var(--surface-2);
+  padding:1px 6px;
+  border-radius:5px;
+  font-size:12.5px;
+}
+.file-list{
+  margin-top:20px;
+  padding:14px 16px;
+  background:var(--surface-2);
+  border-radius:8px;
+  font-size:13px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color:var(--text-muted);
+  line-height:1.9;
+  overflow-x:auto;
+}
+
+.footnote{
+  margin-top:28px;
+  font-size:13px;
+  color:var(--text-faint);
+}
+
+.banner{
+  margin-top:20px;
+  padding:14px 18px;
+  border-radius:10px;
+  background:var(--warn-soft);
+  border:1px solid var(--warn);
+  font-size:13.5px;
+  color:var(--warn-strong);
+}
+.status-badge.pending{ background:var(--warn-soft); color:var(--warn-strong); }
+.known-issue{
+  margin-top:20px;
+  padding:14px 16px;
+  background:var(--warn-soft);
+  border-radius:8px;
+  font-size:13.5px;
+  color:var(--text);
+}
+.known-issue strong{ color:var(--warn-strong); }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Master Data App — Progress Dashboard</p>
+  <h1>統合管理システム構築 進捗ダッシュボード</h1>
+  <p class="updated">最終更新: 2026-08-16 ／ ロードマップ本体は <code>docs/roadmap.md</code></p>
+  <p class="banner">新しい会話でこの続きを行う場合は、まずこのページとroadmap.mdを読んで、どこまで完了しているか把握してから着手してください。</p>
+
+  <div class="summary">
+    <div class="summary-ring-wrap">
+      <div class="summary-ring">
+        <svg viewBox="0 0 100 100">
+          <circle class="track" cx="50" cy="50" r="42"></circle>
+          <circle class="value" cx="50" cy="50" r="42"
+            stroke-dasharray="263.9"
+            stroke-dashoffset="226.2"></circle>
+        </svg>
+      </div>
+      <div class="summary-ring-label">1/7</div>
+    </div>
+    <div class="summary-text">
+      <p class="label">全体進捗</p>
+      <p><strong>Phase 0が完了(本番反映待ち)。</strong>残り6フェーズ(Phase 1〜6)は未着手。優先順位はロードマップのPhase番号がそのまま順序を表す。<strong>本番(masterマージ・vercel --prod)へはまだ反映していない。</strong></p>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot done"></span>完了</span>
+    <span><span class="dot doing"></span>着手中</span>
+    <span><span class="dot todo"></span>未着手</span>
+  </div>
+
+  <p class="section-title">フェーズ別ステータス(優先順位順)</p>
+
+  <div class="phase-row done">
+    <div class="phase-n">0</div>
+    <div class="phase-name">データ基盤の拡張整備</div>
+    <div class="status-badge done">完了</div>
+  </div>
+  <div class="phase-row todo">
+    <div class="phase-n">1</div>
+    <div class="phase-name">CRM基礎(顧客管理)</div>
+    <div class="status-badge todo">未着手</div>
+  </div>
+  <div class="phase-row todo">
+    <div class="phase-n">2</div>
+    <div class="phase-name">SFA(案件管理・行動管理・予実管理)</div>
+    <div class="status-badge todo">未着手</div>
+  </div>
+  <div class="phase-row todo">
+    <div class="phase-n">3</div>
+    <div class="phase-name">データ分析・ダッシュボード</div>
+    <div class="status-badge todo">未着手</div>
+  </div>
+  <div class="phase-row todo">
+    <div class="phase-n">4</div>
+    <div class="phase-name">MA基礎(メール／フォーム自動配信)</div>
+    <div class="status-badge todo">未着手</div>
+  </div>
+  <div class="phase-row todo">
+    <div class="phase-n">5</div>
+    <div class="phase-name">行動履歴分析・スコアリング</div>
+    <div class="status-badge todo">未着手</div>
+  </div>
+  <div class="phase-row todo">
+    <div class="phase-n">6</div>
+    <div class="phase-name">カスタマーサポート</div>
+    <div class="status-badge todo">未着手</div>
+  </div>
+
+  <p class="section-title">Phase 0 詳細</p>
+
+  <div class="detail-card">
+    <h3>データ基盤の拡張整備</h3>
+    <p class="sub">完了(本番反映待ち) ／ 優先度最高・土台</p>
+
+    <h4>新テーブル・DB選択肢の追加</h4>
+    <ul>
+      <li>企業マスタに紐づく新テーブルのスキーマ・作成ロジックを実装(<code>lib/master-data-schema.ts</code>) — 担当者(<code>master_data_contacts</code>)・活動履歴(<code>master_data_activities</code>)・案件(<code>master_data_deals</code>)</li>
+      <li>ログイン成功時に上記テーブルを自動作成する仕組みを追加。失敗時はキャッシュをクリアして再試行できるようにし、失敗してもログイン自体は継続する設計</li>
+      <li>DB選択肢に「PostgreSQL」(ローカル開発用)を追加。ローカル実行時のみ表示され、Vercel本番では表示されない</li>
+    </ul>
+
+    <h4>Vercel本番環境での制限</h4>
+    <ul>
+      <li>スーパー管理者以外は、Vercel上では常にNeonのみ使える(画面側・API側の両方で制御)</li>
+      <li>Vercelプレビュー環境に実際にデプロイし、<code>process.env.VERCEL</code>が<code>"1"</code>になることを実機確認済み</li>
+    </ul>
+
+    <h4>3DB運用(Neon=本番／Supabase=バックアップ／ローカル=開発)</h4>
+    <ul>
+      <li>Neon本番の<code>master_data</code>(186,069件)をスキーマ+データ丸ごとSupabase・ローカルPostgreSQLへ複製し、3DBを同一内容に統一</li>
+      <li><code>npm run sync:backup</code>(Neon→Supabase/ローカル)・<code>npm run sync:restore</code>(Supabase→Neon、確認プロンプトあり)を追加</li>
+      <li><strong>注意:</strong> sync:backupは世代管理のない上書きミラー。誤ってNeonを壊した直後に実行するとバックアップも失われる</li>
+    </ul>
+
+    <h4>本番反映前レビューで発見・修正した既存バグ</h4>
+    <ul>
+      <li><code>export/route.ts</code>(CSV抽出)が固定Neonのままで、DB切替を無視していた問題を修正</li>
+      <li><code>export/route.ts</code>のスコープバイパス条件が「管理者」になっていた(他APIは「スーパー管理者」)問題を統一</li>
+      <li><code>[id]/route.ts</code>(認証チェック皆無・DB固定)が放置されていた → 未参照であることを確認の上で削除</li>
+      <li><code>handleSwitchDatabase</code>がサーバー応答でなくクライアント側の要求値を使っていた問題を修正</li>
+    </ul>
+
+    <h4>残タスク(Phase 1着手時)</h4>
+    <ul>
+      <li>担当者/活動履歴/案件それぞれのCRUD API・画面は未実装(今回はテーブルと作成ロジックのみが対象範囲)</li>
+      <li>対応する権限キー(<code>contacts.view</code> 等)は、実際にAPI/画面を作るタイミングで追加。<code>app/page.tsx</code>内の権限キー型定義が<code>lib/master-data-permissions.ts</code>と重複しているため、そちらも手動同期が必要(既存の技術的負債)</li>
+    </ul>
+
+    <div class="known-issue">
+      <strong>既知の問題(未対応・実害なし):</strong> ログイン画面でブラウザコンソールに Hydration failed (React error #418) が出る。<code>git stash</code>で今回のセッションの変更を全て退避した状態でも再現するため、今回のセッションより前から存在する既存の問題。主要機能への実害は確認されていない。原因は未調査。
+    </div>
+
+    <div class="file-list">
+lib/master-data-schema.ts<br>
+lib/master-data-auth.ts<br>
+lib/db.ts<br>
+app/api/master_data/login/route.ts<br>
+app/api/master_data/export/route.ts<br>
+app/page.tsx<br>
+vercel.json<br>
+scripts/sync-master-data-to-backups.mjs<br>
+scripts/restore-neon-from-supabase.mjs
+    </div>
+  </div>
+
+  <p class="section-title">次にやること</p>
+  <div class="detail-card">
+    <ul>
+      <li>本番反映(コミット→PR更新→masterマージ→<code>vercel --prod</code>)。ユーザーの最終承認待ちで保留中</li>
+      <li>Phase 1(CRM基礎)着手: 担当者/活動履歴のCRUD API・画面実装、権限キー追加</li>
+    </ul>
+  </div>
+
+  <p class="footnote">Phase 1〜6の内容・優先理由は docs/roadmap.md を参照。着手時にこのファイルのステータスを更新する。</p>
+</div>

@@ -1,9 +1,7 @@
-﻿master-view-app/
+master-view-app/
 ├─ app
 │  ├─ api
 │  │  └─ master_data
-│  │     ├─ [id]
-│  │     │  └─ route.ts
 │  │     ├─ crawl
 │  │     │  └─ route.ts
 │  │     ├─ export
@@ -27,12 +25,17 @@
 │  └─ worker
 │     └─ crawl-worker.cjs
 ├─ docs
-│  └─ handover.md
+│  ├─ handover.md
+│  ├─ progress.html
+│  ├─ progress.md
+│  ├─ roadmap.html
+│  └─ roadmap.md
 ├─ lib
 │  ├─ db.ts
 │  ├─ master-data-auth.ts
 │  ├─ master-data-crawler.ts
-│  └─ master-data-permissions.ts
+│  ├─ master-data-permissions.ts
+│  └─ master-data-schema.ts
 ├─ public
 │  ├─ file.svg
 │  ├─ globe.svg
@@ -46,16 +49,20 @@
 │     └─ worker-id.txt
 ├─ scripts
 │  ├─ crawl-worker.ts
-│  └─ mynavi_shinsotsu_unified.py
+│  ├─ mynavi_shinsotsu_unified.py
+│  ├─ restore-neon-from-supabase.mjs
+│  └─ sync-master-data-to-backups.mjs
 ├─ sql
 │  └─ add_column.sql
 ├─ .gitignore
 ├─ CLAUDE.md
 ├─ directory-tree.txt
 ├─ eslint.config.mjs
+├─ LOCAL_DEV_START.md
 ├─ next.config.ts
 ├─ package.json
 ├─ package-lock.json
 ├─ postcss.config.mjs
 ├─ README.md
-└─ tsconfig.json
+├─ tsconfig.json
+└─ vercel.json
