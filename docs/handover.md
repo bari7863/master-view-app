@@ -1135,13 +1135,11 @@ DB、API、画面、CSV、権限管理の整合性が崩れないようにして
   - `app/api/master_data/export/route.ts`(CSV抽出)がDB切替を無視し常にNeonを見ていた問題 → 修正
   - `app/api/master_data/[id]/route.ts`(認証チェックが一切ない未使用エンドポイント) → フロントから未参照であることを確認の上で削除
   - ログイン画面表示時に`Hydration failed`(React error #418)が出ていた問題(`app/page.tsx`の`BlockingLoadingOverlay`が`typeof document === "undefined"`ガードのみでクライアント初回レンダリング時にも即座に`createPortal`を実行していたため) → マウント完了後にのみportalを出すよう修正、本番反映後に調査・特定し解消を確認済み
-- `npm run sync:backup`(Neon→Supabase/ローカル複製)、`npm run sync:restore`(Supabase→Neon復旧)のコマンドを追加。コマンドは`LOCAL_DEV_START.md`にまとめてある
+- `npm run sync:backup`(Neon→Supabase/ローカル複製)、`npm run sync:restore`(Supabase→Neon復旧)のコマンドを追加。使い方は`docs/guides/DB_SYNC_GUIDE.md`にまとめてある
 - Vercelの自動デプロイを`vercel.json`(`git.deploymentEnabled: false`)で無効化。本番反映は手動で`vercel --prod`を実行する運用に変更
 - masterマージ・`vercel --prod`とも完了済み(`master-view-app-ruby.vercel.app`)
-
-### 既知の問題(未対応・要ユーザー対応)
-
-- **Vercel本番にSupabaseの接続情報が設定されていない**。`vercel env ls production`で確認したところ、既存の環境変数は全てVercel Marketplace経由のNeon統合が自動生成したもの(`DATABASE_NEON_PROJECT_ID`等)のみで、`DATABASE_URL_SUPABASE`のようなSupabase専用の接続情報は本番に一つも無い。スーパー管理者アカウントで本番にログインしSupabaseへの切替を試したところ`connect ECONNREFUSED 127.0.0.1:5432`で失敗することを確認済み。今回のセッションで作った不具合ではなく既存の設定漏れ。対応にはSupabaseの接続文字列(機密情報)が必要なため、Vercelダッシュボードでユーザー自身が設定する必要がある(Settings → Environment Variables → Key: `DATABASE_URL_SUPABASE`)
+- Vercel本番にSupabaseの接続情報(`DATABASE_URL_SUPABASE`)が設定されていなかった既存の設定漏れを発見・対応済み。**教訓**: Sensitiveタイプの環境変数は`vercel env pull`で実際の値でなく`[SENSITIVE]`というマスク済みプレースホルダーが返るため、値の検証には使えない。また環境変数を追加・変更しても、既存のデプロイ済み関数には反映されず**再デプロイ(`vercel --prod`)が必須**。ログインAPIを実際に叩いて動作確認するのが最も確実
+- 運用コマンドを`docs/guides/`にまとめて整理: `LOCAL_DEV_START.md`(ローカル起動)、`DB_SYNC_GUIDE.md`(DB同期・復旧)、`VERCEL_DEPLOY_GUIDE.md`(Vercelデプロイ)、`NEW_PHASE_BRANCH_GUIDE.md`(次フェーズ着手時のブランチ切り直し)、`MULTI_PC_SETUP_GUIDE.md`(別PCでの作業環境構築)
 
 ### Phase 1(CRM基礎・顧客管理)着手時にやること
 
