@@ -73,7 +73,11 @@ README.md
 docs/handover.md
 docs/roadmap.md
 docs/progress.md
-LOCAL_DEV_START.md
+docs/guides/LOCAL_DEV_START.md
+docs/guides/DB_SYNC_GUIDE.md
+docs/guides/VERCEL_DEPLOY_GUIDE.md
+docs/guides/NEW_PHASE_BRANCH_GUIDE.md
+docs/guides/MULTI_PC_SETUP_GUIDE.md
 directory-tree.txt
 ```
 
@@ -414,10 +418,14 @@ README.md
 docs/handover.md
 docs/roadmap.md
 docs/progress.md
-LOCAL_DEV_START.md
+docs/guides/LOCAL_DEV_START.md
+docs/guides/DB_SYNC_GUIDE.md
+docs/guides/VERCEL_DEPLOY_GUIDE.md
+docs/guides/NEW_PHASE_BRANCH_GUIDE.md
+docs/guides/MULTI_PC_SETUP_GUIDE.md
 directory-tree.txt
 ```
 
 READMEは概要、handover.mdは詳細仕様、directory-tree.txtは現在のディレクトリ構成確認用です。
 
-`docs/roadmap.md` は、企業マスタ管理アプリをSFA/CRM/MA統合基盤へ拡張するための全体ロードマップ(Phase 0〜6)です。`docs/progress.md` は各Phaseの進捗状況(未着手/着手中/完了)です。**新しい会話でこのプロジェクトの続きを行う場合は、必ずこの2つを先に読んで、どこまで完了しているか把握してください。** `LOCAL_DEV_START.md` には、ローカル起動・DB同期(`sync:backup`/`sync:restore`)・Vercelプレビューデプロイのコマンドがまとまっています。
+`docs/roadmap.md` は、企業マスタ管理アプリをSFA/CRM/MA統合基盤へ拡張するための全体ロードマップ(Phase 0〜6)です。`docs/progress.md` は各Phaseの進捗状況(未着手/着手中/完了)です。**新しい会話でこのプロジェクトの続きを行う場合は、必ずこの2つを先に読んで、どこまで完了しているか把握してください。** 運用コマンドは`docs/guides/`に目的別にまとめています: `LOCAL_DEV_START.md`(ローカル起動)、`DB_SYNC_GUIDE.md`(DB同期・復旧)、`VERCEL_DEPLOY_GUIDE.md`(Vercelプレビュー・本番デプロイ)、`NEW_PHASE_BRANCH_GUIDE.md`(次フェーズ着手時のブランチ切り直し)、`MULTI_PC_SETUP_GUIDE.md`(別PCでの作業環境構築)。

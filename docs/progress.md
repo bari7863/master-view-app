@@ -13,19 +13,7 @@
 - 全7フェーズ中、**Phase 0が完了・本番反映済み**、残り6フェーズは未着手
 - 優先順位はロードマップのPhase番号そのまま(0が最優先、6が最後)
 - 本番反映済み: masterマージ完了、`vercel --prod`実行済み(`master-view-app-ruby.vercel.app`)
-- **本番反映直後に新たな設定漏れを発見。要対応(下記参照)**
-
----
-
-## ⚠️ 対応が必要な項目
-
-**Vercel本番にSupabaseの接続情報が設定されていない**。本番の環境変数一覧(`vercel env ls production`)を確認したところ、`DATABASE_NEON_PROJECT_ID`等が存在することから、既存の環境変数群は全てVercel Marketplace経由のNeon統合が自動生成したものと判明。`DATABASE_URL_SUPABASE`のようなSupabase専用の接続情報は本番に一つも無い。
-
-実際にスーパー管理者アカウントで本番にログインしSupabaseへの切替を試したところ、`connect ECONNREFUSED 127.0.0.1:5432`で失敗した。**現状、本番ではスーパー管理者であってもSupabaseに切り替えられない**。
-
-これは今回のセッションで作った不具合ではなく、以前からの設定漏れ。対応にはSupabaseの接続文字列(機密情報)の入力が必要なため、ユーザー自身の対応が必要。
-
-**対応方法**: Vercel Dashboard → `master-view-app`プロジェクト → Settings → Environment Variables → 新規追加 → Key=`DATABASE_URL_SUPABASE`、Value=Supabaseの接続文字列(Supabaseダッシュボードの Project Settings → Database → Connection string から取得)。対象環境はProduction/Previewにチェック。
+- 本番反映後に見つかったSupabase接続情報の設定漏れも対応済み。スーパー管理者による本番Supabase切替を実機確認済み
 
 ---
 
@@ -68,8 +56,10 @@
 **3DB運用(Neon=本番／Supabase=バックアップ／ローカルPostgreSQL=開発)**
 
 - Neon本番の`master_data`(186,069件)を、スキーマ+データ丸ごとSupabase・ローカルPostgreSQLへ複製し、3DBを同じ内容に揃えた
-- `npm run sync:backup`(Neon→Supabase/ローカル複製)、`npm run sync:restore`(Supabase→Neon復旧、確認プロンプトあり)のコマンドを追加。使い方は`LOCAL_DEV_START.md`参照
+- `npm run sync:backup`(Neon→Supabase/ローカル複製)、`npm run sync:restore`(Supabase→Neon復旧、確認プロンプトあり)のコマンドを追加。使い方は`docs/guides/DB_SYNC_GUIDE.md`参照
 - **重要な設計上の注意**: `sync:backup`は「常に最新Neonで上書きするミラー」であり世代管理はない。誤ってNeon側を壊した直後に実行すると、唯一のバックアップだったSupabaseの正常データも同時に失われる
+- Vercel本番にSupabaseの接続情報(`DATABASE_URL_SUPABASE`)が設定されていなかった既存の設定漏れを発見・対応済み。スーパー管理者アカウントで本番Supabase切替が正常動作することを実機確認済み
+  - **教訓**: Sensitiveタイプの環境変数は`vercel env pull`で実際の値でなく`[SENSITIVE]`というマスク済みプレースホルダーが返るため、値の検証には使えない。また環境変数を追加・変更しても既存のデプロイ済み関数には反映されず、**再デプロイ(`vercel --prod`)が必須**。動作確認はログインAPIを実際に叩くのが最も確実
 
 **本番反映前レビューで発見・修正した既存バグ**
 
@@ -84,7 +74,7 @@
 **運用面のドキュメント整備**
 
 - Vercelの自動デプロイを`vercel.json`(`git.deploymentEnabled: false`)で無効化(無料プランのデプロイ制限を避けるため)。本番反映は手動で`vercel --prod`を実行する運用に変更。README.md/docs/handover.mdに明記済み
-- `LOCAL_DEV_START.md`に、ローカル起動・DB同期・Vercelプレビューデプロイのコマンドをまとめた
+- 運用コマンドを`docs/guides/`にまとめて整理: `LOCAL_DEV_START.md`(ローカル起動)、`DB_SYNC_GUIDE.md`(DB同期・復旧)、`VERCEL_DEPLOY_GUIDE.md`(Vercelプレビュー・本番デプロイ)、`NEW_PHASE_BRANCH_GUIDE.md`(次フェーズ着手時のブランチ切り直し)、`MULTI_PC_SETUP_GUIDE.md`(別PCでの作業環境構築)
 - `directory-tree.txt`・README.md・docs/handover.md・CLAUDE.mdを、今回の変更内容に合わせて更新済み
 
 ### 残タスク(Phase 1着手時に対応)
@@ -104,13 +94,16 @@ app/page.tsx
 vercel.json
 scripts/sync-master-data-to-backups.mjs
 scripts/restore-neon-from-supabase.mjs
-LOCAL_DEV_START.md
+docs/guides/LOCAL_DEV_START.md
+docs/guides/DB_SYNC_GUIDE.md
+docs/guides/VERCEL_DEPLOY_GUIDE.md
+docs/guides/NEW_PHASE_BRANCH_GUIDE.md
+docs/guides/MULTI_PC_SETUP_GUIDE.md
 ```
 
 ### 次にやること
 
-1. **Vercel本番にSupabaseの接続情報(`DATABASE_URL_SUPABASE`)を設定する**(上記「対応が必要な項目」参照、ユーザー対応待ち)
-2. Phase 1(CRM基礎)着手: 担当者/活動履歴のCRUD API・画面実装、権限キー追加
+Phase 1(CRM基礎)着手: 担当者/活動履歴のCRUD API・画面実装、権限キー追加。着手時は`docs/guides/NEW_PHASE_BRANCH_GUIDE.md`の手順でブランチを切り直す。
 
 ---
 

@@ -158,6 +158,12 @@ master-view-app/
 │  └─ worker
 │     └─ crawl-worker.cjs
 ├─ docs
+│  ├─ guides
+│  │  ├─ DB_SYNC_GUIDE.md
+│  │  ├─ LOCAL_DEV_START.md
+│  │  ├─ MULTI_PC_SETUP_GUIDE.md
+│  │  ├─ NEW_PHASE_BRANCH_GUIDE.md
+│  │  └─ VERCEL_DEPLOY_GUIDE.md
 │  ├─ handover.md
 │  ├─ progress.html
 │  ├─ progress.md
@@ -191,7 +197,6 @@ master-view-app/
 ├─ CLAUDE.md
 ├─ directory-tree.txt
 ├─ eslint.config.mjs
-├─ LOCAL_DEV_START.md
 ├─ next.config.ts
 ├─ package.json
 ├─ package-lock.json

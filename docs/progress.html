@@ -275,7 +275,6 @@ h1{
   <h1>統合管理システム構築 進捗ダッシュボード</h1>
   <p class="updated">最終更新: 2026-08-16 ／ ロードマップ本体は <code>docs/roadmap.md</code></p>
   <p class="banner">新しい会話でこの続きを行う場合は、まずこのページとroadmap.mdを読んで、どこまで完了しているか把握してから着手してください。</p>
-  <p class="banner"><strong>要対応:</strong> Vercel本番にSupabaseの接続情報(<code>DATABASE_URL_SUPABASE</code>)が設定されておらず、本番でスーパー管理者がSupabaseに切り替えるとログインエラーになる。Vercelダッシュボードでの設定が必要(下記Phase0詳細を参照)。</p>
 
   <div class="summary">
     <div class="summary-ring-wrap">
@@ -363,6 +362,7 @@ h1{
       <li>Neon本番の<code>master_data</code>(186,069件)をスキーマ+データ丸ごとSupabase・ローカルPostgreSQLへ複製し、3DBを同一内容に統一</li>
       <li><code>npm run sync:backup</code>(Neon→Supabase/ローカル)・<code>npm run sync:restore</code>(Supabase→Neon、確認プロンプトあり)を追加</li>
       <li><strong>注意:</strong> sync:backupは世代管理のない上書きミラー。誤ってNeonを壊した直後に実行するとバックアップも失われる</li>
+      <li>Vercel本番にSupabase接続情報(<code>DATABASE_URL_SUPABASE</code>)が未設定だった既存の設定漏れを発見・対応済み。スーパー管理者による本番Supabase切替を実機確認済み。<strong>教訓:</strong> Sensitive環境変数は<code>vercel env pull</code>で<code>[SENSITIVE]</code>のマスク値しか取れない、環境変数変更後は再デプロイが必須</li>
     </ul>
 
     <h4>本番反映前レビューで発見・修正した既存バグ</h4>
@@ -380,10 +380,6 @@ h1{
       <li>対応する権限キー(<code>contacts.view</code> 等)は、実際にAPI/画面を作るタイミングで追加。<code>app/page.tsx</code>内の権限キー型定義が<code>lib/master-data-permissions.ts</code>と重複しているため、そちらも手動同期が必要(既存の技術的負債)</li>
     </ul>
 
-    <div class="known-issue">
-      <strong>要対応:</strong> Vercel本番にSupabaseの接続情報(<code>DATABASE_URL_SUPABASE</code>)が設定されていない。既存の環境変数は全てNeon統合の自動生成分のみで、Supabase専用の接続情報が本番に一つも無い。スーパー管理者が本番でSupabaseに切り替えるとログインエラー(<code>ECONNREFUSED</code>)になることを実機確認済み。Vercelダッシュボードでの手動設定が必要(機密情報のためユーザー対応)。
-    </div>
-
     <div class="file-list">
 lib/master-data-schema.ts<br>
 lib/master-data-auth.ts<br>
@@ -393,15 +389,19 @@ app/api/master_data/export/route.ts<br>
 app/page.tsx<br>
 vercel.json<br>
 scripts/sync-master-data-to-backups.mjs<br>
-scripts/restore-neon-from-supabase.mjs
+scripts/restore-neon-from-supabase.mjs<br>
+docs/guides/LOCAL_DEV_START.md<br>
+docs/guides/DB_SYNC_GUIDE.md<br>
+docs/guides/VERCEL_DEPLOY_GUIDE.md<br>
+docs/guides/NEW_PHASE_BRANCH_GUIDE.md<br>
+docs/guides/MULTI_PC_SETUP_GUIDE.md
     </div>
   </div>
 
   <p class="section-title">次にやること</p>
   <div class="detail-card">
     <ul>
-      <li><strong>Vercel本番にSupabaseの接続情報(<code>DATABASE_URL_SUPABASE</code>)を設定する</strong>(ユーザー対応待ち)</li>
-      <li>Phase 1(CRM基礎)着手: 担当者/活動履歴のCRUD API・画面実装、権限キー追加</li>
+      <li>Phase 1(CRM基礎)着手: 担当者/活動履歴のCRUD API・画面実装、権限キー追加。着手時は<code>docs/guides/NEW_PHASE_BRANCH_GUIDE.md</code>の手順でブランチを切り直す</li>
     </ul>
   </div>
 
