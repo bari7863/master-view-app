@@ -14,6 +14,11 @@ cd master-view-app
 ```bash
 npm install
 ```
+## 2-1. npmインストール許可
+
+```bash
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+```
 
 `git clone`だけではコードしか取得できない。忘れずに実行する。
 
